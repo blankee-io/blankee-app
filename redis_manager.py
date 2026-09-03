@@ -673,7 +673,9 @@ def _flush_redis_to_mysql():
             'c_expense_category_groups',  # Depends on expense_category_groups
             'income_categories',  # Category definitions - flush before entries/recurring
             'expense_categories',
-            'c_expense_categories',  # Depends on credit_accounts
+            'buds',  # Between the two: buds references expense_categories, and
+                     # c_expense_categories.bud_id references buds
+            'c_expense_categories',  # Depends on credit_accounts and buds
             'income_entries',
             'expense_entries',
             'c_expense_entries',
@@ -684,8 +686,8 @@ def _flush_redis_to_mysql():
             'recurring_income_buckets',  # Bucket state tracking
             'recurring_expense_buckets',
             'recurring_c_expense_buckets',
-            'buds',  # Must flush before bud_items to resolve temp IDs
-            'bud_items',
+            'bud_items',  # After the entry tables, so reassignments land before
+                          # its deletes cascade. buds itself flushes far earlier.
             'users',  # User settings (balance_threshold, starting_savings)
             'notifications',  # User notifications
             'linked_provider_profiles',  # provider session tokens and profile info
@@ -2675,6 +2677,29 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 json.dumps(bud_items, cls=DecimalEncoder)
                             )
                             log_info(logger, 'FLUSH', f"Updated {updated_count} bud_item bud_id references in Redis")
+
+                    # Same for the per-card mirror categories. They carry bud_id
+                    # now, and they flush immediately after this - so a temp id
+                    # left here would fail the foreign key insert.
+                    mirrors_key = _get_redis_key('c_expense_categories', user_id)
+                    mirrors_data = _redis_client.get(mirrors_key)
+                    if mirrors_data:
+                        mirrors = json.loads(mirrors_data)
+                        mirrors_updated = 0
+                        for mirror in mirrors:
+                            old_bud_id = mirror.get('bud_id')
+                            if old_bud_id and int(old_bud_id) in temp_id_mappings:
+                                mirror['bud_id'] = temp_id_mappings[int(old_bud_id)]
+                                mirrors_updated += 1
+
+                        if mirrors_updated > 0:
+                            _redis_client.setex(
+                                mirrors_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(mirrors, cls=DecimalEncoder)
+                            )
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
+                            log_info(logger, 'FLUSH', f"Updated {mirrors_updated} c_expense_category bud_id references in Redis")
                 
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
@@ -2720,11 +2745,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     if is_temp:
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
-                            INSERT INTO bud_items (id, bud_id, account, name, value, date, description)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO bud_items (id, bud_id, account, credit_account_id, name, value, date, description)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             bud_id_val,
                             row.get('account'),
+                            row.get('credit_account_id'),
                             row.get('name'),
                             float(row.get('value', 0)),
                             row.get('date'),
@@ -2736,11 +2762,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
-                            INSERT INTO bud_items (id, bud_id, account, name, value, date, description)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO bud_items (id, bud_id, account, credit_account_id, name, value, date, description)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 bud_id = VALUES(bud_id),
                                 account = VALUES(account),
+                                credit_account_id = COALESCE(VALUES(credit_account_id), credit_account_id),
                                 name = VALUES(name),
                                 value = VALUES(value),
                                 date = VALUES(date),
@@ -2749,6 +2776,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             old_id,
                             bud_id_val,
                             row.get('account'),
+                            row.get('credit_account_id'),
                             row.get('name'),
                             float(row.get('value', 0)),
                             row.get('date'),
@@ -3634,6 +3662,30 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             # Mark as dirty so recurring_expense gets flushed in this cycle
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_expense')
                             log_info(logger, 'FLUSH', f"Updated {recurring_updated} recurring_expense records with new category IDs")
+
+                    # And buds.expense_category_id. Activating a bud creates its
+                    # category through Redis, so the bud holds a negative temp id
+                    # until this runs. Without it the buds flush writes -1 into a
+                    # foreign key column and the insert fails outright.
+                    buds_key = _get_redis_key('buds', user_id)
+                    buds_data = _redis_client.get(buds_key)
+                    if buds_data:
+                        bud_rows = json.loads(buds_data)
+                        buds_updated = 0
+                        for bud in bud_rows:
+                            old_cat_id = bud.get('expense_category_id')
+                            if old_cat_id and int(old_cat_id) in temp_id_mappings:
+                                bud['expense_category_id'] = temp_id_mappings[int(old_cat_id)]
+                                buds_updated += 1
+                        if buds_updated > 0:
+                            _redis_client.setex(
+                                buds_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(bud_rows, cls=DecimalEncoder)
+                            )
+                            # Mark as dirty so buds get flushed in this cycle
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'buds')
+                            log_info(logger, 'FLUSH', f"Updated {buds_updated} buds with new expense_category IDs")
                 
                 # Clear pending deletions
                 _redis_client.delete(pending_key)
@@ -3700,8 +3752,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
                             INSERT INTO c_expense_categories (id, account_id, name, display_order, group_id,
-                                is_recurring, no_end_date, hidden, is_bud, is_interest, is_auto_adjustment, is_system)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, no_end_date, hidden, is_bud, bud_id, is_interest, is_auto_adjustment, is_system)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             row.get('account_id'),
                             row.get('name'),
@@ -3711,6 +3763,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('no_end_date', 0)),
                             int(row.get('hidden', 0)),
                             int(row.get('is_bud', 0)),
+                            row.get('bud_id'),
                             int(row.get('is_interest', 0)),
                             int(row.get('is_auto_adjustment', 0)),
                             int(row.get('is_system', 0))
@@ -3722,8 +3775,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
                             INSERT INTO c_expense_categories (id, account_id, name, display_order, group_id,
-                                is_recurring, no_end_date, hidden, is_bud, is_interest, is_auto_adjustment, is_system)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, no_end_date, hidden, is_bud, bud_id, is_interest, is_auto_adjustment, is_system)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
                                 display_order = VALUES(display_order),
@@ -3732,6 +3785,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 no_end_date = VALUES(no_end_date),
                                 hidden = VALUES(hidden),
                                 is_bud = VALUES(is_bud),
+                                bud_id = COALESCE(VALUES(bud_id), bud_id),
                                 is_interest = VALUES(is_interest),
                                 is_auto_adjustment = VALUES(is_auto_adjustment),
                                 is_system = VALUES(is_system)
@@ -3745,6 +3799,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('no_end_date', 0)),
                             int(row.get('hidden', 0)),
                             int(row.get('is_bud', 0)),
+                            row.get('bud_id'),
                             int(row.get('is_interest', 0)),
                             int(row.get('is_auto_adjustment', 0)),
                             int(row.get('is_system', 0))
@@ -4983,6 +5038,7 @@ def flush_dirty_tables_for_user(user_id: int):
             'c_a_balances_m',
             'income_categories',  # Category definitions
             'expense_categories',
+            'buds',  # Between the two, as above
             'c_expense_categories',
             'income_entries',
             'expense_entries',
@@ -4993,8 +5049,7 @@ def flush_dirty_tables_for_user(user_id: int):
             'recurring_income_buckets',  # Bucket state tracking
             'recurring_expense_buckets',
             'recurring_c_expense_buckets',
-            'buds',  # Must flush before bud_items to resolve temp IDs
-            'bud_items',
+            'bud_items',  # buds itself flushes far earlier, before the mirrors
             'users',  # User settings (balance_threshold, starting_savings)
             'notifications',  # User notifications
             'setup_state',  # Setup wizard temporary state
