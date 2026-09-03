@@ -219,7 +219,8 @@
         $(function() {
             // Show modal when Add Credit Account button is clicked
             $('#add-cas-btn').on('click', function() {
-                $('#add-credit-account-modal').show();
+                // display:flex, not .show() - see .footer-modal in style.css.
+                $('#add-credit-account-modal').css('display', 'flex');
                 $('#credit-account-name').focus();
             });
 
@@ -280,7 +281,8 @@
                 $('#edit-credit-account-interest').val(interest);
                 $('#edit-credit-account-type').val(type);
                 
-                $('#edit-credit-account-modal').show();
+                // display:flex, not .show() - see .footer-modal in style.css.
+                $('#edit-credit-account-modal').css('display', 'flex');
                 $('#edit-credit-account-name').focus();
             });
 

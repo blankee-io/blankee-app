@@ -8,6 +8,26 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.14.2 — 2026-09-02
+
+### Fixed
+- **On a phone, a dialog taller than the screen either ran off both edges with
+  its heading out of reach, or scrolled the page behind it instead of itself.**
+  The add recurring income and expense forms had always been right - capped at
+  the height of the screen, with their own scrollbar - but every other dialog in
+  the application had been written separately over time and had drifted. They now
+  all behave the way those two forms do: never taller than the screen, and
+  scrolling their own contents when there is more than fits.
+- **Dialogs were sized in `vh`, which on a phone counts the space behind the
+  browser's own toolbar.** A dialog sized that way is taller than the screen it
+  is on, so its bottom - usually the confirm button - sat underneath the toolbar.
+- **Three overlays could not be scrolled at all:** the profile picture upload,
+  the Test a Purchase and Test a Bill dialogs, and the bud entry prompt. Anything
+  that did not fit was simply unreachable.
+- Several dialogs opened a third of the way down a wide screen and barely moved
+  on a narrow one, from a percentage margin that measures against width rather
+  than height.
+
 ## 1.14.1 — 2026-09-01
 
 ### Fixed
