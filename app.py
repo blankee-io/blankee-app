@@ -22815,6 +22815,70 @@ def delete_bud():
     save_ca_daily_balance()
     return jsonify({'status': 'success'})
 
+@app.route('/rename-bud', methods=['POST'])
+@login_required
+def rename_bud():
+    """Rename a bundle, its budget category and every one of its mirrors.
+
+    There was no way to do this before: the name was fixed at creation, and the
+    category it minted on activation took that name with it. Renaming the
+    category by hand did not rename the bundle, so the two drifted apart and
+    the name match that used to find the mirrors stopped finding them.
+
+    By id throughout, so a bundle sharing a name with another bundle - or with
+    an ordinary expense category - renames only its own rows.
+    """
+    data = request.get_json()
+    bud_id = int(data.get('bud_id', 0))
+    new_name = (data.get('name') or '').strip()
+
+    if not bud_id or not new_name:
+        return jsonify({'status': 'error', 'message': 'Missing bundle or name'}), 400
+
+    buds = _get_buds_from_redis(current_user.id) or []
+    bud_row = next((b for b in buds if int(b['id']) == bud_id), None)
+    if not bud_row:
+        return jsonify({'status': 'error', 'message': 'Bundle not found'}), 404
+
+    old_name = bud_row.get('name') or ''
+    if new_name == old_name:
+        return jsonify({'status': 'success', 'name': new_name})
+
+    # Same rule as creating one: the name has to be free among this user's
+    # expense categories, excluding the bundle's own.
+    own_category_id = bud_row.get('expense_category_id')
+    for cat in (_get_categories_from_redis('expense_categories', current_user.id) or []):
+        if own_category_id and int(cat.get('id', 0) or 0) == int(own_category_id):
+            continue
+        if (cat.get('name') or '').strip().lower() == new_name.lower():
+            return jsonify({
+                'status': 'error',
+                'message': f"You already have an expense category called '{new_name}'."
+            }), 400
+
+    for other in buds:
+        if int(other['id']) != bud_id and (other.get('name') or '').strip().lower() == new_name.lower():
+            return jsonify({
+                'status': 'error',
+                'message': f"You already have a bundle called '{new_name}'."
+            }), 400
+
+    bud_row['name'] = new_name
+    _update_bud_in_redis(current_user.id, bud_row)
+
+    if own_category_id:
+        _update_category_in_redis('expense_categories', current_user.id,
+                                  own_category_id, {'name': new_name})
+
+    for cat in (_get_categories_from_redis('c_expense_categories', current_user.id) or []):
+        if cat.get('bud_id') is not None and int(cat['bud_id']) == bud_id:
+            _update_category_in_redis('c_expense_categories', current_user.id,
+                                      cat['id'], {'name': new_name})
+
+    log_info(app.logger, 'BUD', f"Renamed bud {bud_id}: '{old_name}' -> '{new_name}'")
+    return jsonify({'status': 'success', 'name': new_name})
+
+
 @app.route('/toggle-bud-active', methods=['POST'])
 @login_required
 def toggle_bud_active():
@@ -22880,6 +22944,17 @@ def toggle_bud_active():
             # activated before a card was added, which used to be left without a
             # mirror there for good.
             expense_category_id = _ensure_bundle_categories(current_user.id, bud_row)
+
+            # Un-hide whatever a previous deactivation hid. check_and_hide_bud
+            # _category runs at the end of this route and will hide it again if
+            # every item really is in the past with nothing left to confirm.
+            if expense_category_id:
+                _update_category_in_redis('expense_categories', current_user.id,
+                                          expense_category_id, {'hidden': 0})
+            for cat in (_get_categories_from_redis('c_expense_categories', current_user.id) or []):
+                if cat.get('bud_id') is not None and int(cat['bud_id']) == int(bud_id):
+                    _update_category_in_redis('c_expense_categories', current_user.id,
+                                              cat['id'], {'hidden': 0})
 
             bud_row['expense_category_id'] = expense_category_id
             bud_row['active'] = active
@@ -23122,27 +23197,24 @@ def toggle_bud_active():
                                                  ca_auto_adj_entry['amount'], 
                                                  processed=1, bud_item_id=ca_auto_adj_entry['bud_item_id'])
 
-            # Delete the regular expense category if it exists.
-            # Redis-first: a raw DELETE here left the row in Redis, and the flush
-            # worker faithfully wrote it back within about fifteen seconds - so the
-            # category returned on its own and deactivation looked flaky.
+            # Hide the categories rather than delete them, and keep the
+            # bundle pointing at its own. Deleting meant a toggle off and on
+            # again minted a new category with a new id, so anything that had
+            # referred to the old one - a mirror's bud_id, an entry's
+            # category_id - was left pointing at a row that no longer existed.
+            # Hidden keeps the ids stable and is what the user sees anyway:
+            # the category disappears from the dashboard either way.
             if bud_row.get('expense_category_id'):
-                _delete_category_in_redis(
-                    'expense_categories', current_user.id, bud_row['expense_category_id']
+                _update_category_in_redis(
+                    'expense_categories', current_user.id,
+                    bud_row['expense_category_id'], {'hidden': 1}
                 )
 
-                # Update bud in Redis - set inactive and remove expense_category_id
-                bud_row['active'] = active
-                bud_row['expense_category_id'] = None
-                _update_bud_in_redis(current_user.id, bud_row)
-            else:
-                # Update bud active status in Redis
-                bud_row['active'] = active
-                _update_bud_in_redis(current_user.id, bud_row)
-            
-            # Delete this bundle's mirror categories - by id, so deactivating
-            # one bundle cannot take another of the same name down with it.
-            # Through Redis, or the flush worker restores them.
+            bud_row['active'] = active
+            _update_bud_in_redis(current_user.id, bud_row)
+
+            # And this bundle's mirrors - by id, so deactivating one bundle
+            # cannot take another of the same name down with it.
             mirror_cats = _get_categories_from_redis('c_expense_categories', current_user.id)
             if mirror_cats is None:
                 cursor.execute("""
@@ -23157,7 +23229,8 @@ def toggle_bud_active():
                     if c.get('bud_id') is not None and int(c['bud_id']) == int(bud_id)
                 ]
             for mirror_id in mirror_ids:
-                _delete_category_in_redis('c_expense_categories', current_user.id, mirror_id)
+                _update_category_in_redis('c_expense_categories', current_user.id,
+                                          mirror_id, {'hidden': 1})
             
         else:
             # Update bud active status in Redis
