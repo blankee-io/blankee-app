@@ -2913,6 +2913,116 @@ window.sortableAutoScroll = (function () {
  * stylesheet resumes - its :nth-child rules carry :not([class*="zebra-"]), so
  * exactly one of the two ever applies to a row.
  */
+/* ── Collapsible category groups on the recurring pages ──────────────────────
+ *
+ * The rows arrive already ordered and already stamped with the group they
+ * belong to, so a group is just "the rows sharing a data-group-key" - there is
+ * no nesting to manage and no second source of truth about which category is in
+ * which group.
+ *
+ * Collapsed state is remembered per page in localStorage, because the whole
+ * point is navigating a long list: springing back open on every save would undo
+ * the thing the user did to make the page manageable. It is a display
+ * preference and it is per browser, which is what localStorage is for - and it
+ * is read defensively, because a private window can throw on access rather than
+ * simply return nothing.
+ */
+window.recurringGroups = (function () {
+
+    function storeKey() {
+        return 'recurring-collapsed:' + window.location.pathname;
+    }
+
+    function readCollapsed() {
+        try {
+            return JSON.parse(localStorage.getItem(storeKey()) || '[]') || [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function writeCollapsed(keys) {
+        try {
+            localStorage.setItem(storeKey(), JSON.stringify(keys));
+        } catch (e) {
+            /* The groups still collapse; they just will not be remembered.
+               Not worth telling the user about. */
+        }
+    }
+
+    function members(header) {
+        var key = header.getAttribute('data-group-key');
+        var out = [];
+        var row = header.nextElementSibling;
+        while (row && !row.classList.contains('recurring-group-header')) {
+            if (row.getAttribute('data-group-key') === key) { out.push(row); }
+            row = row.nextElementSibling;
+        }
+        return out;
+    }
+
+    function paint(header, collapsed) {
+        header.classList.toggle('is-collapsed', collapsed);
+        var btn = header.querySelector('.recurring-group-toggle');
+        if (btn) { btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true'); }
+        members(header).forEach(function (row) {
+            // An attribute rather than a direct style, so this and the search
+            // are not both writing row.style.display and undoing each other.
+            if (collapsed) {
+                row.setAttribute('data-collapsed', '1');
+                row.style.display = 'none';
+            } else {
+                row.removeAttribute('data-collapsed');
+                row.style.display = '';
+            }
+        });
+    }
+
+    function attach(root) {
+        root = root || document;
+        var headers = root.querySelectorAll('.recurring-group-header');
+        if (!headers.length) { return; }
+        var collapsed = readCollapsed();
+
+        Array.prototype.forEach.call(headers, function (header) {
+            var key = header.getAttribute('data-group-key');
+
+            var label = header.querySelector('.recurring-group-count');
+            if (label) {
+                // Categories, not rows: a scheduled change is another row for
+                // the same category, and counting those would report more
+                // entries than the user has.
+                var seen = {};
+                members(header).forEach(function (row) {
+                    var id = row.getAttribute('data-category-id');
+                    if (id) { seen[id] = true; }
+                });
+                var n = Object.keys(seen).length;
+                label.textContent = n === 1 ? '1 category' : n + ' categories';
+            }
+
+            paint(header, collapsed.indexOf(key) !== -1);
+
+            header.addEventListener('click', function () {
+                var now = readCollapsed();
+                var at = now.indexOf(key);
+                if (at === -1) { now.push(key); } else { now.splice(at, 1); }
+                writeCollapsed(now);
+                paint(header, at === -1);
+                // Opening a group while a search is running would otherwise put
+                // back the rows that did not match it. The search owns which
+                // rows are visible; this just asks it to decide again.
+                var tbody = header.parentNode;
+                if (tbody && typeof tbody._recurringApply === 'function') {
+                    tbody._recurringApply();
+                }
+            });
+        });
+    }
+
+    return { attach: attach, members: members, paint: paint };
+})();
+
 window.recurringSearch = (function () {
 
     function stripe(tbody, oddClass, evenClass) {
@@ -2922,6 +3032,9 @@ window.recurringSearch = (function () {
             var row = rows[i];
             row.classList.remove(oddClass, evenClass);
             if (row.style.display === 'none') { continue; }
+            // A group header is not one of the striped rows; counting it would
+            // flip the colours of everything below it.
+            if (row.classList.contains('recurring-group-header')) { continue; }
             row.classList.add(index % 2 === 0 ? evenClass : oddClass);
             index++;
         }
@@ -2941,10 +3054,37 @@ window.recurringSearch = (function () {
             var rows = tbody.querySelectorAll('tr');
             var shown = 0;
             for (var i = 0; i < rows.length; i++) {
-                var name = (rows[i].getAttribute('data-category-name') || '').toLowerCase();
+                var row = rows[i];
+                // Group headers are placed by the loop below, from whether
+                // anything in the group survived the filter.
+                if (row.classList.contains('recurring-group-header')) { continue; }
+                var name = (row.getAttribute('data-category-name') || '').toLowerCase();
                 var match = !query || name.indexOf(query) !== -1;
-                rows[i].style.display = match ? '' : 'none';
+                // A collapsed group hides its rows, but only while nothing is
+                // being searched for - a match the user asked to see must not
+                // stay hidden because of a group they closed earlier.
+                var collapsedAway = !query && row.hasAttribute('data-collapsed');
+                row.style.display = (match && !collapsedAway) ? '' : 'none';
                 if (match) { shown++; }
+            }
+
+            // A header with nothing left under it goes too, rather than sitting
+            // over a gap - unless it is collapsed and unsearched, which is the
+            // one case where showing no members is the point and the header has
+            // to stay for the group to be opened again.
+            var headers = tbody.querySelectorAll('.recurring-group-header');
+            for (var h = 0; h < headers.length; h++) {
+                var key = headers[h].getAttribute('data-group-key');
+                var visible = 0;
+                var member = headers[h].nextElementSibling;
+                while (member && !member.classList.contains('recurring-group-header')) {
+                    if (member.getAttribute('data-group-key') === key
+                            && member.style.display !== 'none') { visible++; }
+                    member = member.nextElementSibling;
+                }
+                headers[h].style.display =
+                    (visible || (!query && headers[h].classList.contains('is-collapsed')))
+                        ? '' : 'none';
             }
 
             if (query) {
@@ -2960,6 +3100,10 @@ window.recurringSearch = (function () {
 
             if (empty) { empty.style.display = (query && shown === 0) ? '' : 'none'; }
         }
+
+        // So the group toggle can ask the search to decide again after it
+        // changes which rows are collapsed.
+        tbody._recurringApply = apply;
 
         input.addEventListener('input', apply);
         if (clear) {

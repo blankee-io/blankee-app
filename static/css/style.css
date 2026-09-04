@@ -15146,6 +15146,70 @@ transform: scale(1.2);
 /* ── Category Group Styles ── */
 
 /* Group header row */
+/* ── Group headers on the recurring pages ────────────────────────────────────
+   The same idea Manage Categories uses, in the same colours, so a category
+   sits under a heading that looks the same on both screens. Tinted rather than
+   filled: these rows are signposts in a table of data, where the ones on
+   Manage Categories are the subject of that page. */
+.recurring-group-header {
+    cursor: pointer;
+    user-select: none;
+}
+
+.recurring-group-header td {
+    padding: 6px 10px;
+    background: var(--primary-lighter);
+    border-top: 1px solid var(--secondary-hover);
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--text-dark);
+}
+
+.expense-recurring-table .recurring-group-header td,
+.ca-recurring-table .recurring-group-header td {
+    background: var(--accent-lighter);
+}
+
+.recurring-group-header:hover td {
+    filter: brightness(0.97);
+}
+
+.recurring-group-toggle {
+    padding: 0 6px 0 0;
+    background: none;
+    border: none;
+    color: var(--text-dark);
+    cursor: pointer;
+}
+
+/* The chevron turns rather than swapping glyph: one icon, and the rotation
+   says which way the group is about to go. */
+.recurring-group-toggle i {
+    transition: transform 0.15s ease;
+}
+
+.recurring-group-header.is-collapsed .recurring-group-toggle i {
+    transform: rotate(-90deg);
+}
+
+.recurring-group-name {
+    margin-right: 8px;
+}
+
+/* The count is context, not content - it should not compete with the name. */
+.recurring-group-count {
+    color: var(--secondary-dark);
+    font-size: 12px;
+    font-weight: normal;
+}
+
+/* A collapsed group's rows are hidden by script, which sets display directly.
+   This is here so they are also hidden before the script runs, on a page drawn
+   from a remembered state - otherwise the group flashes open and then shuts. */
+tr[data-collapsed] {
+    display: none;
+}
+
 .manage-cat-table .group-header-row {
     background: var(--primary-lighter);
     position: relative;
