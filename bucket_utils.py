@@ -1141,8 +1141,37 @@ def restore_bucket_for_category_change(bucket_table, category_id, entry_date, en
         return False
 
 
+def _is_bundle_category(entry_table, category_id, user_id):
+    """Is this category one a bundle created?"""
+    category_table = {
+        'expense_entries': 'expense_categories',
+        'c_expense_entries': 'c_expense_categories',
+    }.get(entry_table)
+    if not category_table:
+        return False
+    try:
+        cached = (redis_manager._redis_client.get(f"{category_table}:v1:{user_id}")
+                  if redis_manager._redis_client else None)
+        if not cached:
+            return False
+        for cat in json.loads(cached):
+            if int(cat.get('id', 0) or 0) == int(category_id):
+                return bool(cat.get('is_bundle')) or cat.get('bundle_id') is not None
+    except Exception:
+        pass
+    return False
+
+
 def _get_wage_bill_for_category(entry_table, category_id, user_id):
     """Get wage_bill flag for a category's recurring record from Redis."""
+    # A bundle has no recurring record, so the lookup below would return 0 -
+    # and wage_bill=0 makes find_next_bucket_for_category search only
+    # [today, today+45d]. A bundle item planned for last week would then be
+    # unreachable, and today's purchase would deplete the NEXT item's plan
+    # instead. Bundles are all-or-nothing: one plan, one purchase, gone.
+    if _is_bundle_category(entry_table, category_id, user_id):
+        return 1
+
     table_map = {
         'income_entries': 'recurring_income',
         'expense_entries': 'recurring_expense',
@@ -1263,10 +1292,15 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
     
     log_info(logger, 'BUCKET_DEBUG', f"process_manual_entry_with_bucket called: table={table}, category_id={category_id}, entry_date={entry_date}, entry_amount={entry_amount}, user_id={user_id}")
     
-    # Determine wage_bill from cadence_info (recurring_info)
-    wage_bill = 0
-    if cadence_info and isinstance(cadence_info, dict):
-        wage_bill = int(cadence_info.get('wage_bill', 0))
+    # Determine wage_bill from cadence_info where the caller supplied it, and
+    # look it up otherwise. Defaulting to 0 meant this and the probe in app.py,
+    # which does look it up, could pick different buckets for the same entry -
+    # exactly what find_next_bucket_for_category's docstring warns about. It
+    # also silently made every bundle an allowance.
+    if cadence_info and isinstance(cadence_info, dict) and 'wage_bill' in cadence_info:
+        wage_bill = int(cadence_info.get('wage_bill') or 0)
+    else:
+        wage_bill = _get_wage_bill_for_category(table, category_id, user_id)
     
     log_info(logger, 'BUCKET_DEBUG', f"wage_bill={wage_bill}")
     

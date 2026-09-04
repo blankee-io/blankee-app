@@ -8,6 +8,55 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.18.0 — 2026-09-03
+
+### Added
+- **Bundles.** A Bundle is a named list of one-off spends you are planning
+  together — a trip, a renovation, a move. Each item has an amount, a date and
+  the account it comes out of, and switching the Bundle on puts all of them into
+  your forecast. It is back on the menu under Manage.
+- **Bundle items are proper planned spending now.** An item that has not
+  happened yet shows as money set aside, and on the day it is due Blankee asks
+  whether it happened — so recording the real purchase replaces the plan instead
+  of counting beside it. Before this, the plan and the purchase both counted and
+  the day was double-charged.
+- **Bundles can be renamed.** The name used to be fixed at creation. Renaming
+  one now renames its category and its card categories with it.
+
+### Fixed
+- **Editing a Bundle item's date no longer leaves the money on both dates.**
+- **Deleting a Bundle item now removes only its own share.** Where several items
+  fell on one date, deleting any but the first left its amount behind.
+- **A Bundle whose dates have all passed stays visible** until you have said what
+  happened. It used to hide itself, and hidden categories are left out of the
+  add-entry lists — so you could not pick the category you needed to record the
+  purchase.
+- **Two Bundles with the same name no longer share one category on a card**, and
+  renaming or deleting an ordinary category that happens to share a Bundle's name
+  no longer drags the Bundle's categories along with it.
+- **A Bundle's categories now appear on every card**, including cards added after
+  the Bundle was switched on.
+- **Deleting a credit account no longer touches other people's Bundle items.** The
+  same for the flush worker's delete path.
+- **Editing a Bundle item's amount keeps the pence.** The inline editor was
+  dropping everything after the decimal point.
+- **Switching a Bundle off no longer deletes an entry settled earlier the same
+  day**, and no longer briefly loses its categories to the background writer.
+- **Bundle activity refreshes the balance trend**, rather than waiting for an
+  unrelated edit to do it.
+
+### Changed
+- **"Buds" are called Bundles**, including in the database. `buds` and `bud_items`
+  become `bundles` and `bundle_items`, and the columns that named them follow.
+
+  **This release changes table names, so plan for a short interruption.** An
+  update applies the code, then the migrations, then reloads. Between the
+  migration and the reload the outgoing process is querying tables that no longer
+  answer to the names it knows, and requests in that window can fail. The rename
+  is deliberately the last migration to run so the window is as short as possible.
+  Nothing is lost — it ends when the reload completes.
+- The Bundle icon is stacked boxes rather than a seedling.
+
 ## 1.17.0 — 2026-09-03
 
 ### Added

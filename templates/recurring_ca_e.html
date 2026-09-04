@@ -505,12 +505,12 @@
             const wrapper = input.closest('.category-input-wrapper');
             const dropdown = wrapper.querySelector('.pending-transactions-category-dropdown');
             const hiddenInput = wrapper.querySelector('.category-hidden');
-            // Filter: match account, exclude already-recurring, interest, bud
+            // Filter: match account, exclude already-recurring, interest, bundle
             const categories = allCACategories.filter(cat =>
                 String(cat.account_id) === String(accountId) &&
                 cat.is_recurring != 1 &&
                 cat.is_interest != 1 &&
-                cat.is_bud != 1 &&
+                cat.is_bundle != 1 &&
                 cat.name !== 'Uncategorized'
             ).sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
 

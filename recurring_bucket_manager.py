@@ -430,6 +430,76 @@ def add_to_bucket_record(bucket_table, bucket_id, add_amount, user_id):
         return False
 
 
+def set_bucket_record_amount(bucket_table, category_id, bucket_date, new_original, user_id):
+    """Restate a bucket's planned amount, keeping whatever has been depleted.
+
+    Neither add_to_bucket_record nor subtract_from_bucket_record touches
+    original_amount - they exist to record spending against a fixed plan. When
+    the plan itself changes (a bundle item is edited, or another item joins it
+    on the same date) original_amount has to move too, and `amount` has to move
+    with it by the same delta so that whatever was already spent stays spent.
+
+    Deleting and recreating instead would be worse: create_bucket_record mints
+    a fresh negative temp id, which then sits in Redis against a positive row
+    in MySQL. The orphan sweep deletes and re-inserts that pairing every fifteen
+    seconds, forever.
+
+    Args:
+        bucket_table: 'recurring_income_buckets', 'recurring_expense_buckets',
+            or 'recurring_c_expense_buckets'
+        category_id: Category ID
+        bucket_date: The bucket's date
+        new_original: The new planned amount
+        user_id: User ID
+
+    Returns:
+        True if a bucket was found and updated.
+    """
+    if isinstance(bucket_date, str):
+        bucket_date = date.fromisoformat(bucket_date)
+
+    redis_key = f"{bucket_table}:v1:{user_id}"
+    redis_data = redis_manager._redis_client.get(redis_key) if redis_manager._redis_client else None
+    if not redis_data:
+        log_warning(logger, 'SET_BUCKET_RECORD', f"No Redis data for {redis_key}")
+        return False
+
+    try:
+        bucket_list = json.loads(redis_data)
+        new_original = Decimal(str(new_original))
+
+        for bucket in bucket_list:
+            if (int(bucket.get('category_id', 0) or 0) != int(category_id)
+                    or bucket.get('bucket_date') != bucket_date.isoformat()):
+                continue
+
+            old_original = Decimal(str(bucket.get('original_amount', 0) or 0))
+            old_amount = Decimal(str(bucket.get('amount', 0) or 0))
+            spent = old_original - old_amount
+
+            bucket['original_amount'] = float(new_original)
+            # What is left of the new plan after the same spending. It can go
+            # negative, which is correct and is what the confirmation prompt
+            # reads as "more was spent than planned".
+            bucket['amount'] = float(new_original - spent)
+
+            redis_manager._redis_client.setex(redis_key, 604800, json.dumps(bucket_list))
+            redis_manager._redis_client.sadd(f"dirty_tables:{user_id}", bucket_table)
+            log_info(logger, 'SET_BUCKET_RECORD',
+                     f"Bucket category={category_id} date={bucket_date} restated: "
+                     f"original {old_original} -> {new_original}, "
+                     f"remaining {old_amount} -> {bucket['amount']} (spent {spent})")
+            return True
+
+        log_warning(logger, 'SET_BUCKET_RECORD',
+                    f"No bucket for category={category_id} date={bucket_date}")
+        return False
+
+    except Exception as e:
+        log_error(logger, 'SET_BUCKET_RECORD', f"Error: {e}")
+        return False
+
+
 def add_to_bucket_record_by_category_date(bucket_table, category_id, bucket_date, add_amount, user_id):
     """
     Add amount back to a bucket record by finding it via category_id + bucket_date.
