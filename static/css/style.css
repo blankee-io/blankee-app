@@ -15146,39 +15146,84 @@ transform: scale(1.2);
 /* ── Category Group Styles ── */
 
 /* Group header row */
+/* ── Rows fading in and out of a collapsing group ────────────────────────────
+   Opacity on the cells, not on the row: a <tr> is not a paint target in every
+   engine, and its cells reliably are. The small lift is on the cells for the
+   same reason, and is a nicety - an engine that ignores transforms on a table
+   cell still gets the fade, which is what carries the effect.
+
+   The row still takes its space in one step, because table layout decides a
+   row's height and no rule here can transition it. What this buys is telling
+   the eye where to look, rather than a block of the table blinking away. */
+@keyframes rowRevealIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: none; }
+}
+
+@keyframes rowRevealOut {
+    from { opacity: 1; transform: none; }
+    to   { opacity: 0; transform: translateY(-4px); }
+}
+
+.row-revealing > td {
+    animation: rowRevealIn 180ms ease-out both;
+}
+
+.row-hiding > td {
+    animation: rowRevealOut 130ms ease-in both;
+}
+
+/* Someone who has asked their system for less motion gets none. The JS also
+   skips the timers, so this is the belt to that braces - a stylesheet cached
+   ahead of the script should not animate either. */
+@media (prefers-reduced-motion: reduce) {
+    .row-revealing > td,
+    .row-hiding > td {
+        animation: none;
+    }
+}
+
 /* ── Group headers on the recurring pages ────────────────────────────────────
-   The same idea Manage Categories uses, in the same colours, so a category
-   sits under a heading that looks the same on both screens. Tinted rather than
-   filled: these rows are signposts in a table of data, where the ones on
-   Manage Categories are the subject of that page. */
+   The same colours, weight and shadow Manage Categories gives its group
+   headers - primary for income, accent for expense - so a group reads as the
+   same object on both screens rather than as a lighter echo of one. */
 .recurring-group-header {
+    position: relative;
+    z-index: 1;
     cursor: pointer;
     user-select: none;
 }
 
 .recurring-group-header td {
-    padding: 6px 10px;
-    background: var(--primary-lighter);
-    border-top: 1px solid var(--secondary-hover);
-    font-size: 13px;
-    font-weight: bold;
-    color: var(--text-dark);
+    padding: 10px 8px;
+    background: var(--primary-mid);
+    box-shadow: 0 3px 3px -2px var(--shadow-xxl);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-light);
 }
 
 .expense-recurring-table .recurring-group-header td,
 .ca-recurring-table .recurring-group-header td {
-    background: var(--accent-lighter);
+    background: var(--accent-mid);
+}
+
+/* Collapsed, the shadow has nothing to cast onto - it would sit on the header
+   below it. Manage Categories drops it for the same reason. */
+.recurring-group-header.is-collapsed td {
+    box-shadow: none;
 }
 
 .recurring-group-header:hover td {
-    filter: brightness(0.97);
+    filter: brightness(1.04);
 }
 
 .recurring-group-toggle {
     padding: 0 6px 0 0;
     background: none;
     border: none;
-    color: var(--text-dark);
+    color: inherit;
+    font-size: 1.05rem;
     cursor: pointer;
 }
 
@@ -15196,10 +15241,13 @@ transform: scale(1.2);
     margin-right: 8px;
 }
 
-/* The count is context, not content - it should not compete with the name. */
+/* The count is context, not content - it should not compete with the name.
+   Dimmed against the filled header rather than given its own colour, so it
+   works on both the primary and the accent background. */
 .recurring-group-count {
-    color: var(--secondary-dark);
-    font-size: 12px;
+    color: inherit;
+    opacity: 0.75;
+    font-size: 0.8rem;
     font-weight: normal;
 }
 

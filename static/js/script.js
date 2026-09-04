@@ -2913,6 +2913,91 @@ window.sortableAutoScroll = (function () {
  * stylesheet resumes - its :nth-child rules carry :not([class*="zebra-"]), so
  * exactly one of the two ever applies to a row.
  */
+/* ── Animating table rows in and out ─────────────────────────────────────────
+ *
+ * A <tr> cannot be transitioned the way a block can: display is not an
+ * animatable property, and height on a table row is decided by the table
+ * layout rather than by the rule you write. So this animates what can be
+ * animated - the opacity of the cells, and a small vertical shift - and
+ * changes display around it, before the reveal and after the hide.
+ *
+ * That means the row still takes its space in one step. What the animation
+ * buys is that the eye is told where to look: the rows fade up out of the
+ * header they belong to rather than a block of the table blinking out of
+ * existence.
+ *
+ * Rapid toggling is the case that breaks a naive version - the hide finishes
+ * after the user has already reopened the group, and sets display:none on a
+ * row that should be visible. Each row therefore carries the id of the
+ * animation currently in charge, and a callback that is no longer the current
+ * one does nothing.
+ */
+window.rowReveal = (function () {
+
+    var seq = 0;
+
+    function reduced() {
+        try {
+            return window.matchMedia
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function clear(row) {
+        row.classList.remove('row-revealing', 'row-hiding');
+    }
+
+    function show(rows) {
+        Array.prototype.forEach.call(rows, function (row) {
+            var mine = ++seq;
+            row._revealSeq = mine;
+            clear(row);
+            row.style.display = '';
+            if (reduced()) { return; }
+            // Read a layout property so the browser treats the class that
+            // follows as a change to animate rather than folding the two
+            // together and showing the end state immediately.
+            void row.offsetHeight;
+            row.classList.add('row-revealing');
+            window.setTimeout(function () {
+                if (row._revealSeq === mine) { clear(row); }
+            }, 200);
+        });
+    }
+
+    function hide(rows) {
+        Array.prototype.forEach.call(rows, function (row) {
+            var mine = ++seq;
+            row._revealSeq = mine;
+            clear(row);
+            if (reduced()) {
+                row.style.display = 'none';
+                return;
+            }
+            row.classList.add('row-hiding');
+            window.setTimeout(function () {
+                // Only if this hide is still the one in charge. Without the
+                // check, reopening a group mid-animation leaves rows that
+                // should be visible with display:none.
+                if (row._revealSeq === mine) {
+                    row.style.display = 'none';
+                    clear(row);
+                }
+            }, 140);
+        });
+    }
+
+    /* One entry point for "these rows should now be visible or not", so a
+       caller does not have to decide which of the two to use. */
+    function set(rows, visible) {
+        if (visible) { show(rows); } else { hide(rows); }
+    }
+
+    return { show: show, hide: hide, set: set };
+})();
+
 /* ── Collapsible category groups on the recurring pages ──────────────────────
  *
  * The rows arrive already ordered and already stamped with the group they
@@ -2961,21 +3046,27 @@ window.recurringGroups = (function () {
         return out;
     }
 
-    function paint(header, collapsed) {
+    function paint(header, collapsed, animate) {
         header.classList.toggle('is-collapsed', collapsed);
         var btn = header.querySelector('.recurring-group-toggle');
         if (btn) { btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true'); }
-        members(header).forEach(function (row) {
+        var rows = members(header);
+        rows.forEach(function (row) {
             // An attribute rather than a direct style, so this and the search
             // are not both writing row.style.display and undoing each other.
             if (collapsed) {
                 row.setAttribute('data-collapsed', '1');
-                row.style.display = 'none';
             } else {
                 row.removeAttribute('data-collapsed');
-                row.style.display = '';
             }
         });
+        // animate is false on the first paint: rows arriving already collapsed
+        // should simply be collapsed, not play a hide the user did not ask for.
+        if (animate === false) {
+            rows.forEach(function (row) { row.style.display = collapsed ? 'none' : ''; });
+        } else {
+            window.rowReveal.set(rows, !collapsed);
+        }
     }
 
     function attach(root) {
@@ -3001,7 +3092,7 @@ window.recurringGroups = (function () {
                 label.textContent = n === 1 ? '1 category' : n + ' categories';
             }
 
-            paint(header, collapsed.indexOf(key) !== -1);
+            paint(header, collapsed.indexOf(key) !== -1, false);
 
             header.addEventListener('click', function () {
                 var now = readCollapsed();
