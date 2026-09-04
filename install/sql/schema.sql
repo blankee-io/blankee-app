@@ -31,23 +31,26 @@
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `bud_items` (
+CREATE TABLE `bundle_items` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `bud_id` int NOT NULL,
+  `bundle_id` int NOT NULL,
   `account` varchar(255) NOT NULL,
+  `credit_account_id` int DEFAULT NULL,
   `name` varchar(255) NOT NULL,
   `value` decimal(15,2) DEFAULT NULL,
   `date` date DEFAULT NULL,
   `description` varchar(255) DEFAULT NULL,
   `last_modified` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `bud_id` (`bud_id`),
-  CONSTRAINT `bud_items_ibfk_1` FOREIGN KEY (`bud_id`) REFERENCES `buds` (`id`) ON DELETE CASCADE
+  KEY `bundle_id` (`bundle_id`),
+  KEY `bundle_items_account_fk` (`credit_account_id`),
+  CONSTRAINT `bundle_items_ibfk_1` FOREIGN KEY (`bundle_id`) REFERENCES `bundles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `bundle_items_account_fk` FOREIGN KEY (`credit_account_id`) REFERENCES `credit_accounts` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB AUTO_INCREMENT=198 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ENCRYPTION='Y';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `buds` (
+CREATE TABLE `bundles` (
   `id` int NOT NULL AUTO_INCREMENT,
   `user_id` int NOT NULL,
   `expense_category_id` int DEFAULT NULL,
@@ -57,9 +60,9 @@ CREATE TABLE `buds` (
   `last_modified` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `user_id` (`user_id`),
-  KEY `buds_ibfk_2` (`expense_category_id`),
-  CONSTRAINT `buds_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `buds_ibfk_2` FOREIGN KEY (`expense_category_id`) REFERENCES `expense_categories` (`id`) ON DELETE SET NULL
+  KEY `bundles_ibfk_2` (`expense_category_id`),
+  CONSTRAINT `bundles_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `bundles_ibfk_2` FOREIGN KEY (`expense_category_id`) REFERENCES `expense_categories` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB AUTO_INCREMENT=83 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ENCRYPTION='Y';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -121,15 +124,19 @@ CREATE TABLE `c_expense_categories` (
   `is_recurring` tinyint(1) DEFAULT '0',
   `no_end_date` tinyint(1) DEFAULT '0',
   `hidden` tinyint(1) DEFAULT '0',
-  `is_bud` tinyint(1) NOT NULL DEFAULT '0',
+  `is_bundle` tinyint(1) NOT NULL DEFAULT '0',
+  `bundle_id` int DEFAULT NULL,
   `is_interest` tinyint(1) NOT NULL DEFAULT '0',
   `is_auto_adjustment` tinyint(1) NOT NULL DEFAULT '0',
   `is_system` tinyint(1) NOT NULL DEFAULT '0',
   `last_modified` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_c_expense_categories_account_bundle` (`account_id`,`bundle_id`),
   KEY `account_id` (`account_id`),
+  KEY `c_expense_categories_bundle_fk` (`bundle_id`),
   KEY `c_expense_categories_group_fk` (`group_id`),
   CONSTRAINT `c_expense_categories_group_fk` FOREIGN KEY (`group_id`) REFERENCES `c_expense_category_groups` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `c_expense_categories_bundle_fk` FOREIGN KEY (`bundle_id`) REFERENCES `bundles` (`id`) ON DELETE CASCADE,
   CONSTRAINT `c_expense_categories_ibfk_1` FOREIGN KEY (`account_id`) REFERENCES `credit_accounts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=1658 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ENCRYPTION='Y';
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -167,17 +174,17 @@ CREATE TABLE `c_expense_entries` (
   `auto_confirmed` tinyint(1) DEFAULT '0',
   `is_auto_adjustment` tinyint(1) NOT NULL DEFAULT '0',
   `pending` tinyint(1) DEFAULT '0',
-  `bud_item_id` int DEFAULT NULL,
+  `bundle_item_id` int DEFAULT NULL,
   `last_modified` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `category_id` (`category_id`),
-  KEY `bud_item_id` (`bud_item_id`),
+  KEY `bundle_item_id` (`bundle_item_id`),
   KEY `idx_c_expense_entries_category_date` (`category_id`,`date`),
   KEY `idx_bucket_category_date` (`is_bucket`,`category_id`,`date`),
   KEY `idx_pending` (`pending`),
   KEY `idx_c_expense_entries_auto_confirmed` (`auto_confirmed`),
   CONSTRAINT `c_expense_entries_ibfk_1` FOREIGN KEY (`category_id`) REFERENCES `c_expense_categories` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `c_expense_entries_ibfk_bud_item` FOREIGN KEY (`bud_item_id`) REFERENCES `bud_items` (`id`) ON DELETE CASCADE
+  CONSTRAINT `c_expense_entries_ibfk_bundle_item` FOREIGN KEY (`bundle_item_id`) REFERENCES `bundle_items` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=981768 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ENCRYPTION='Y';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -271,7 +278,7 @@ CREATE TABLE `expense_categories` (
   `is_auto_adjustment` tinyint(1) NOT NULL DEFAULT '0',
   `no_end_date` tinyint(1) DEFAULT '0',
   `hidden` tinyint(1) DEFAULT '0',
-  `is_bud` tinyint(1) NOT NULL DEFAULT '0',
+  `is_bundle` tinyint(1) NOT NULL DEFAULT '0',
   `is_credit_account` tinyint(1) NOT NULL DEFAULT '0',
   `is_system` tinyint(1) NOT NULL DEFAULT '0',
   `credit_account_id` int DEFAULT NULL,
@@ -315,18 +322,18 @@ CREATE TABLE `expense_entries` (
   `auto_confirmed` tinyint(1) DEFAULT '0',
   `is_auto_adjustment` tinyint(1) NOT NULL DEFAULT '0',
   `pending` tinyint(1) DEFAULT '0',
-  `bud_item_id` int DEFAULT NULL,
+  `bundle_item_id` int DEFAULT NULL,
   `last_modified` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `expense_entries_ibfk_1` (`category_id`),
-  KEY `bud_item_id` (`bud_item_id`),
+  KEY `bundle_item_id` (`bundle_item_id`),
   KEY `idx_expense_entries_category_date` (`category_id`,`date`),
   KEY `idx_expense_entries_date` (`date`),
   KEY `idx_bucket_category_date` (`is_bucket`,`category_id`,`date`),
   KEY `idx_pending` (`pending`),
   KEY `idx_expense_entries_auto_confirmed` (`auto_confirmed`),
   CONSTRAINT `expense_entries_ibfk_1` FOREIGN KEY (`category_id`) REFERENCES `expense_categories` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `expense_entries_ibfk_bud_item` FOREIGN KEY (`bud_item_id`) REFERENCES `bud_items` (`id`) ON DELETE CASCADE
+  CONSTRAINT `expense_entries_ibfk_bundle_item` FOREIGN KEY (`bundle_item_id`) REFERENCES `bundle_items` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=210976419 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ENCRYPTION='Y';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;

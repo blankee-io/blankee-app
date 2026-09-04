@@ -3082,7 +3082,7 @@ def dashboard_d():
         if expense_categories is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT id, name, is_auto_adjustment, hidden, is_bud, is_recurring, is_credit_account
+                SELECT id, name, is_auto_adjustment, hidden, is_bundle, is_recurring, is_credit_account
                 FROM expense_categories
                 WHERE user_id = %s
                 ORDER BY display_order DESC
@@ -3640,7 +3640,7 @@ def get_categories():
                 """, (current_user.id,))
             else:  # expense
                 cursor.execute("""
-                    SELECT id, name, is_auto_adjustment, hidden, is_bud, is_recurring, is_credit_account
+                    SELECT id, name, is_auto_adjustment, hidden, is_bundle, is_recurring, is_credit_account
                     FROM expense_categories
                     WHERE user_id = %s
                     ORDER BY display_order DESC
@@ -4980,7 +4980,7 @@ def _set_entries_to_redis(table_name, user_id, data):
     except Exception as e:
         pass
 
-def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount, processed=None, entry_id=None, bud_item_id=None, is_bucket=None, original_amount=None, recurring_id=None, is_auto_adjustment=False, match_entry_id=None):
+def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount, processed=None, entry_id=None, bundle_item_id=None, is_bucket=None, original_amount=None, recurring_id=None, is_auto_adjustment=False, match_entry_id=None):
     """
     Update or insert a single entry in Redis cache.
     
@@ -4997,7 +4997,7 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
             or moving a paid entry cleared it. A new entry with no opinion is still
             created unpaid.
         entry_id: Existing entry ID (if updating) or None (will generate)
-        bud_item_id: Optional bud_item_id for expense entries
+        bundle_item_id: Optional bundle_item_id for expense entries
         is_bucket: Whether this is a bucket entry from recurring. None leaves an
             existing entry's flag alone, which is what every caller that has no
             opinion wants; a new entry with no opinion is still created is_bucket=0.
@@ -5071,8 +5071,8 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
                         entry['processed'] = int(processed)
                     if is_bucket is not None:
                         entry['is_bucket'] = 1 if is_bucket else 0
-                    if bud_item_id is not None:
-                        entry['bud_item_id'] = int(bud_item_id)
+                    if bundle_item_id is not None:
+                        entry['bundle_item_id'] = int(bundle_item_id)
                     if original_amount is not None:
                         entry['original_amount'] = float(original_amount)
                     found = True
@@ -5086,8 +5086,8 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
                     entry['amount'] = float(amount)
                     if processed is not None:
                         entry['processed'] = int(processed)
-                    if bud_item_id is not None:
-                        entry['bud_item_id'] = int(bud_item_id)
+                    if bundle_item_id is not None:
+                        entry['bundle_item_id'] = int(bundle_item_id)
                     found = True
                     break
         
@@ -5111,7 +5111,7 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
             if original_amount is not None:
                 new_entry['original_amount'] = float(original_amount)
             if table_name in ['expense_entries', 'c_expense_entries']:
-                new_entry['bud_item_id'] = int(bud_item_id) if bud_item_id is not None else None
+                new_entry['bundle_item_id'] = int(bundle_item_id) if bundle_item_id is not None else None
             entries.append(new_entry)
         
         # Write back to Redis
@@ -5981,7 +5981,7 @@ def _delete_future_buckets_in_redis(table_name, user_id, category_id, from_date=
         log_error(app.logger, 'BUCKET', f"Error deleting future buckets from {table_name} in Redis: {e}")
 
 
-def _sync_expense_category_to_credit_accounts(user_id, category_name, display_order, group_id=None, is_system=0):
+def _sync_expense_category_to_credit_accounts(user_id, category_name, display_order, group_id=None, is_system=0, is_bundle=0, bundle_id=None):
     """
     Sync an expense category to all credit accounts for a user.
     Creates a non-recurring c_expense_category for each credit account.
@@ -5995,7 +5995,10 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
         display_order: Display order from the expense_category
         group_id: Optional expense group ID — mapped to c_expense group via source_group_id
         is_system: Whether this is a system category (0 or 1)
-    
+        is_bundle: Whether this category belongs to a bundle (0 or 1)
+        bundle_id: The bundle this category mirrors, or None for an ordinary category.
+            This is the join key - name is not, and never was reliable.
+
     Returns:
         Dictionary mapping account_id -> c_expense_category_id
     """
@@ -6023,11 +6026,25 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
         # Check if category already exists for this account (avoid duplicates)
         existing_categories = _get_categories_from_redis('c_expense_categories', user_id)
         if existing_categories:
-            existing_cat = next(
-                (cat for cat in existing_categories 
-                 if cat.get('account_id') == account_id and cat.get('name') == category_name),
-                None
-            )
+            if bundle_id is not None:
+                # A bundle's mirror is identified by the bundle, not by its name.
+                # Two bundles can share a name; matching on it put them both on
+                # one category and merged their spending.
+                existing_cat = next(
+                    (cat for cat in existing_categories
+                     if cat.get('account_id') == account_id
+                     and cat.get('bundle_id') is not None
+                     and int(cat['bundle_id']) == int(bundle_id)),
+                    None
+                )
+            else:
+                existing_cat = next(
+                    (cat for cat in existing_categories
+                     if cat.get('account_id') == account_id
+                     and cat.get('name') == category_name
+                     and cat.get('bundle_id') is None),
+                    None
+                )
             if existing_cat:
                 # Already exists, return the existing ID
                 created_map[account_id] = existing_cat.get('id')
@@ -6072,7 +6089,8 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
             'is_recurring': 0,  # Always non-recurring when synced
             'no_end_date': 0,
             'hidden': 0,
-            'is_bud': 0,
+            'is_bundle': is_bundle,
+            'bundle_id': bundle_id,
             'is_interest': 0,
             'is_auto_adjustment': 0,
             'is_system': is_system
@@ -6087,10 +6105,10 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO c_expense_categories 
-                    (account_id, name, display_order, is_recurring, hidden, is_bud, is_interest, is_auto_adjustment, is_system)
-                    VALUES (%s, %s, %s, 0, 0, 0, 0, 0, 0)
-                """, (account_id, category_name, new_display_order))
+                    INSERT INTO c_expense_categories
+                    (account_id, name, display_order, is_recurring, hidden, is_bundle, bundle_id, is_interest, is_auto_adjustment, is_system)
+                    VALUES (%s, %s, %s, 0, 0, %s, %s, 0, 0, %s)
+                """, (account_id, category_name, new_display_order, is_bundle, bundle_id, is_system))
                 new_id = cursor.lastrowid
                 conn.commit()
                 cursor.close()
@@ -6189,7 +6207,7 @@ def _copy_expense_categories_to_new_credit_account(user_id, account_id):
             'is_recurring': 0,
             'no_end_date': 0,
             'hidden': 0,
-            'is_bud': 0,
+            'is_bundle': 0,
             'is_interest': 0,
             'is_auto_adjustment': 0,
             'is_system': 0
@@ -6222,7 +6240,14 @@ def _sync_rename_to_credit_accounts(user_id, old_name, new_name):
             if cached:
                 categories = json.loads(cached)
                 for cat in categories:
-                    if cat.get('name') == old_name and not cat.get('is_interest') and not cat.get('is_auto_adjustment'):
+                    # A mirror with a bundle_id belongs to a bundle and is renamed by
+                    # the bundle, through its id. Without this an ordinary category
+                    # that happens to share a bundle's name renamed the bundle's
+                    # mirrors on every card as a side effect.
+                    if (cat.get('name') == old_name
+                            and cat.get('bundle_id') is None
+                            and not cat.get('is_interest')
+                            and not cat.get('is_auto_adjustment')):
                         cat['name'] = new_name
                         renamed_count += 1
                 if renamed_count > 0:
@@ -6237,6 +6262,7 @@ def _sync_rename_to_credit_accounts(user_id, old_name, new_name):
         cursor.execute("""
             UPDATE c_expense_categories SET name = %s
             WHERE name = %s AND is_interest = 0 AND is_auto_adjustment = 0
+              AND bundle_id IS NULL
               AND account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
         """, (new_name, old_name, user_id))
         conn.commit()
@@ -6267,10 +6293,13 @@ def _sync_delete_to_credit_accounts(user_id, category_name):
     if not c_categories:
         return
     
-    # Find matching categories (skip system categories)
-    matching_cats = [cat for cat in c_categories 
-                     if cat.get('name') == category_name 
-                     and not cat.get('is_interest') 
+    # Find matching categories (skip system categories, and skip bundles -
+    # a mirror with a bundle_id is deleted by its bundle, through its id, not by
+    # an ordinary category that happens to share the name)
+    matching_cats = [cat for cat in c_categories
+                     if cat.get('name') == category_name
+                     and cat.get('bundle_id') is None
+                     and not cat.get('is_interest')
                      and not cat.get('is_auto_adjustment')]
     
     if not matching_cats:
@@ -6331,7 +6360,7 @@ def _sync_delete_to_credit_accounts(user_id, category_name):
                         'is_bucket': 0,
                         'original_amount': None,
                         'processed': 1,
-                        'bud_item_id': None
+                        'bundle_item_id': None
                     }
                     entries.append(new_entry)
                 
@@ -6836,86 +6865,86 @@ def _ungroup_categories_in_redis(category_table, user_id, group_id):
         return 0
 
 
-# Redis helper functions for buds and bud_items
+# Redis helper functions for bundles and bundle_items
 
-def _get_buds_from_redis(user_id):
-    """Get buds from Redis."""
+def _get_bundles_from_redis(user_id):
+    """Get bundles from Redis."""
     if not app.config.get('REDIS_OK'):
         return None
     try:
-        redis_key = f"buds:v1:{user_id}"
+        redis_key = f"bundles:v1:{user_id}"
         cached = _redis_client.get(redis_key)
         return json.loads(cached) if cached else None
     except Exception as e:
-        log_error(app.logger, 'BUD', f"Error getting buds from Redis: {e}")
+        log_error(app.logger, 'BUNDLE', f"Error getting bundles from Redis: {e}")
         return None
 
-def _set_buds_to_redis(user_id, data):
-    """Set buds to Redis and mark dirty for flush."""
+def _set_bundles_to_redis(user_id, data):
+    """Set bundles to Redis and mark dirty for flush."""
     if not app.config.get('REDIS_OK'):
         return
     try:
-        redis_key = f"buds:v1:{user_id}"
+        redis_key = f"bundles:v1:{user_id}"
         _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(data, cls=DecimalEncoder))
         dirty_key = f"dirty_tables:{user_id}"
-        _redis_client.sadd(dirty_key, 'buds')
+        _redis_client.sadd(dirty_key, 'bundles')
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
     except Exception as e:
-        log_error(app.logger, 'BUD', f"Error setting buds to Redis: {e}")
+        log_error(app.logger, 'BUNDLE', f"Error setting bundles to Redis: {e}")
 
-def _update_bud_in_redis(user_id, bud_data):
-    """Update or insert a single bud record in Redis cache."""
+def _update_bundle_in_redis(user_id, bundle_data):
+    """Update or insert a single bundle record in Redis cache."""
     if not app.config.get('REDIS_OK'):
         return None
     try:
-        redis_key = f"buds:v1:{user_id}"
+        redis_key = f"bundles:v1:{user_id}"
         cached = _redis_client.get(redis_key)
         rows = json.loads(cached) if cached else []
         
-        bud_id = bud_data.get('id')
-        if bud_id:
+        bundle_id = bundle_data.get('id')
+        if bundle_id:
             found = False
             for i, row in enumerate(rows):
-                if int(row.get('id')) == int(bud_id):
-                    rows[i] = bud_data
+                if int(row.get('id')) == int(bundle_id):
+                    rows[i] = bundle_data
                     found = True
                     break
             if not found:
-                rows.append(bud_data)
+                rows.append(bundle_data)
         else:
             temp_id = -int(time.time() * 1000000)
-            bud_data['id'] = temp_id
-            rows.append(bud_data)
+            bundle_data['id'] = temp_id
+            rows.append(bundle_data)
         
         _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
         dirty_key = f"dirty_tables:{user_id}"
-        _redis_client.sadd(dirty_key, 'buds')
+        _redis_client.sadd(dirty_key, 'bundles')
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-        return bud_data['id']
+        return bundle_data['id']
     except Exception as e:
-        log_error(app.logger, 'BUD', f"Error updating bud in Redis: {e}")
+        log_error(app.logger, 'BUNDLE', f"Error updating bundle in Redis: {e}")
         return None
 
-def _delete_bud_in_redis(user_id, bud_id):
-    """Delete a bud record from Redis cache."""
+def _delete_bundle_in_redis(user_id, bundle_id):
+    """Delete a bundle record from Redis cache."""
     if not app.config.get('REDIS_OK'):
         return
     try:
-        redis_key = f"buds:v1:{user_id}"
+        redis_key = f"bundles:v1:{user_id}"
         cached = _redis_client.get(redis_key)
         if cached:
             rows = json.loads(cached)
-            rows = [row for row in rows if int(row.get('id')) != int(bud_id)]
+            rows = [row for row in rows if int(row.get('id')) != int(bundle_id)]
             _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
         
-        pending_key = f"pending_deletes:buds:{user_id}"
-        _redis_client.sadd(pending_key, str(bud_id))
+        pending_key = f"pending_deletes:bundles:{user_id}"
+        _redis_client.sadd(pending_key, str(bundle_id))
         _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
         dirty_key = f"dirty_tables:{user_id}"
-        _redis_client.sadd(dirty_key, 'buds')
+        _redis_client.sadd(dirty_key, 'bundles')
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
     except Exception as e:
-        log_error(app.logger, 'BUD', f"Error deleting bud from Redis: {e}")
+        log_error(app.logger, 'BUNDLE', f"Error deleting bundle from Redis: {e}")
 
 def _get_credit_accounts_from_redis(user_id):
     """Get credit accounts from Redis cache, sorted by display_order DESC."""
@@ -7026,84 +7055,505 @@ def _get_c_expense_category_by_name(account_id, category_name, user_id=None):
         cursor.close()
         return result['id'] if result else None
 
-def _get_bud_items_from_redis(user_id):
-    """Get bud_items from Redis."""
+def _get_bundle_category_for_account(user_id, account_id, bundle_id):
+    """Find a bundle's mirror category on one credit account, by id.
+
+    Replaces matching c_expense_categories.name against bundles.name. Name was
+    never a safe key: two bundles can share one, and c_expense_categories had
+    no uniqueness constraint, so both landed on a single category and their
+    spending merged.
+
+    Rows created before add_bundle_ids.sql ran, or by a version that did not
+    stamp bundle_id, still have it NULL. Those fall back to the name match, which
+    is what they were found by anyway - so this is no worse than before for
+    them, and exact for everything since.
+
+    Returns:
+        The c_expense_category id, or None.
+    """
+    if bundle_id is None:
+        return None
+
+    categories = _get_categories_from_redis('c_expense_categories', user_id)
+    if categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                """
+                SELECT c.* FROM c_expense_categories c
+                INNER JOIN credit_accounts a ON c.account_id = a.id
+                WHERE a.user_id = %s
+                """,
+                (user_id,)
+            )
+            categories = cursor.fetchall()
+            cursor.close()
+
+    account_cats = [c for c in categories
+                    if int(c.get('account_id', 0) or 0) == int(account_id)]
+
+    for cat in account_cats:
+        if cat.get('bundle_id') is not None and int(cat['bundle_id']) == int(bundle_id):
+            return cat.get('id')
+
+    # Legacy fallback: an unstamped mirror, found the old way.
+    all_bundles = _get_bundles_from_redis(user_id) or []
+    bundle_name = next((b.get('name') for b in all_bundles
+                     if int(b.get('id', 0) or 0) == int(bundle_id)), None)
+    if not bundle_name:
+        return None
+    for cat in account_cats:
+        if cat.get('name') == bundle_name and int(cat.get('is_bundle', 0) or 0) == 1:
+            return cat.get('id')
+    return None
+
+
+def _ensure_bundle_categories(user_id, bundle_row):
+    """Make sure a bundle has its budget category and a mirror on every card.
+
+    Activation used to create the budget category only, and mint the per-card
+    ones lazily the first time an item on that card was processed - so a card
+    added after activation never got one, and the item's spending fell through
+    to Uncategorized.
+
+    Redis-first throughout, and idempotent: safe to call on every activation
+    and from the repair pass.
+
+    Returns:
+        The bundle's expense_category id, or None if it could not be created.
+    """
+    bundle_id = int(bundle_row['id'])
+    bundle_name = bundle_row.get('name')
+    category_id = bundle_row.get('expense_category_id')
+
+    existing_cats = _get_categories_from_redis('expense_categories', user_id)
+    if existing_cats is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT * FROM expense_categories WHERE user_id = %s", (user_id,))
+            existing_cats = cursor.fetchall()
+            cursor.close()
+
+    # The budget category, if it has gone missing or was never made.
+    known = {int(c['id']) for c in existing_cats if c.get('id') is not None}
+    if not category_id or int(category_id) not in known:
+        display_order = _next_display_order(existing_cats, tier=1)
+        category_id = _add_category_to_redis(
+            'expense_categories', user_id,
+            {
+                'user_id': user_id,
+                'name': bundle_name,
+                'display_order': display_order,
+                'group_id': None,
+                'is_recurring': 0,
+                'no_end_date': 0,
+                'hidden': 0,
+                'is_bundle': 1,
+                'is_interest': 0,
+                'is_auto_adjustment': 0,
+                'is_system': 0,
+            }
+        )
+    else:
+        display_order = next(
+            (c.get('display_order') for c in existing_cats
+             if int(c['id']) == int(category_id)),
+            _next_display_order(existing_cats, tier=1)
+        )
+
+    if category_id is None:
+        return None
+
+    # And one mirror per card, stamped with the bundle id so it can be found
+    # again without going through the name.
+    _sync_expense_category_to_credit_accounts(
+        user_id, bundle_name, display_order, is_bundle=1, bundle_id=bundle_id
+    )
+    return category_id
+
+
+def _upgrade_bundles_for_user(user_id):
+    """Bring one user's bundles up to the current model. Idempotent.
+
+    Three things, all of which the migration also does - this is the safety net
+    for the seconds between the migration and the reload, when the outgoing
+    process is still flushing and can put a repaired row back:
+
+    1. Link mirror categories to their bundle where bundle_id is still NULL.
+    2. Give items a credit_account_id to go with their account name.
+    3. Reconcile every active bundle's plan, which is what converts the plain
+       entries written by the old code into buckets.
+
+    Step 3 is the one that matters to the user: until it runs, a bundle item is
+    a forecast that never reaches the confirmation prompt and never gets
+    depleted by the purchase it was predicting, so the money counts twice.
+    """
+    bundles = _get_bundles_from_redis(user_id)
+    if not bundles:
+        return
+
+    by_name = {}
+    for bundle in bundles:
+        by_name.setdefault((bundle.get('name') or '').strip().lower(), []).append(bundle)
+
+    # 1. Link unstamped mirrors, oldest bundle first where a name is ambiguous -
+    # the same rule the migration uses, so the two cannot disagree.
+    for cat in (_get_categories_from_redis('c_expense_categories', user_id) or []):
+        if cat.get('bundle_id') is not None or not cat.get('is_bundle'):
+            continue
+        candidates = by_name.get((cat.get('name') or '').strip().lower())
+        if not candidates:
+            # A mirror flagged as a bundle's with no bundle to match. Its
+            # entries are real spending, so it is demoted, not deleted.
+            _update_category_in_redis('c_expense_categories', user_id,
+                                      cat['id'], {'is_bundle': 0})
+            continue
+        _update_category_in_redis(
+            'c_expense_categories', user_id, cat['id'],
+            {'bundle_id': int(min(candidates, key=lambda b: int(b['id']))['id'])})
+
+    # 2. Items point at a card by id.
+    items = _get_bundle_items_from_redis(user_id)
+    if items:
+        changed = False
+        for item in items:
+            if item.get('credit_account_id') is not None:
+                continue
+            name = (item.get('account') or '').strip()
+            if not name or name.lower() in ('blankee', 'deleted account'):
+                continue
+            account_id = _get_credit_account_by_name(user_id, name)
+            if account_id:
+                item['credit_account_id'] = account_id
+                changed = True
+        if changed:
+            _set_bundle_items_to_redis(user_id, items)
+
+    # 3. Every active bundle's plan, on every (account, date) it touches.
+    items = _get_bundle_items_from_redis(user_id) or []
+    for bundle in bundles:
+        if int(bundle.get('active', 0) or 0) != 1:
+            continue
+        _ensure_bundle_categories(user_id, bundle)
+        keys = {
+            _bundle_plan_key(user_id, item) for item in items
+            if int(item.get('bundle_id', 0) or 0) == int(bundle['id'])
+        }
+        for account_id, plan_date in keys:
+            if plan_date is None:
+                continue
+            _sync_bundle_plan(user_id, bundle, account_id, plan_date)
+
+
+def _bundle_plan_key(user_id, item):
+    """The (account, date) a bundle item's money lands on.
+
+    account is the credit_account_id, or None for the cash budget. Items are
+    aggregated by this key because the bucket record tables carry
+    UNIQUE (category_id, bucket_date) - one plan per category per day, whatever
+    it is made of.
+    """
+    account = item.get('credit_account_id')
+    if account is None:
+        name = (item.get('account') or '').strip().lower()
+        if name and name not in ('blankee', 'deleted account'):
+            # An item written before credit_account_id existed. Resolving it
+            # here keeps old and new items in the same bucket.
+            account = _get_credit_account_by_name(user_id, item.get('account'))
+    item_date = item.get('date')
+    if isinstance(item_date, str):
+        item_date = datetime.strptime(item_date[:10], '%Y-%m-%d').date()
+    return (int(account) if account else None, item_date)
+
+
+def _sync_bundle_plan(user_id, bundle_row, account_id, plan_date):
+    """Make the budget match this bundle's items on one (account, date).
+
+    Replaces add_expense_entry_for_bundle_item and
+    update_expense_entry_for_bundle_item, which between them wrote plain entries
+    with no is_bucket, no original_amount, no processed and no paired bucket
+    record. A future-dated item was therefore an ordinary forecast: it never
+    reached the evening confirmation prompt, and when the real purchase was
+    later recorded in the same category there was no bucket for
+    process_manual_entry_with_bucket to deplete. update_daily_totals sums every
+    entry with no is_bucket filter, so the plan and the purchase both counted.
+
+    Idempotent. Called with the (account, date) keys affected by a change,
+    computed both before and after it, so moving an item's date tears the old
+    plan down as well as building the new one - which is what the old code
+    failed to do, leaving the amount in two places at once.
+
+    Args:
+        user_id: User ID
+        bundle_row: The bundle, as stored in Redis
+        account_id: credit_account_id, or None for the cash budget
+        plan_date: The date being reconciled
+    """
+    bundle_id = int(bundle_row['id'])
+
+    if account_id is None:
+        table = 'expense_entries'
+        category_id = bundle_row.get('expense_category_id')
+    else:
+        table = 'c_expense_entries'
+        category_id = _get_bundle_category_for_account(user_id, account_id, bundle_id)
+
+    if not category_id:
+        log_warning(app.logger, 'BUNDLE',
+                    f"No category for bundle {bundle_id} on account {account_id}; "
+                    f"nothing to reconcile for {plan_date}")
+        return
+
+    if isinstance(plan_date, str):
+        plan_date = datetime.strptime(plan_date[:10], '%Y-%m-%d').date()
+
+    # What the bundle plans for this account and date.
+    all_items = _get_bundle_items_from_redis(user_id) or []
+    members = [
+        item for item in all_items
+        if int(item.get('bundle_id', 0) or 0) == bundle_id
+        and _bundle_plan_key(user_id, item) == (account_id, plan_date)
+    ]
+
+    total = round(sum(float(m.get('value') or 0) for m in members), 2)
+    # Any member's id will do - it marks the row as a plan rather than as a
+    # purchase. The old code stamped only the first item's id and then used it
+    # as the teardown key, which is why every other item's share was stranded
+    # inside the aggregate; nothing here looks an item up by it.
+    stamp_item_id = int(members[0]['id']) if members else None
+
+    # The existing plan entry, if there is one. Found by scanning rather than
+    # through _update_entry_in_redis, whose legacy match compares bool(is_bucket)
+    # and so sails straight past an existing bucket and makes a second row on
+    # the same date.
+    entries = _get_entries_from_redis(table, user_id) or []
+    plan_entry = None
+    for entry in entries:
+        if int(entry.get('category_id', 0) or 0) != int(category_id):
+            continue
+        entry_date = entry.get('date')
+        if isinstance(entry_date, str):
+            entry_date = datetime.strptime(entry_date[:10], '%Y-%m-%d').date()
+        if entry_date != plan_date:
+            continue
+        # The plan is the entry this function wrote: a bucket, or a past-dated
+        # record stamped with one of the bundle's item ids. Anything else in
+        # this category is a purchase the user recorded against it - real money
+        # that moved - and editing a plan must not rewrite history.
+        #
+        # Testing "not a bucket and processed" instead would match the
+        # reconciler's own past-dated rows, so it could not find its previous
+        # work and would write a second entry on the same day.
+        is_bucket = int(entry.get('is_bucket', 0) or 0) == 1
+        stamped = entry.get('bundle_item_id') is not None
+        if not (is_bucket or stamped):
+            continue
+        plan_entry = entry
+        break
+
+    bucket_table = {
+        'expense_entries': 'recurring_expense_buckets',
+        'c_expense_entries': 'recurring_c_expense_buckets',
+    }[table]
+
+    if total <= 0:
+        # Nothing planned here any more.
+        if plan_entry is not None:
+            _delete_entry_in_redis(table, user_id, category_id, plan_date, plan_date,
+                                   specific_entry_id=plan_entry.get('id'))
+        return
+
+    is_forecast = plan_date >= _bucket_cutoff_date(user_id)
+
+    if is_forecast:
+        if plan_entry is None:
+            _create_bucket_entry_and_record(table, user_id, category_id, plan_date,
+                                            total, None, account_id=account_id)
+            _stamp_bundle_plan_entry(table, user_id, category_id, plan_date,
+                                     stamp_item_id)
+            return
+        if int(plan_entry.get('is_bucket', 0) or 0) != 1:
+            # An unprocessed plain entry: a plan written by the old code, or one
+            # whose date has moved forward past the cutoff. Replace it with a
+            # proper bucket rather than trying to convert it in place.
+            _delete_entry_in_redis(table, user_id, category_id, plan_date, plan_date,
+                                   specific_entry_id=plan_entry.get('id'))
+            _create_bucket_entry_and_record(table, user_id, category_id, plan_date,
+                                            total, None, account_id=account_id)
+            _stamp_bundle_plan_entry(table, user_id, category_id, plan_date,
+                                     stamp_item_id)
+            return
+
+        # An existing bucket whose planned amount has changed. Restated in
+        # place, keeping whatever has already been spent against it.
+        from recurring_bucket_manager import set_bucket_record_amount
+        spent = (float(plan_entry.get('original_amount') or 0)
+                 - float(plan_entry.get('amount') or 0))
+        _update_entry_in_redis(table, user_id, category_id, plan_date,
+                               round(total - spent, 2),
+                               processed=0, entry_id=plan_entry.get('id'),
+                               is_bucket=True, original_amount=total,
+                               match_entry_id=plan_entry.get('id'))
+        set_bucket_record_amount(bucket_table, category_id, plan_date, total, user_id)
+        return
+
+    # In the past, so it is a record rather than a forecast. No depletion: the
+    # only buckets inside a bundle category are other items' plans, and one
+    # item's spending must not eat another's.
+    if plan_entry is not None and int(plan_entry.get('is_bucket', 0) or 0) == 1:
+        _delete_entry_in_redis(table, user_id, category_id, plan_date, plan_date,
+                               specific_entry_id=plan_entry.get('id'))
+        plan_entry = None
+
+    _update_entry_in_redis(table, user_id, category_id, plan_date, total,
+                           processed=1, is_bucket=False,
+                           bundle_item_id=stamp_item_id,
+                           entry_id=plan_entry.get('id') if plan_entry else None,
+                           match_entry_id=plan_entry.get('id') if plan_entry else None)
+
+
+def _is_bundle_category_id(user_id, entry_table, category_id):
+    """Is this category one a bundle created? Thin wrapper over bucket_utils."""
+    try:
+        from bucket_utils import _is_bundle_category
+        return _is_bundle_category(entry_table, category_id, user_id)
+    except Exception:
+        return False
+
+
+def _bundle_has_live_bucket(user_id, bundle_row):
+    """Does this bundle still have an unconfirmed bucket anywhere?
+
+    Its own categories only - the budget one and every mirror - because a
+    bucket in some other category is somebody else's business.
+    """
+    bundle_id = int(bundle_row['id'])
+    category_ids = {('expense_entries', int(bundle_row['expense_category_id']))} \
+        if bundle_row.get('expense_category_id') else set()
+
+    for cat in (_get_categories_from_redis('c_expense_categories', user_id) or []):
+        if cat.get('bundle_id') is not None and int(cat['bundle_id']) == bundle_id:
+            category_ids.add(('c_expense_entries', int(cat['id'])))
+
+    for table in ('expense_entries', 'c_expense_entries'):
+        wanted = {cid for tbl, cid in category_ids if tbl == table}
+        if not wanted:
+            continue
+        for entry in (_get_entries_from_redis(table, user_id) or []):
+            if (int(entry.get('category_id', 0) or 0) in wanted
+                    and int(entry.get('is_bucket', 0) or 0) == 1):
+                return True
+    return False
+
+
+def _stamp_bundle_plan_entry(table, user_id, category_id, plan_date, bundle_item_id):
+    """Mark an entry as a bundle plan.
+
+    _create_bucket_entry_and_record is shared with recurring entries and takes
+    no bundle_item_id, so the stamp is applied afterwards rather than by forking
+    the helper.
+    """
+    if bundle_item_id is None or not app.config.get('REDIS_OK'):
+        return
+    entries = _get_entries_from_redis(table, user_id)
+    if not entries:
+        return
+    if isinstance(plan_date, str):
+        plan_date = datetime.strptime(plan_date[:10], '%Y-%m-%d').date()
+
+    changed = False
+    for entry in entries:
+        if int(entry.get('category_id', 0) or 0) != int(category_id):
+            continue
+        entry_date = entry.get('date')
+        if isinstance(entry_date, str):
+            entry_date = datetime.strptime(entry_date[:10], '%Y-%m-%d').date()
+        if entry_date == plan_date and int(entry.get('is_bucket', 0) or 0) == 1:
+            entry['bundle_item_id'] = int(bundle_item_id)
+            changed = True
+    if changed:
+        _set_entries_to_redis(table, user_id, entries)
+
+
+def _get_bundle_items_from_redis(user_id):
+    """Get bundle_items from Redis."""
     if not app.config.get('REDIS_OK'):
         return None
     try:
-        redis_key = f"bud_items:v1:{user_id}"
+        redis_key = f"bundle_items:v1:{user_id}"
         cached = _redis_client.get(redis_key)
         return json.loads(cached) if cached else None
     except Exception as e:
-        log_error(app.logger, 'BUD', f"Error getting bud_items from Redis: {e}")
+        log_error(app.logger, 'BUNDLE', f"Error getting bundle_items from Redis: {e}")
         return None
 
-def _set_bud_items_to_redis(user_id, data):
-    """Set bud_items to Redis and mark dirty for flush."""
+def _set_bundle_items_to_redis(user_id, data):
+    """Set bundle_items to Redis and mark dirty for flush."""
     if not app.config.get('REDIS_OK'):
         return
     try:
-        redis_key = f"bud_items:v1:{user_id}"
+        redis_key = f"bundle_items:v1:{user_id}"
         _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(data, cls=DecimalEncoder))
         dirty_key = f"dirty_tables:{user_id}"
-        _redis_client.sadd(dirty_key, 'bud_items')
+        _redis_client.sadd(dirty_key, 'bundle_items')
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
     except Exception as e:
-        log_error(app.logger, 'BUD', f"Error setting bud_items to Redis: {e}")
+        log_error(app.logger, 'BUNDLE', f"Error setting bundle_items to Redis: {e}")
 
-def _update_bud_item_in_redis(user_id, bud_item_data):
-    """Update or insert a single bud_item record in Redis cache."""
+def _update_bundle_item_in_redis(user_id, bundle_item_data):
+    """Update or insert a single bundle_item record in Redis cache."""
     if not app.config.get('REDIS_OK'):
         return None
     try:
-        redis_key = f"bud_items:v1:{user_id}"
+        redis_key = f"bundle_items:v1:{user_id}"
         cached = _redis_client.get(redis_key)
         rows = json.loads(cached) if cached else []
         
-        item_id = bud_item_data.get('id')
+        item_id = bundle_item_data.get('id')
         if item_id:
             found = False
             for i, row in enumerate(rows):
                 if int(row.get('id')) == int(item_id):
-                    rows[i] = bud_item_data
+                    rows[i] = bundle_item_data
                     found = True
                     break
             if not found:
-                rows.append(bud_item_data)
+                rows.append(bundle_item_data)
         else:
             temp_id = -int(time.time() * 1000000)
-            bud_item_data['id'] = temp_id
-            rows.append(bud_item_data)
+            bundle_item_data['id'] = temp_id
+            rows.append(bundle_item_data)
         
         _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
         dirty_key = f"dirty_tables:{user_id}"
-        _redis_client.sadd(dirty_key, 'bud_items')
+        _redis_client.sadd(dirty_key, 'bundle_items')
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-        return bud_item_data['id']
+        return bundle_item_data['id']
     except Exception as e:
-        log_error(app.logger, 'BUD', f"Error updating bud_item in Redis: {e}")
+        log_error(app.logger, 'BUNDLE', f"Error updating bundle_item in Redis: {e}")
         return None
 
-def _delete_bud_item_in_redis(user_id, item_id):
-    """Delete a bud_item record from Redis cache."""
+def _delete_bundle_item_in_redis(user_id, item_id):
+    """Delete a bundle_item record from Redis cache."""
     if not app.config.get('REDIS_OK'):
         return
     try:
-        redis_key = f"bud_items:v1:{user_id}"
+        redis_key = f"bundle_items:v1:{user_id}"
         cached = _redis_client.get(redis_key)
         if cached:
             rows = json.loads(cached)
             rows = [row for row in rows if int(row.get('id')) != int(item_id)]
             _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
         
-        pending_key = f"pending_deletes:bud_items:{user_id}"
+        pending_key = f"pending_deletes:bundle_items:{user_id}"
         _redis_client.sadd(pending_key, str(item_id))
         _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
         dirty_key = f"dirty_tables:{user_id}"
-        _redis_client.sadd(dirty_key, 'bud_items')
+        _redis_client.sadd(dirty_key, 'bundle_items')
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
     except Exception as e:
-        log_error(app.logger, 'BUD', f"Error deleting bud_item from Redis: {e}")
+        log_error(app.logger, 'BUNDLE', f"Error deleting bundle_item from Redis: {e}")
 
 def update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder):
     with get_db_pool().get_connection() as conn:
@@ -9373,7 +9823,7 @@ def add_expense_category():
         'is_auto_adjustment': 0,
         'no_end_date': 0,
         'hidden': 0,
-        'is_bud': 0,
+        'is_bundle': 0,
         'is_credit_account': 0,
         'is_system': 0
     }
@@ -9757,7 +10207,7 @@ def dashboard():
         if expense_categories is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT id, name, is_auto_adjustment, hidden, is_bud, is_recurring, is_credit_account
+                SELECT id, name, is_auto_adjustment, hidden, is_bundle, is_recurring, is_credit_account
                 FROM expense_categories
                 WHERE user_id = %s
                 ORDER BY display_order DESC
@@ -9884,7 +10334,7 @@ def dashboard():
         if raw_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id, ee.bud_item_id, ee.pending, ee.auto_confirmed
+                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id, ee.bundle_item_id, ee.pending, ee.auto_confirmed
                 FROM expense_entries ee
                 WHERE ee.category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
             """, (current_user.id,))
@@ -9964,7 +10414,7 @@ def dashboard():
         if raw_c_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount, cee.original_date, cee.recurring_id, cee.bud_item_id, cee.pending, cee.auto_confirmed
+                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount, cee.original_date, cee.recurring_id, cee.bundle_item_id, cee.pending, cee.auto_confirmed
                 FROM c_expense_entries cee
                 JOIN c_expense_categories cec ON cee.category_id = cec.id
                 JOIN credit_accounts ca ON cec.account_id = ca.id
@@ -10072,13 +10522,13 @@ def dashboard():
         else:
             pass
 
-        # Fetch buds
+        # Fetch bundles
         cursor.execute("""
             SELECT b.id, b.expense_category_id
-            FROM buds b
+            FROM bundles b
             WHERE b.user_id = %s
         """, (current_user.id,))
-        buds = cursor.fetchall()
+        bundles = cursor.fetchall()
 
         # Fetch credit accounts - try Redis first
         credit_accounts = _get_credit_accounts_from_redis(current_user.id)
@@ -10196,7 +10646,7 @@ def dashboard():
         savings_entries=savings_entries,
         member_since=member_since,
         landing_page=landing_page,
-        buds=buds,
+        bundles=bundles,
         currency_type=currency_type,
         credit_accounts=credit_accounts,
         c_expense_categories=c_expense_categories,
@@ -12513,7 +12963,7 @@ def dashboard_3m():
         if expense_categories is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT id, name, is_auto_adjustment, hidden, is_bud, is_recurring, is_credit_account
+                SELECT id, name, is_auto_adjustment, hidden, is_bundle, is_recurring, is_credit_account
                 FROM expense_categories
                 WHERE user_id = %s
                 ORDER BY display_order DESC
@@ -12619,7 +13069,7 @@ def dashboard_3m():
         if raw_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id, ee.bud_item_id, ee.pending, ee.auto_confirmed
+                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.processed, ee.is_bucket, ee.original_amount, ee.original_date, ee.recurring_id, ee.bundle_item_id, ee.pending, ee.auto_confirmed
                 FROM expense_entries ee
                 WHERE ee.category_id IN (SELECT id FROM expense_categories WHERE user_id = %s)
             """, (current_user.id,))
@@ -12696,7 +13146,7 @@ def dashboard_3m():
         if raw_c_expense_entries is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount, cee.original_date, cee.recurring_id, cee.bud_item_id, cee.pending, cee.auto_confirmed
+                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.processed, cee.is_bucket, cee.original_amount, cee.original_date, cee.recurring_id, cee.bundle_item_id, cee.pending, cee.auto_confirmed
                 FROM c_expense_entries cee
                 JOIN c_expense_categories cec ON cee.category_id = cec.id
                 JOIN credit_accounts ca ON cec.account_id = ca.id
@@ -12801,13 +13251,13 @@ def dashboard_3m():
         else:
             pass
 
-        # Fetch Buds
+        # Fetch Bundles
         cursor.execute("""
             SELECT b.id, b.expense_category_id
-            FROM buds b
+            FROM bundles b
             WHERE b.user_id = %s
         """, (current_user.id,))
-        buds = cursor.fetchall()
+        bundles = cursor.fetchall()
 
         # Fetch credit accounts - try Redis first
         credit_accounts = _get_credit_accounts_from_redis(current_user.id)
@@ -12927,7 +13377,7 @@ def dashboard_3m():
         savings_entries=savings_entries,
         member_since=member_since,
         landing_page=landing_page,
-        buds=buds,
+        bundles=bundles,
         currency_type=currency_type,
         credit_accounts=credit_accounts,
         c_expense_categories=c_expense_categories,
@@ -13366,7 +13816,7 @@ def dashboard_m():
         if expense_categories is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT id, name, is_auto_adjustment, hidden, is_bud, is_recurring, is_credit_account
+                SELECT id, name, is_auto_adjustment, hidden, is_bundle, is_recurring, is_credit_account
                 FROM expense_categories
                 WHERE user_id = %s
                 ORDER BY display_order DESC
@@ -13725,7 +14175,7 @@ def dashboard_y():
         if expense_categories is None:
             # Redis miss - fallback to MySQL
             cursor.execute("""
-                SELECT id, name, is_auto_adjustment, hidden, is_bud, is_recurring, is_credit_account
+                SELECT id, name, is_auto_adjustment, hidden, is_bundle, is_recurring, is_credit_account
                 FROM expense_categories
                 WHERE user_id = %s
                 ORDER BY display_order DESC
@@ -14048,7 +14498,7 @@ def dashboard_summary():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                SELECT id, name, is_recurring, hidden, is_bud
+                SELECT id, name, is_recurring, hidden, is_bundle
                 FROM expense_categories
                 WHERE user_id = %s
                 ORDER BY display_order DESC
@@ -14093,7 +14543,7 @@ def dashboard_summary():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                SELECT cec.id, cec.account_id, cec.name, cec.is_recurring, cec.hidden, cec.is_bud, ca.name as account_name
+                SELECT cec.id, cec.account_id, cec.name, cec.is_recurring, cec.hidden, cec.is_bundle, ca.name as account_name
                 FROM c_expense_categories cec
                 JOIN credit_accounts ca ON cec.account_id = ca.id
                 WHERE ca.user_id = %s
@@ -14176,7 +14626,7 @@ def dashboard_summary():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                SELECT id, name, is_recurring, hidden, is_bud
+                SELECT id, name, is_recurring, hidden, is_bundle
                 FROM income_categories
                 WHERE user_id = %s
                 ORDER BY display_order DESC
@@ -14758,7 +15208,7 @@ def widget_day_box():
                 income_categories = list(cursor.fetchall())
             if expense_categories is None:
                 cursor.execute(
-                    "SELECT id, name, is_auto_adjustment, hidden, is_bud, is_recurring, "
+                    "SELECT id, name, is_auto_adjustment, hidden, is_bundle, is_recurring, "
                     "is_credit_account, is_savings FROM expense_categories WHERE user_id = %s", (user_id,)
                 )
                 expense_categories = list(cursor.fetchall())
@@ -14786,7 +15236,11 @@ def widget_day_box():
             return 'starting-balance'
         if not cat:
             return 'folder'
-        if cat.get('is_bud'):
+        if cat.get('is_bundle'):
+            # Deliberately still 'bud', not 'bundle'. This string is sent to the
+            # iOS widget, which is versioned separately and matches the literal;
+            # renaming it here would silently blank the icon for anyone who has
+            # not updated. It changes when the client can accept both.
             return 'bud'
         if cat.get('is_credit_account') and cat.get('is_recurring'):
             return 'credit-recurring'
@@ -16400,8 +16854,13 @@ def confirm_transaction():
                 # Reduce bucket for the new category (only if not already reduced by auto-confirm to same category)
                 if not was_auto_confirmed or old_category_id != category_id:
                     new_recurring_info = _get_recurring_info_from_redis(recurring_table, current_user.id, category_id)
-                    if new_recurring_info:
-                        log_info(app.logger, 'CONFIRM_TXN', f"Category {category_id} is recurring, processing bucket reduction")
+                    # A bundle category has no recurring record, so gating on one
+                    # skipped bundles entirely - the bucket was never depleted and
+                    # the plan and the purchase both counted. Passing None lets
+                    # process_manual_entry_with_bucket look the wage_bill up,
+                    # which answers 1 for a bundle.
+                    if new_recurring_info or _is_bundle_category_id(current_user.id, table_name, category_id):
+                        log_info(app.logger, 'CONFIRM_TXN', f"Category {category_id} has buckets, processing reduction")
                         process_manual_entry_with_bucket(
                             table_name, category_id, entry_date,
                             entry_amount, current_user.id, new_recurring_info
@@ -16604,8 +17063,12 @@ def confirm_all_transactions():
                     recurring_info = _get_recurring_info_from_redis(
                         recurring_table, current_user.id, reduction['category_id']
                     )
-                    if recurring_info and reduction['date'] and reduction['amount']:
-                        log_info(app.logger, 'CONFIRM_ALL', f"Category {reduction['category_id']} is recurring, processing bucket")
+                    # As above: a bundle has buckets without having a recurring
+                    # record, and gating on one skipped it.
+                    has_buckets = recurring_info or _is_bundle_category_id(
+                        current_user.id, table_name, reduction['category_id'])
+                    if has_buckets and reduction['date'] and reduction['amount']:
+                        log_info(app.logger, 'CONFIRM_ALL', f"Category {reduction['category_id']} has buckets, processing")
                         process_manual_entry_with_bucket(
                             table_name, reduction['category_id'], reduction['date'],
                             reduction['amount'], current_user.id, recurring_info
@@ -17227,12 +17690,14 @@ def _hidden_email_kinds(user_id):
     to recognise them, because the code that sends them has not gone anywhere.
     This only decides what is worth showing a switch for.
 
-      buds                  held back for now
       pending_transactions  only reachable with a bank feed, and a switch for
                             something that can never fire reads as a feature the
                             user is missing out on
+
+    Bundles used to be hidden here while the feature was parked. It is on the
+    menu again, so its switch belongs with the others.
     """
-    hidden = {'buds'}
+    hidden = set()
     try:
         from bank_redis import get_linked_accounts
         if not get_linked_accounts(user_id):
@@ -19862,7 +20327,7 @@ def add_recurring_expense():
                 'is_auto_adjustment': 0,
                 'no_end_date': no_end_date,
                 'hidden': 0,
-                'is_bud': 0,
+                'is_bundle': 0,
                 'is_credit_account': 0,
                 'is_system': 0
             }
@@ -20607,7 +21072,7 @@ def recurring_ca_expense():
         # Fetch ALL c_expense_categories for the searchable category dropdown
         cursor.execute("""
             SELECT cec.id, cec.account_id, cec.name, cec.display_order, cec.is_recurring, cec.hidden,
-                   cec.is_interest, cec.is_auto_adjustment, cec.is_bud
+                   cec.is_interest, cec.is_auto_adjustment, cec.is_bundle
             FROM c_expense_categories cec
             WHERE cec.account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
             ORDER BY cec.account_id, cec.display_order DESC
@@ -21272,77 +21737,86 @@ def update_recurring_ca_expense_inner(data, user_id):
         return jsonify({'status': 'error', 'message': f'An error occurred: {str(e)}'}), 500
 
 ####################################################################################
-##################################### BUDS #########################################
+##################################### BUNDLES #########################################
 ####################################################################################
 
-@app.route('/buds')
+@app.route('/bundles')
 @login_required
-def buds():
-    bud_id = request.args.get('bud_id', type=int)
+def bundles():
+    bundle_id = request.args.get('bundle_id', type=int)
 
-    # Try Redis first for buds
-    buds_list = _get_buds_from_redis(current_user.id)
-    if buds_list is None:
+    # Bring this user's existing bundles up to the current model before the
+    # page reads them. Idempotent, and cheap once there is nothing to do.
+    try:
+        _upgrade_bundles_for_user(current_user.id)
+    except Exception as e:
+        # A page that will not load is worse than one showing un-upgraded data,
+        # which is what every version until now showed anyway.
+        log_error(app.logger, 'BUNDLE', f"Bundle upgrade pass failed: {e}")
+
+    # Try Redis first for bundles
+    bundles_list = _get_bundles_from_redis(current_user.id)
+    if bundles_list is None:
         # Fallback to MySQL
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
                 SELECT b.id, b.name, b.expense_category_id, b.created_at, b.active, ec.name AS category_name
-                FROM buds b
+                FROM bundles b
                 LEFT JOIN expense_categories ec ON b.expense_category_id = ec.id
                 WHERE b.user_id = %s
                 ORDER BY b.created_at DESC
             """, (current_user.id,))
-            buds_list = cursor.fetchall()
+            bundles_list = cursor.fetchall()
             cursor.close()
     else:
-        # Ensure buds from Redis have category_name field for template compatibility
-        for bud in buds_list:
-            if 'category_name' not in bud:
-                bud['category_name'] = None
+        # Ensure bundles from Redis have category_name field for template compatibility
+        for bundle in bundles_list:
+            if 'category_name' not in bundle:
+                bundle['category_name'] = None
 
-    # Determine selected bud
-    selected_bud = None
-    if buds_list:
-        if bud_id:
-            selected_bud = next((bud for bud in buds_list if int(bud['id']) == bud_id), buds_list[0])
+    # Determine selected bundle
+    selected_bundle = None
+    if bundles_list:
+        if bundle_id:
+            selected_bundle = next((bundle for bundle in bundles_list if int(bundle['id']) == bundle_id), bundles_list[0])
         else:
-            selected_bud = buds_list[0]
+            selected_bundle = bundles_list[0]
 
-    # Try Redis first for bud_items
-    all_bud_items = _get_bud_items_from_redis(current_user.id)
-    if all_bud_items is None:
-        # Fallback to MySQL - get ALL bud_items for this user's buds
+    # Try Redis first for bundle_items
+    all_bundle_items = _get_bundle_items_from_redis(current_user.id)
+    if all_bundle_items is None:
+        # Fallback to MySQL - get ALL bundle_items for this user's bundles
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                SELECT bi.* FROM bud_items bi
-                INNER JOIN buds b ON bi.bud_id = b.id
+                SELECT bi.* FROM bundle_items bi
+                INNER JOIN bundles b ON bi.bundle_id = b.id
                 WHERE b.user_id = %s
                 ORDER BY bi.id DESC
             """, (current_user.id,))
-            all_bud_items = cursor.fetchall()
+            all_bundle_items = cursor.fetchall()
             cursor.close()
 
-    # Ensure all_bud_items is at least an empty list
-    if all_bud_items is None:
-        all_bud_items = []
+    # Ensure all_bundle_items is at least an empty list
+    if all_bundle_items is None:
+        all_bundle_items = []
 
-    # Group all bud_items by bud_id for all buds
-    bud_items_by_bud = {}
-    if buds_list:
-        # Create a set of valid bud IDs for quick lookup
-        valid_bud_ids = {int(bud['id']) for bud in buds_list}
+    # Group all bundle_items by bundle_id for all bundles
+    bundle_items_by_bundle = {}
+    if bundles_list:
+        # Create a set of valid bundle IDs for quick lookup
+        valid_bundle_ids = {int(bundle['id']) for bundle in bundles_list}
         
-        for bud in buds_list:
-            bud_items = [item for item in all_bud_items if int(item['bud_id']) == int(bud['id'])]
-            bud_items_by_bud[bud['id']] = bud_items
+        for bundle in bundles_list:
+            bundle_items = [item for item in all_bundle_items if int(item['bundle_id']) == int(bundle['id'])]
+            bundle_items_by_bundle[bundle['id']] = bundle_items
         
-        # Check for orphaned bud_items (items with bud_id not in buds_list)
-        orphaned_items = [item for item in all_bud_items if int(item['bud_id']) not in valid_bud_ids]
+        # Check for orphaned bundle_items (items with bundle_id not in bundles_list)
+        orphaned_items = [item for item in all_bundle_items if int(item['bundle_id']) not in valid_bundle_ids]
         if orphaned_items:
             pass
-            # Optionally: add orphaned items to a special "Orphaned Items" bud for visibility
+            # Optionally: add orphaned items to a special "Orphaned Items" bundle for visibility
             # For now, we just log them
 
     # Fetch other data from MySQL (categories, accounts, user settings)
@@ -21376,95 +21850,126 @@ def buds():
         cursor.close()
 
     return render_template(
-        'buds.html',
-        buds=buds_list,
-        selected_bud=selected_bud,
-        bud_items_by_bud=bud_items_by_bud,
+        'bundles.html',
+        bundles=bundles_list,
+        selected_bundle=selected_bundle,
+        bundle_items_by_bundle=bundle_items_by_bundle,
         expense_categories=expense_categories,
         credit_accounts=credit_accounts,
         landing_page=landing_page,
         currency_type=currency_type
     )
 
-@app.route('/add-bud', methods=['POST'])
+@app.route('/add-bundle', methods=['POST'])
 @login_required
-def add_bud():
+def add_bundle():
     data = request.get_json()
-    bud_name = data.get('name', '').strip()
-    if not bud_name:
-        return jsonify({'status': 'error', 'message': 'Bud name required.'}), 400
+    bundle_name = data.get('name', '').strip()
+    if not bundle_name:
+        return jsonify({'status': 'error', 'message': 'Bundle name required.'}), 400
+
+    # A bundle mints an expense category of the same name when it is activated.
+    # Nothing checked for a clash, so a bundle named after an existing category
+    # produced two categories with one name - and then the rename and delete
+    # syncs, which match on name, could not tell them apart.
+    existing_cats = _get_categories_from_redis('expense_categories', current_user.id)
+    if existing_cats is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT name FROM expense_categories WHERE user_id = %s",
+                (current_user.id,)
+            )
+            existing_cats = cursor.fetchall()
+            cursor.close()
+    clash = next((c for c in existing_cats
+                  if (c.get('name') or '').strip().lower() == bundle_name.lower()), None)
+    if clash:
+        return jsonify({
+            'status': 'error',
+            'message': f"You already have an expense category called '{bundle_name}'. "
+                       "Pick a different name."
+        }), 400
 
     # Insert to MySQL first to get real ID
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("""
-            INSERT INTO buds (user_id, name, expense_category_id, active, created_at)
+            INSERT INTO bundles (user_id, name, expense_category_id, active, created_at)
             VALUES (%s, %s, NULL, 0, NOW())
-        """, (current_user.id, bud_name))
-        new_bud_id = cursor.lastrowid
+        """, (current_user.id, bundle_name))
+        new_bundle_id = cursor.lastrowid
         conn.commit()
         cursor.close()
 
-    # Create bud data for Redis
-    bud_data = {
-        'id': new_bud_id,
+    # Create bundle data for Redis
+    bundle_data = {
+        'id': new_bundle_id,
         'user_id': current_user.id,
-        'name': bud_name,
+        'name': bundle_name,
         'expense_category_id': None,
         'active': 0,
         'created_at': datetime.now().isoformat()
     }
 
     # Add to Redis
-    _update_bud_in_redis(current_user.id, bud_data)
+    _update_bundle_in_redis(current_user.id, bundle_data)
 
-    return jsonify({'status': 'success', 'bud_id': new_bud_id})
+    return jsonify({'status': 'success', 'bundle_id': new_bundle_id})
 
-@app.route('/add-bud-item', methods=['POST'])
+@app.route('/add-bundle-item', methods=['POST'])
 @login_required
-def add_bud_item():
+def add_bundle_item():
     data = request.get_json()
     name = data.get('name', '').strip()
     value = data.get('value', None)
     date_val = data.get('date', None)
-    bud_id = int(data.get('bud_id', 0))
+    bundle_id = int(data.get('bundle_id', 0))
     active = int(data.get('active', 0))
     account = data.get('account', '').strip()
 
-    if not name or not value or not date_val or not bud_id:
+    if not name or not value or not date_val or not bundle_id:
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
 
-    # Validate that the bud exists before creating the item
-    buds = _get_buds_from_redis(current_user.id)
-    if buds is None:
+    # Validate that the bundle exists before creating the item
+    bundles = _get_bundles_from_redis(current_user.id)
+    if bundles is None:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT id FROM buds WHERE user_id = %s AND id = %s", (current_user.id, bud_id))
-            bud_exists = cursor.fetchone()
+            cursor.execute("SELECT id FROM bundles WHERE user_id = %s AND id = %s", (current_user.id, bundle_id))
+            bundle_exists = cursor.fetchone()
             cursor.close()
-            if not bud_exists:
-                return jsonify({'status': 'error', 'message': 'Parent bud not found'}), 404
+            if not bundle_exists:
+                return jsonify({'status': 'error', 'message': 'Parent bundle not found'}), 404
     else:
-        bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
-        if not bud:
-            return jsonify({'status': 'error', 'message': 'Parent bud not found'}), 404
+        bundle = next((b for b in bundles if int(b['id']) == int(bundle_id)), None)
+        if not bundle:
+            return jsonify({'status': 'error', 'message': 'Parent bundle not found'}), 404
+
+    # Resolve the card once, here, and store its id alongside the name. The
+    # name stays for now because a lot of code still reads it; the id is what
+    # survives the card being renamed.
+    credit_account_id = None
+    if account and account.lower() not in ('blankee', 'deleted account'):
+        credit_account_id = _get_credit_account_by_name(current_user.id, account)
 
     # Insert to MySQL first to get real ID
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("""
-            INSERT INTO bud_items (bud_id, account, name, value, date, description)
-            VALUES (%s, %s, %s, %s, %s, NULL)
-        """, (bud_id, account, name, float(value), date_val))
+            INSERT INTO bundle_items (bundle_id, account, credit_account_id, name, value, date, description)
+            VALUES (%s, %s, %s, %s, %s, %s, NULL)
+        """, (bundle_id, account, credit_account_id, name, float(value), date_val))
         new_item_id = cursor.lastrowid
         conn.commit()
         cursor.close()
 
-    # Create bud_item data for Redis
-    bud_item_data = {
+    # Create bundle_item data for Redis
+    bundle_item_data = {
         'id': new_item_id,
-        'bud_id': bud_id,
+        'bundle_id': bundle_id,
         'account': account,
+        'credit_account_id': credit_account_id,
         'name': name,
         'value': float(value),
         'date': date_val,
@@ -21472,123 +21977,26 @@ def add_bud_item():
     }
 
     # Add to Redis
-    _update_bud_item_in_redis(current_user.id, bud_item_data)
+    _update_bundle_item_in_redis(current_user.id, bundle_item_data)
 
     # Only add expense entry if active flag is set
     if active:
-        # Need to use MySQL for expense entry creation (existing pattern)
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            add_expense_entry_for_bud_item(cursor, bud_id, new_item_id, value, date_val)
-            conn.commit()
-            cursor.close()
+        bundle_row = next((b for b in (_get_bundles_from_redis(current_user.id) or [])
+                        if int(b['id']) == int(bundle_id)), None)
+        if bundle_row:
+            account_key, date_key = _bundle_plan_key(current_user.id, bundle_item_data)
+            _sync_bundle_plan(current_user.id, bundle_row, account_key, date_key)
 
     if active:
+    # save_ca_daily_balance alone only refreshes the card. Money on the budget
+    # side needs the running totals recomputed too, or the balance trend keeps
+    # showing the old numbers until an unrelated edit happens to refresh it.
+        save_totals_remainders_d()
         save_ca_daily_balance()
-        # Check if all bud items are in the past and hide category if so
-        check_and_hide_bud_category(bud_id)
+        # Check if all bundle items are in the past and hide category if so
+        check_and_hide_bundle_category(bundle_id)
     
     return jsonify({'status': 'success', 'item_id': new_item_id})
-
-def add_expense_entry_for_bud_item(cursor, bud_id, bud_item_id, value, date_val):
-    # Ensure date_val is a date object for comparison
-    if isinstance(date_val, str):
-        date_val_obj = datetime.strptime(date_val, '%Y-%m-%d').date()
-    else:
-        date_val_obj = date_val
-    
-    # Get bud_item account - try Redis first
-    bud_items = _get_bud_items_from_redis(current_user.id)
-    if bud_items:
-        bud_item = next((item for item in bud_items if int(item['id']) == int(bud_item_id)), None)
-        account = bud_item['account'] if bud_item else "Blankee"
-    else:
-        cursor.execute("SELECT account FROM bud_items WHERE id = %s", (bud_item_id,))
-        bud_item_row = cursor.fetchone()
-        account = bud_item_row['account'] if bud_item_row else "Blankee"
-
-    # Get bud info - try Redis first
-    buds = _get_buds_from_redis(current_user.id)
-    if buds:
-        bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
-        bud_name = bud['name'] if bud else "Bud"
-        expense_category_id = bud.get('expense_category_id') if bud else None
-    else:
-        cursor.execute("SELECT name, expense_category_id FROM buds WHERE id = %s", (bud_id,))
-        bud_row = cursor.fetchone()
-        bud_name = bud_row['name'] if bud_row else "Bud"
-        expense_category_id = bud_row['expense_category_id'] if bud_row else None
-
-    if account.lower() == "blankee":
-        if expense_category_id:
-            # Check if entry exists for this date and category, add to it if so
-            expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
-            existing_entry = None
-            if expense_entries:
-                for e in expense_entries:
-                    e_date = e.get('date')
-                    if isinstance(e_date, str):
-                        e_date = datetime.strptime(e_date, '%Y-%m-%d').date()
-                    if int(e.get('category_id', 0) or 0) == int(expense_category_id) and e_date == date_val_obj:
-                        existing_entry = e
-                        break
-            
-            if existing_entry:
-                # Add to existing entry - preserve original bud_item_id
-                new_amount = float(existing_entry.get('amount', 0)) + float(value)
-                original_bud_item_id = existing_entry.get('bud_item_id')
-                _update_entry_in_redis('expense_entries', current_user.id, expense_category_id, date_val, new_amount, bud_item_id=original_bud_item_id)
-            else:
-                # Create new entry
-                _update_entry_in_redis('expense_entries', current_user.id, expense_category_id, date_val, float(value), bud_item_id=bud_item_id)
-    else:
-        cursor.execute(
-            "SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s",
-            (current_user.id, account)
-        )
-        ca_row = cursor.fetchone()
-        if ca_row:
-            account_id = ca_row['id']
-            # Use the bud's name for the category
-            cursor.execute(
-                "SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s",
-                (account_id, bud_name)
-            )
-            cat_row = cursor.fetchone()
-            if not cat_row:
-                cursor.execute(
-                    "SELECT COALESCE(MAX(display_order), 1.0) AS max_do FROM c_expense_categories WHERE account_id = %s AND FLOOR(display_order) = 1",
-                    (account_id,)
-                )
-                max_order = cursor.fetchone()
-                display_order = round(float(max_order['max_do']) + 0.0001, 4) if max_order and max_order['max_do'] is not None else 1.0001
-                cursor.execute(
-                    "INSERT INTO c_expense_categories (account_id, name, display_order, is_bud, is_system) VALUES (%s, %s, %s, 1, 0)",
-                    (account_id, bud_name, display_order)
-                )
-                category_id = cursor.lastrowid
-            else:
-                category_id = cat_row['id']
-            # Check if entry exists for this date and category, add to it if so
-            c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
-            existing_entry = None
-            if c_expense_entries:
-                for e in c_expense_entries:
-                    e_date = e.get('date')
-                    if isinstance(e_date, str):
-                        e_date = datetime.strptime(e_date, '%Y-%m-%d').date()
-                    if int(e.get('category_id', 0) or 0) == int(category_id) and e_date == date_val_obj:
-                        existing_entry = e
-                        break
-            
-            if existing_entry:
-                # Add to existing entry - preserve original bud_item_id
-                new_amount = float(existing_entry.get('amount', 0)) + float(value)
-                original_bud_item_id = existing_entry.get('bud_item_id')
-                _update_entry_in_redis('c_expense_entries', current_user.id, category_id, date_val, new_amount, bud_item_id=original_bud_item_id)
-            else:
-                # Create new entry
-                _update_entry_in_redis('c_expense_entries', current_user.id, category_id, date_val, float(value), bud_item_id=bud_item_id)
 
 def upsert_device_token(user_id, device_token, platform='ios', device_info=None):
     """Store or update a device token for push notifications."""
@@ -21988,61 +22396,71 @@ def check_negative_remainders(user_id):
     except Exception as e:
         log_error(app.logger, 'NOTIFICATION', f"Error creating notification: {e}")
 
-def check_and_hide_bud_category(bud_id):
+def check_and_hide_bundle_category(bundle_id):
     """
-    Check if all items for this bud are in the past.
-    If so, hide the expense and c_expense categories for this bud.
+    Check if all items for this bundle are in the past.
+    If so, hide the expense and c_expense categories for this bundle.
     """
     today = _user_today_for(current_user.id)
     
-    # Get all bud items for this bud
-    all_bud_items = _get_bud_items_from_redis(current_user.id)
-    if not all_bud_items:
+    # Get all bundle items for this bundle
+    all_bundle_items = _get_bundle_items_from_redis(current_user.id)
+    if not all_bundle_items:
         return
     
-    bud_items = [item for item in all_bud_items if int(item['bud_id']) == int(bud_id)]
-    if not bud_items:
+    bundle_items = [item for item in all_bundle_items if int(item['bundle_id']) == int(bundle_id)]
+    if not bundle_items:
         return
     
     # Check if all items are in the past
     all_in_past = True
-    for item in bud_items:
+    for item in bundle_items:
         item_date = item['date']
         if isinstance(item_date, str):
             item_date = datetime.strptime(item_date, '%Y-%m-%d').date()
         if item_date >= today:
             all_in_past = False
             break
-    
-    # Get bud info
-    buds = _get_buds_from_redis(current_user.id)
-    if not buds:
+
+    # Get bundle info
+    bundles = _get_bundles_from_redis(current_user.id)
+    if not bundles:
         return
-    
-    bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
-    if not bud:
+
+    bundle = next((b for b in bundles if int(b['id']) == int(bundle_id)), None)
+    if not bundle:
         return
+
+    # A date that has passed does not mean the money has moved. While an
+    # undepleted bucket remains, the category has to stay visible - hidden
+    # categories are filtered out of the add-entry pickers, so hiding it here
+    # left the user unable to select the very category they needed in order to
+    # record the purchase that would deplete it.
+    if all_in_past and _bundle_has_live_bucket(current_user.id, bundle):
+        all_in_past = False
     
-    bud_name = bud['name']
+    bundle_name = bundle['name']
     
     # Hide or show expense category in Redis
-    if bud.get('expense_category_id'):
+    if bundle.get('expense_category_id'):
         _update_category_in_redis('expense_categories', current_user.id, 
-                                 bud['expense_category_id'], 
+                                 bundle['expense_category_id'], 
                                  {'hidden': 1 if all_in_past else 0})
     
-    # Hide or show c_expense_categories for this bud (keyed by user_id)
+    # Hide or show c_expense_categories for this bundle (keyed by user_id)
     c_categories = _get_categories_from_redis('c_expense_categories', current_user.id)
     if c_categories:
         for cat in c_categories:
-            if cat.get('name') == bud_name and cat.get('is_bud'):
+            # By id. On a name match this hid every bundle of the same name, on
+            # every card, whenever any one of them ran out of future items.
+            if cat.get('bundle_id') is not None and int(cat['bundle_id']) == int(bundle_id):
                 _update_category_in_redis('c_expense_categories', current_user.id,
                                         cat['id'],
                                         {'hidden': 1 if all_in_past else 0})
 
-@app.route('/update-bud-item', methods=['POST'])
+@app.route('/update-bundle-item', methods=['POST'])
 @login_required
-def update_bud_item():
+def update_bundle_item():
     data = request.get_json()
     item_id = int(data.get('id', 0))
     field = data.get('field')
@@ -22051,321 +22469,86 @@ def update_bud_item():
     if not item_id or field not in allowed_fields:
         return jsonify({'status': 'error', 'message': 'Invalid request'}), 400
 
-    # Get the bud_item from Redis first
-    bud_items = _get_bud_items_from_redis(current_user.id)
-    if bud_items is None:
+    # Get the bundle_item from Redis first
+    bundle_items = _get_bundle_items_from_redis(current_user.id)
+    if bundle_items is None:
         # Fallback to MySQL
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT * FROM bud_items WHERE id = %s", (item_id,))
-            bud_item = cursor.fetchone()
+            cursor.execute("SELECT * FROM bundle_items WHERE id = %s", (item_id,))
+            bundle_item = cursor.fetchone()
             cursor.close()
     else:
-        bud_item = next((item for item in bud_items if int(item['id']) == int(item_id)), None)
+        bundle_item = next((item for item in bundle_items if int(item['id']) == int(item_id)), None)
 
-    if not bud_item:
-        return jsonify({'status': 'error', 'message': 'Bud item not found'}), 404
+    if not bundle_item:
+        return jsonify({'status': 'error', 'message': 'Bundle item not found'}), 404
 
     # Save old account value before updating
-    old_account = bud_item.get('account', 'Blankee')
+    old_account = bundle_item.get('account', 'Blankee')
+
+    # The (account, date) this item's money used to land on. Editing a date or
+    # an account moves it, and both ends have to be reconciled - the old code
+    # only built the new one, so the amount existed in two places at once.
+    old_plan_key = _bundle_plan_key(current_user.id, bundle_item)
 
     # Update the field
-    bud_item[field] = value if field != 'value' else float(value)
+    bundle_item[field] = value if field != 'value' else float(value)
+
+    # Keep the card id in step with the name. The name is what the UI sends;
+    # the id is what survives the card being renamed.
+    if field == 'account':
+        if value and value.lower() not in ('blankee', 'deleted account'):
+            bundle_item['credit_account_id'] = _get_credit_account_by_name(
+                current_user.id, value)
+        else:
+            bundle_item['credit_account_id'] = None
 
     # Update in Redis
-    _update_bud_item_in_redis(current_user.id, bud_item)
+    _update_bundle_item_in_redis(current_user.id, bundle_item)
 
-    # Get bud active status
-    bud_id = bud_item['bud_id']
-    buds = _get_buds_from_redis(current_user.id)
-    if buds:
-        bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
-        bud_active = bud['active'] if bud else 0
+    # Get bundle active status
+    bundle_id = bundle_item['bundle_id']
+    bundles = _get_bundles_from_redis(current_user.id)
+    if bundles:
+        bundle = next((b for b in bundles if int(b['id']) == int(bundle_id)), None)
+        bundle_active = bundle['active'] if bundle else 0
     else:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT active FROM buds WHERE id = %s", (bud_id,))
-            bud_row = cursor.fetchone()
-            bud_active = bud_row['active'] if bud_row else 0
+            cursor.execute("SELECT active FROM bundles WHERE id = %s", (bundle_id,))
+            bundle_row = cursor.fetchone()
+            bundle_active = bundle_row['active'] if bundle_row else 0
             cursor.close()
 
-    # Only update expense entry if bud is active
-    if bud_active == 1:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            update_expense_entry_for_bud_item(cursor, item_id, field, value, old_account)
-            conn.commit()
-            cursor.close()
+    # Only update expense entry if bundle is active
+    if bundle_active == 1:
+        bundle_row = next((b for b in (_get_bundles_from_redis(current_user.id) or [])
+                        if int(b['id']) == int(bundle_id)), None)
+        if bundle_row:
+            new_plan_key = _bundle_plan_key(current_user.id, bundle_item)
+            for account_key, date_key in {old_plan_key, new_plan_key}:
+                _sync_bundle_plan(current_user.id, bundle_row, account_key, date_key)
 
-    # Only run save_ca_daily_balance if account is not Blankee and bud is active
-    account = bud_item.get('account', '').lower()
-    if account != "blankee" and bud_active == 1:
+    # Only run save_ca_daily_balance if account is not Blankee and bundle is active
+    account = bundle_item.get('account', '').lower()
+    # save_ca_daily_balance alone only refreshes the card. Money on the budget
+    # side needs the running totals recomputed too, or the balance trend keeps
+    # showing the old numbers until an unrelated edit happens to refresh it.
+    if bundle_active == 1:
+        save_totals_remainders_d()
+    if account != "blankee" and bundle_active == 1:
         save_ca_daily_balance()
     
-    # Check if all bud items are in the past and hide category if so
-    if bud_active == 1 and field == 'date':
-        check_and_hide_bud_category(bud_item['bud_id'])
+    # Check if all bundle items are in the past and hide category if so
+    if bundle_active == 1 and field == 'date':
+        check_and_hide_bundle_category(bundle_item['bundle_id'])
     
     return jsonify({'status': 'success'})
 
-def update_expense_entry_for_bud_item(cursor, item_id, field, value, old_account=None):
-    """
-    Updates the linked expense entry for a bud_item.
-    If the account field changes, moves the entry between expense_entries and c_expense_entries.
-    Otherwise, updates the corresponding entry's field.
-    """
-    # Get all bud items from Redis (already updated)
-    all_bud_items = _get_bud_items_from_redis(current_user.id)
-    if not all_bud_items:
-        return
-    
-    # Find the current item
-    current_item = next((item for item in all_bud_items if int(item['id']) == int(item_id)), None)
-    if not current_item:
-        return
-    
-    bud_id = current_item['bud_id']
-    item_date = current_item['date']
-    item_value = current_item['value']
-    
-    # Get bud info from Redis
-    buds = _get_buds_from_redis(current_user.id)
-    if not buds:
-        return
-    
-    bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
-    if not bud:
-        return
-    
-    bud_name = bud['name']
-
-    # If editing the account field, value is the new account
-    if field == 'account':
-        new_account = value
-        # Use old_account parameter to know where to remove from
-        if not old_account:
-            old_account = 'Blankee'
-        
-        # Get all items for this bud on this date with OLD account from Redis (excluding current item)
-        old_account_items = [
-            item for item in all_bud_items
-            if int(item['bud_id']) == int(bud_id) 
-            and item['date'] == item_date
-            and item['account'] == old_account
-            and int(item['id']) != int(item_id)
-        ]
-        
-        # Handle OLD account - remove all entries and re-add with correct total
-        if old_account.lower() == "blankee":
-            expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
-            if expense_entries:
-                # Get all item IDs on old account (items still showing old account) PLUS current item being moved
-                old_item_ids = [int(item['id']) for item in all_bud_items
-                               if int(item['bud_id']) == int(bud_id) 
-                               and item['date'] == item_date
-                               and item['account'] == old_account]
-                # Add the current item being moved (it's already updated to new account in Redis)
-                old_item_ids.append(int(item_id))
-                
-                entries_to_keep = [e for e in expense_entries if int(e.get('bud_item_id') or 0) not in old_item_ids]
-                _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
-            
-            # If there are remaining items on old account, add them back
-            if old_account_items and bud.get('expense_category_id'):
-                old_category_id = bud['expense_category_id']
-                old_total = sum(float(item['value']) for item in old_account_items)
-                first_old_item_id = old_account_items[0]['id']
-                _update_entry_in_redis('expense_entries', current_user.id, 
-                                     old_category_id, item_date, 
-                                     old_total, bud_item_id=first_old_item_id)
-        else:
-            c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
-            if c_expense_entries:
-                # Get all item IDs on old account (items still showing old account) PLUS current item being moved
-                old_item_ids = [int(item['id']) for item in all_bud_items
-                               if int(item['bud_id']) == int(bud_id) 
-                               and item['date'] == item_date
-                               and item['account'] == old_account]
-                # Add the current item being moved (it's already updated to new account in Redis)
-                old_item_ids.append(int(item_id))
-                
-                entries_to_keep = [e for e in c_expense_entries if int(e.get('bud_item_id') or 0) not in old_item_ids]
-                _set_entries_to_redis('c_expense_entries', current_user.id, entries_to_keep)
-            
-            # If there are remaining items on old account, add them back
-            if old_account_items:
-                # Use Redis-first helper
-                old_account_id = _get_credit_account_by_name(current_user.id, old_account)
-                if old_account_id:
-                    # Use Redis-first helper for category
-                    old_category_id = _get_c_expense_category_by_name(old_account_id, bud_name)
-                    if old_category_id:
-                        old_total = sum(float(item['value']) for item in old_account_items)
-                        first_old_item_id = old_account_items[0]['id']
-                        _update_entry_in_redis('c_expense_entries', current_user.id, 
-                                             old_category_id, item_date, 
-                                             old_total, bud_item_id=first_old_item_id)
-        
-        # Handle NEW account - aggregate with other items on same date
-        # Get all items for this bud on this date with NEW account from Redis
-        new_account_items = [
-            item for item in all_bud_items
-            if int(item['bud_id']) == int(bud_id) 
-            and item['date'] == item_date
-            and item['account'] == new_account
-        ]
-        
-        if new_account.lower() == "blankee":
-            if bud.get('expense_category_id'):
-                expense_category_id = bud['expense_category_id']
-                
-                # Calculate total amount for all items on new account
-                total_amount = sum(float(item['value']) for item in new_account_items)
-                
-                # Remove any existing entries for these items
-                expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
-                if expense_entries:
-                    item_ids_on_date = [int(item['id']) for item in new_account_items]
-                    entries_to_keep = [e for e in expense_entries if int(e.get('bud_item_id') or 0) not in item_ids_on_date]
-                    _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
-                
-                # Add single combined entry
-                first_item_id = new_account_items[0]['id'] if new_account_items else item_id
-                _update_entry_in_redis('expense_entries', current_user.id, 
-                                     expense_category_id, item_date, 
-                                     total_amount, bud_item_id=first_item_id)
-        else:
-            # Use Redis-first helper
-            account_id = _get_credit_account_by_name(current_user.id, new_account)
-            if account_id:
-                # Use the bud's name for the category (Redis-first, keyed by user_id)
-                c_categories = _get_categories_from_redis('c_expense_categories', current_user.id)
-                category_id = None
-                if c_categories:
-                    for cat in c_categories:
-                        if cat.get('name') == bud_name and cat.get('account_id') == account_id:
-                            category_id = cat['id']
-                            break
-                
-                if not category_id:
-                    # Create new category in Redis (keyed by user_id)
-                    account_categories = [c for c in c_categories if c.get('account_id') == account_id] if c_categories else []
-                    max_order = max([int(c.get('display_order', 0)) for c in account_categories], default=0)
-                    category_data = {
-                        'account_id': account_id,
-                        'name': bud_name,
-                        'display_order': max_order + 1,
-                        'is_bud': 1,
-                        'is_recurring': 0,
-                        'no_end_date': 0,
-                        'hidden': 0,
-                        'is_interest': 0,
-                        'is_auto_adjustment': 0,
-                        'group_id': None
-                    }
-                    category_id = _add_category_to_redis('c_expense_categories', current_user.id, category_data)
-                
-                # Calculate total amount for all items on new account
-                total_amount = sum(float(item['value']) for item in new_account_items)
-                
-                # Remove any existing entries for these items
-                c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
-                if c_expense_entries:
-                    item_ids_on_date = [int(item['id']) for item in new_account_items]
-                    entries_to_keep = [e for e in c_expense_entries if int(e.get('bud_item_id') or 0) not in item_ids_on_date]
-                    _set_entries_to_redis('c_expense_entries', current_user.id, entries_to_keep)
-                
-                # Add single combined entry
-                first_item_id = new_account_items[0]['id'] if new_account_items else item_id
-                _update_entry_in_redis('c_expense_entries', current_user.id, 
-                                     category_id, item_date, 
-                                     total_amount, bud_item_id=first_item_id)
-    else:
-        # Field is value or date, need to recalculate total for all items on that date
-        # For these fields, use old_account since account hasn't changed (or get from current item)
-        if field == 'value' or field == 'date':
-            current_account = current_item.get('account', 'Blankee')
-            
-            # Get all items for this bud on this date with this account from Redis
-            items_on_date = [
-                item for item in all_bud_items
-                if int(item['bud_id']) == int(bud_id) 
-                and item['date'] == item_date
-                and item['account'] == current_account
-            ]
-            
-            if current_account.lower() == "blankee":
-                if bud.get('expense_category_id'):
-                    category_id = bud['expense_category_id']
-                    
-                    # Calculate total amount
-                    total_amount = sum(float(item['value']) for item in items_on_date)
-                    
-                    # Update Redis - remove all entries for these items, then add one combined entry
-                    expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
-                    if expense_entries:
-                        item_ids_on_date = [int(item['id']) for item in items_on_date]
-                        entries_to_keep = [e for e in expense_entries if int(e.get('bud_item_id') or 0) not in item_ids_on_date]
-                        _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
-                    
-                    # Add single combined entry with the first item's ID as reference
-                    first_item_id = items_on_date[0]['id'] if items_on_date else item_id
-                    _update_entry_in_redis('expense_entries', current_user.id, 
-                                         category_id, item_date, 
-                                         total_amount, bud_item_id=first_item_id)
-            else:
-                # Use Redis-first helper
-                account_id = _get_credit_account_by_name(current_user.id, current_account)
-                if not account_id:
-                    return
-                
-                # Use the bud's name for the category (Redis-first, keyed by user_id)
-                c_categories = _get_categories_from_redis('c_expense_categories', current_user.id)
-                category_id = None
-                if c_categories:
-                    for cat in c_categories:
-                        if cat.get('name') == bud_name and cat.get('account_id') == account_id:
-                            category_id = cat['id']
-                            break
-                
-                if not category_id:
-                    # Create new category in Redis (keyed by user_id)
-                    account_categories = [c for c in c_categories if c.get('account_id') == account_id] if c_categories else []
-                    max_order = max([int(c.get('display_order', 0)) for c in account_categories], default=0)
-                    category_data = {
-                        'account_id': account_id,
-                        'name': bud_name,
-                        'display_order': max_order + 1,
-                        'is_bud': 1,
-                        'is_recurring': 0,
-                        'no_end_date': 0,
-                        'hidden': 0,
-                        'is_interest': 0,
-                        'is_auto_adjustment': 0,
-                        'group_id': None
-                    }
-                    category_id = _add_category_to_redis('c_expense_categories', current_user.id, category_data)
-                
-                
-                # Calculate total amount
-                total_amount = sum(float(item['value']) for item in items_on_date)
-                
-                # Update Redis - remove all entries for these items, then add one combined entry
-                c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
-                if c_expense_entries:
-                    item_ids_on_date = [int(item['id']) for item in items_on_date]
-                    entries_to_keep = [e for e in c_expense_entries if int(e.get('bud_item_id') or 0) not in item_ids_on_date]
-                    _set_entries_to_redis('c_expense_entries', current_user.id, entries_to_keep)
-                
-                # Add single combined entry with the first item's ID as reference
-                first_item_id = items_on_date[0]['id'] if items_on_date else item_id
-                _update_entry_in_redis('c_expense_entries', current_user.id, 
-                                     category_id, item_date, 
-                                     total_amount, bud_item_id=first_item_id)
-
-@app.route('/delete-bud-item', methods=['POST'])
+@app.route('/delete-bundle-item', methods=['POST'])
 @login_required
-def delete_bud_item():
+def delete_bundle_item():
     data = request.get_json()
     item_id = int(data.get('id', 0))
     if not item_id:
@@ -22373,186 +22556,127 @@ def delete_bud_item():
 
     today = _user_today_for(current_user.id)
 
-    # Get bud_item info from Redis first
-    all_bud_items = _get_bud_items_from_redis(current_user.id)
-    if all_bud_items is None:
+    # Get bundle_item info from Redis first
+    all_bundle_items = _get_bundle_items_from_redis(current_user.id)
+    if all_bundle_items is None:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT * FROM bud_items WHERE bud_id IN (SELECT id FROM buds WHERE user_id = %s)", (current_user.id,))
-            all_bud_items = cursor.fetchall()
+            cursor.execute("SELECT * FROM bundle_items WHERE bundle_id IN (SELECT id FROM bundles WHERE user_id = %s)", (current_user.id,))
+            all_bundle_items = cursor.fetchall()
             cursor.close()
     
-    bud_item = next((item for item in all_bud_items if int(item['id']) == int(item_id)), None)
-    if not bud_item:
+    bundle_item = next((item for item in all_bundle_items if int(item['id']) == int(item_id)), None)
+    if not bundle_item:
         return jsonify({'status': 'error', 'message': 'Item not found'}), 404
 
-    bud_id = bud_item['bud_id']
-    account = bud_item.get('account', 'Blankee')
+    bundle_id = bundle_item['bundle_id']
+    account = bundle_item.get('account', 'Blankee')
 
-    # Get bud active status from Redis
-    buds = _get_buds_from_redis(current_user.id)
-    if buds is None:
+    # Get bundle active status from Redis
+    bundles = _get_bundles_from_redis(current_user.id)
+    if bundles is None:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT * FROM buds WHERE user_id = %s", (current_user.id,))
-            buds = cursor.fetchall()
+            cursor.execute("SELECT * FROM bundles WHERE user_id = %s", (current_user.id,))
+            bundles = cursor.fetchall()
             cursor.close()
     
-    bud = next((b for b in buds if int(b['id']) == int(bud_id)), None)
-    bud_active = bud['active'] if bud else 0
+    bundle = next((b for b in bundles if int(b['id']) == int(bundle_id)), None)
+    bundle_active = bundle['active'] if bundle else 0
 
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
+    # Settled money survives the item being deleted, in Uncategorized - the
+    # same rule deactivation follows. What is deleted is the plan, not the
+    # record of a spend that already happened.
+    #
+    # This used to match entries on bundle_item_id, but the aggregate row carries
+    # only the FIRST item's id, so every other item's teardown matched nothing
+    # and its share stayed inside the aggregate for good.
+    plan_key = _bundle_plan_key(current_user.id, bundle_item)
+    plan_account_id, plan_date = plan_key
+    item_value = float(bundle_item.get('value') or 0)
 
-        if account.lower() == "blankee":
-            # Get expense_category_id for this bud
-            expense_category_id = bud.get('expense_category_id') if bud else None
-
-            # Find Uncategorized category for this user
-            cursor.execute("SELECT id FROM expense_categories WHERE user_id = %s AND name = %s", (current_user.id, "Uncategorized"))
-            auto_adj = cursor.fetchone()
-            if not auto_adj:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Uncategorized category not found'}), 404
-            auto_adj_id = auto_adj['id']
-
-            # Get all expense_entries for this bud_item from Redis
-            expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
-            if expense_entries:
-                # Collect Uncategorized entries to create
-                auto_adj_entries_to_create = []
-                
-                for e in expense_entries:
-                    if int(e.get('bud_item_id', 0)) == int(item_id):
-                        entry_date = e.get('date')
-                        if isinstance(entry_date, str):
-                            entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
-                        
-                        if entry_date < today:
-                            # Collect for Uncategorized
-                            auto_adj_entries_to_create.append({
-                                'date': entry_date,
-                                'amount': float(e.get('amount', 0))
-                            })
-                
-                # Remove all entries with this bud_item_id
-                entries_to_keep = [e for e in expense_entries if int(e.get('bud_item_id', 0)) != int(item_id)]
-                
-                # Save filtered entries first
-                _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
-                
-                # Now create Uncategorized entries
-                for auto_adj_entry in auto_adj_entries_to_create:
-                    _update_entry_in_redis('expense_entries', current_user.id, 
-                                         auto_adj_id, auto_adj_entry['date'], 
-                                         auto_adj_entry['amount'], 
-                                         processed=1, bud_item_id=None)
-
+    if bundle_active == 1 and plan_date and plan_date < _bucket_cutoff_date(current_user.id):
+        if plan_account_id is None:
+            budget_cats = _get_categories_from_redis(
+                'expense_categories', current_user.id) or []
+            uncat_id = next((c['id'] for c in budget_cats
+                             if c.get('name') == 'Uncategorized'), None)
+            if uncat_id:
+                _update_entry_in_redis('expense_entries', current_user.id, uncat_id,
+                                       plan_date, item_value, processed=1,
+                                       bundle_item_id=None)
         else:
-            # CA: Find the credit account
-            cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s AND name = %s", (current_user.id, account))
-            ca_row = cursor.fetchone()
-            if not ca_row:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Credit account not found'}), 404
-            account_id = ca_row['id']
+            uncat_id = _get_c_expense_category_by_name(
+                plan_account_id, 'Uncategorized', user_id=current_user.id)
+            if uncat_id:
+                _update_entry_in_redis('c_expense_entries', current_user.id, uncat_id,
+                                       plan_date, item_value, processed=1,
+                                       bundle_item_id=None)
 
-            # Find Uncategorized CA category for this account
-            cursor.execute("SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s", (account_id, "Uncategorized"))
-            auto_adj = cursor.fetchone()
-            if not auto_adj:
-                cursor.close()
-                return jsonify({'status': 'error', 'message': 'Uncategorized CA category not found'}), 404
-            auto_adj_id = auto_adj['id']
+    # Delete the bundle_item from Redis
+    _delete_bundle_item_in_redis(current_user.id, item_id)
 
-            # Get all c_expense_entries for this bud_item from Redis
-            c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
-            if c_expense_entries:
-                # Collect Uncategorized entries to create
-                ca_auto_adj_entries_to_create = []
-                
-                for e in c_expense_entries:
-                    if int(e.get('bud_item_id', 0)) == int(item_id):
-                        entry_date = e.get('date')
-                        if isinstance(entry_date, str):
-                            entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
-                        
-                        if entry_date < today:
-                            # Collect for Uncategorized
-                            ca_auto_adj_entries_to_create.append({
-                                'date': entry_date,
-                                'amount': float(e.get('amount', 0))
-                            })
-                
-                # Remove all entries with this bud_item_id
-                ca_entries_to_keep = [e for e in c_expense_entries if int(e.get('bud_item_id', 0)) != int(item_id)]
-                
-                # Save filtered entries first
-                _set_entries_to_redis('c_expense_entries', current_user.id, ca_entries_to_keep)
-                
-                # Now create Uncategorized entries
-                for ca_auto_adj_entry in ca_auto_adj_entries_to_create:
-                    _update_entry_in_redis('c_expense_entries', current_user.id, 
-                                         auto_adj_id, ca_auto_adj_entry['date'], 
-                                         ca_auto_adj_entry['amount'], 
-                                         processed=1, bud_item_id=None)
-
-        conn.commit()
-        cursor.close()
-    
-    # Delete the bud_item from Redis
-    _delete_bud_item_in_redis(current_user.id, item_id)
+    # Then restate whatever is left planned on that (account, date). If this was
+    # the last item there the plan entry goes; if others remain the aggregate
+    # drops by exactly this item's value.
+    if bundle_active == 1 and bundle:
+        _sync_bundle_plan(current_user.id, bundle, plan_account_id, plan_date)
         
-    # Only run save_ca_daily_balance if account is not Blankee and bud is active
-    if account.lower() != "blankee" and bud_active == 1:
+    # Only run save_ca_daily_balance if account is not Blankee and bundle is active
+    # save_ca_daily_balance alone only refreshes the card. Money on the budget
+    # side needs the running totals recomputed too, or the balance trend keeps
+    # showing the old numbers until an unrelated edit happens to refresh it.
+    if bundle_active == 1:
+        save_totals_remainders_d()
+    if account.lower() != "blankee" and bundle_active == 1:
         save_ca_daily_balance()
     
-    # Check if all remaining bud items are in the past and hide category if so
-    if bud_active == 1:
-        check_and_hide_bud_category(bud_id)
+    # Check if all remaining bundle items are in the past and hide category if so
+    if bundle_active == 1:
+        check_and_hide_bundle_category(bundle_id)
     
     return jsonify({'status': 'success'})
 
-@app.route('/delete-bud', methods=['POST'])
+@app.route('/delete-bundle', methods=['POST'])
 @login_required
-def delete_bud():
+def delete_bundle():
     data = request.get_json()
-    bud_id = int(data.get('bud_id', 0))
-    if not bud_id:
-        return jsonify({'status': 'error', 'message': 'Missing bud_id'}), 400
+    bundle_id = int(data.get('bundle_id', 0))
+    if not bundle_id:
+        return jsonify({'status': 'error', 'message': 'Missing bundle_id'}), 400
 
     today = _user_today_for(current_user.id)
 
-    # Get bud info from Redis first
-    buds = _get_buds_from_redis(current_user.id)
-    if buds is None:
+    # Get bundle info from Redis first
+    bundles = _get_bundles_from_redis(current_user.id)
+    if bundles is None:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT * FROM buds WHERE user_id = %s", (current_user.id,))
-            buds = cursor.fetchall()
+            cursor.execute("SELECT * FROM bundles WHERE user_id = %s", (current_user.id,))
+            bundles = cursor.fetchall()
             cursor.close()
     
-    bud_row = next((b for b in buds if int(b['id']) == int(bud_id)), None)
-    if not bud_row:
-        return jsonify({'status': 'error', 'message': 'Bud not found'}), 404
+    bundle_row = next((b for b in bundles if int(b['id']) == int(bundle_id)), None)
+    if not bundle_row:
+        return jsonify({'status': 'error', 'message': 'Bundle not found'}), 404
     
-    bud_name = bud_row['name']
-    bud_expense_category_id = bud_row.get('expense_category_id')
+    bundle_name = bundle_row['name']
+    bundle_expense_category_id = bundle_row.get('expense_category_id')
 
-    # Get all bud_items for this bud from Redis
-    all_bud_items = _get_bud_items_from_redis(current_user.id)
-    if all_bud_items is None:
+    # Get all bundle_items for this bundle from Redis
+    all_bundle_items = _get_bundle_items_from_redis(current_user.id)
+    if all_bundle_items is None:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT * FROM bud_items WHERE bud_id IN (SELECT id FROM buds WHERE user_id = %s)", (current_user.id,))
-            all_bud_items = cursor.fetchall()
+            cursor.execute("SELECT * FROM bundle_items WHERE bundle_id IN (SELECT id FROM bundles WHERE user_id = %s)", (current_user.id,))
+            all_bundle_items = cursor.fetchall()
             cursor.close()
     
-    bud_items = [item for item in all_bud_items if int(item['bud_id']) == int(bud_id)]
+    bundle_items = [item for item in all_bundle_items if int(item['bundle_id']) == int(bundle_id)]
 
     # Track CA categories to delete
     ca_category_ids_to_delete = set()
-    bud_category_ids_to_delete = set()
+    bundle_category_ids_to_delete = set()
 
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -22560,9 +22684,9 @@ def delete_bud():
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        for bud_item in bud_items:
-            item_id = bud_item['id']
-            account = bud_item.get('account', '').lower() if bud_item.get('account') else "blankee"
+        for bundle_item in bundle_items:
+            item_id = bundle_item['id']
+            account = bundle_item.get('account', '').lower() if bundle_item.get('account') else "blankee"
 
             if account == "blankee":
                 # Find Uncategorized expense category for this user
@@ -22575,14 +22699,14 @@ def delete_bud():
                     continue
                 auto_adj_id = auto_adj['id']
 
-                # Get all expense_entries for this bud_item from Redis
+                # Get all expense_entries for this bundle_item from Redis
                 expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
                 if expense_entries:
                     # Collect Uncategorized entries to create
                     auto_adj_entries_to_create = []
                     
                     for e in expense_entries:
-                        if int(e.get('bud_item_id') or 0) == int(item_id):
+                        if int(e.get('bundle_item_id') or 0) == int(item_id):
                             entry_date = e.get('date')
                             if isinstance(entry_date, str):
                                 entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
@@ -22594,8 +22718,8 @@ def delete_bud():
                                     'amount': float(e.get('amount', 0))
                                 })
                     
-                    # Remove all entries with this bud_item_id
-                    entries_to_keep = [e for e in expense_entries if int(e.get('bud_item_id') or 0) != int(item_id)]
+                    # Remove all entries with this bundle_item_id
+                    entries_to_keep = [e for e in expense_entries if int(e.get('bundle_item_id') or 0) != int(item_id)]
                     
                     # Save filtered entries first
                     _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
@@ -22605,11 +22729,11 @@ def delete_bud():
                         _update_entry_in_redis('expense_entries', current_user.id, 
                                              auto_adj_id, auto_adj_entry['date'], 
                                              auto_adj_entry['amount'], 
-                                             processed=1, bud_item_id=None)
+                                             processed=1, bundle_item_id=None)
 
-                # Track bud expense category for deletion
-                if bud_expense_category_id:
-                    bud_category_ids_to_delete.add(bud_expense_category_id)
+                # Track bundle expense category for deletion
+                if bundle_expense_category_id:
+                    bundle_category_ids_to_delete.add(bundle_expense_category_id)
 
             else:
                 # CA: Find the credit account
@@ -22629,14 +22753,14 @@ def delete_bud():
                     continue
                 auto_adj_id = auto_adj['id']
 
-                # Get all c_expense_entries for this bud_item from Redis
+                # Get all c_expense_entries for this bundle_item from Redis
                 c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
                 if c_expense_entries:
                     # Collect Uncategorized entries to create
                     ca_auto_adj_entries_to_create = []
                     
                     for e in c_expense_entries:
-                        if int(e.get('bud_item_id') or 0) == int(item_id):
+                        if int(e.get('bundle_item_id') or 0) == int(item_id):
                             entry_date = e.get('date')
                             if isinstance(entry_date, str):
                                 entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
@@ -22648,8 +22772,8 @@ def delete_bud():
                                     'amount': float(e.get('amount', 0))
                                 })
                     
-                    # Remove all entries with this bud_item_id
-                    ca_entries_to_keep = [e for e in c_expense_entries if int(e.get('bud_item_id') or 0) != int(item_id)]
+                    # Remove all entries with this bundle_item_id
+                    ca_entries_to_keep = [e for e in c_expense_entries if int(e.get('bundle_item_id') or 0) != int(item_id)]
                     
                     # Save filtered entries first
                     _set_entries_to_redis('c_expense_entries', current_user.id, ca_entries_to_keep)
@@ -22659,74 +22783,144 @@ def delete_bud():
                         _update_entry_in_redis('c_expense_entries', current_user.id, 
                                              auto_adj_id, ca_auto_adj_entry['date'], 
                                              ca_auto_adj_entry['amount'], 
-                                             processed=1, bud_item_id=None)
+                                             processed=1, bundle_item_id=None)
 
-                # Track CA categories created for this bud (by bud name)
-                if bud_name:
-                    cursor.execute("""
-                        SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s
-                    """, (account_id, bud_name))
-                    cat_row = cursor.fetchone()
-                    if cat_row:
-                        ca_category_ids_to_delete.add(cat_row['id'])
+                # Track CA categories created for this bundle, by id - a name
+                # match here deleted another bundle's category off this card.
+                bundle_cat_id = _get_bundle_category_for_account(
+                    current_user.id, account_id, bundle_id)
+                if bundle_cat_id:
+                    ca_category_ids_to_delete.add(bundle_cat_id)
 
-        # Delete the bud's expense category if present
-        for bud_cat_id in bud_category_ids_to_delete:
-            cursor.execute("DELETE FROM expense_categories WHERE id = %s AND user_id = %s", (bud_cat_id, current_user.id))
+        # Delete the bundle's expense category if present.
+        # Redis-first, for the same reason as deactivation: a raw DELETE leaves the
+        # row in Redis and the flush worker writes it straight back. The mirror
+        # delete was also unscoped - the id came from a scoped read, so it was
+        # bounded in practice, but nothing in the statement itself said so.
+        for bundle_cat_id in bundle_category_ids_to_delete:
+            _delete_category_in_redis('expense_categories', current_user.id, bundle_cat_id)
 
-        # Delete any c_expense_categories created for this bud
+        # Delete any c_expense_categories created for this bundle
         for ca_cat_id in ca_category_ids_to_delete:
-            cursor.execute("DELETE FROM c_expense_categories WHERE id = %s", (ca_cat_id,))
+            _delete_category_in_redis('c_expense_categories', current_user.id, ca_cat_id)
 
         conn.commit()
         cursor.close()
     
-    # Delete all bud_items for this bud from Redis
-    for bud_item in bud_items:
-        _delete_bud_item_in_redis(current_user.id, bud_item['id'])
+    # Delete all bundle_items for this bundle from Redis
+    for bundle_item in bundle_items:
+        _delete_bundle_item_in_redis(current_user.id, bundle_item['id'])
 
-    # Delete the bud itself from Redis
-    _delete_bud_in_redis(current_user.id, bud_id)
-        
+    # Delete the bundle itself from Redis
+    _delete_bundle_in_redis(current_user.id, bundle_id)
+
+    # save_ca_daily_balance alone only refreshes the card. Money on the budget
+    # side needs the running totals recomputed too, or the balance trend keeps
+    # showing the old numbers until an unrelated edit happens to refresh it.
+    save_totals_remainders_d()
     save_ca_daily_balance()
     return jsonify({'status': 'success'})
 
-@app.route('/toggle-bud-active', methods=['POST'])
+@app.route('/rename-bundle', methods=['POST'])
 @login_required
-def toggle_bud_active():
+def rename_bundle():
+    """Rename a bundle, its budget category and every one of its mirrors.
+
+    There was no way to do this before: the name was fixed at creation, and the
+    category it minted on activation took that name with it. Renaming the
+    category by hand did not rename the bundle, so the two drifted apart and
+    the name match that used to find the mirrors stopped finding them.
+
+    By id throughout, so a bundle sharing a name with another bundle - or with
+    an ordinary expense category - renames only its own rows.
+    """
     data = request.get_json()
-    bud_id = int(data.get('bud_id', 0))
+    bundle_id = int(data.get('bundle_id', 0))
+    new_name = (data.get('name') or '').strip()
+
+    if not bundle_id or not new_name:
+        return jsonify({'status': 'error', 'message': 'Missing bundle or name'}), 400
+
+    bundles = _get_bundles_from_redis(current_user.id) or []
+    bundle_row = next((b for b in bundles if int(b['id']) == bundle_id), None)
+    if not bundle_row:
+        return jsonify({'status': 'error', 'message': 'Bundle not found'}), 404
+
+    old_name = bundle_row.get('name') or ''
+    if new_name == old_name:
+        return jsonify({'status': 'success', 'name': new_name})
+
+    # Same rule as creating one: the name has to be free among this user's
+    # expense categories, excluding the bundle's own.
+    own_category_id = bundle_row.get('expense_category_id')
+    for cat in (_get_categories_from_redis('expense_categories', current_user.id) or []):
+        if own_category_id and int(cat.get('id', 0) or 0) == int(own_category_id):
+            continue
+        if (cat.get('name') or '').strip().lower() == new_name.lower():
+            return jsonify({
+                'status': 'error',
+                'message': f"You already have an expense category called '{new_name}'."
+            }), 400
+
+    for other in bundles:
+        if int(other['id']) != bundle_id and (other.get('name') or '').strip().lower() == new_name.lower():
+            return jsonify({
+                'status': 'error',
+                'message': f"You already have a bundle called '{new_name}'."
+            }), 400
+
+    bundle_row['name'] = new_name
+    _update_bundle_in_redis(current_user.id, bundle_row)
+
+    if own_category_id:
+        _update_category_in_redis('expense_categories', current_user.id,
+                                  own_category_id, {'name': new_name})
+
+    for cat in (_get_categories_from_redis('c_expense_categories', current_user.id) or []):
+        if cat.get('bundle_id') is not None and int(cat['bundle_id']) == bundle_id:
+            _update_category_in_redis('c_expense_categories', current_user.id,
+                                      cat['id'], {'name': new_name})
+
+    log_info(app.logger, 'BUNDLE', f"Renamed bundle {bundle_id}: '{old_name}' -> '{new_name}'")
+    return jsonify({'status': 'success', 'name': new_name})
+
+
+@app.route('/toggle-bundle-active', methods=['POST'])
+@login_required
+def toggle_bundle_active():
+    data = request.get_json()
+    bundle_id = int(data.get('bundle_id', 0))
     active = int(data.get('active', 0))
     today = _user_today_for(current_user.id)
 
-    if not bud_id:
-        return jsonify({'status': 'error', 'message': 'Missing bud_id'}), 400
+    if not bundle_id:
+        return jsonify({'status': 'error', 'message': 'Missing bundle_id'}), 400
 
-    # Try Redis first for bud data
-    buds = _get_buds_from_redis(current_user.id)
-    if buds is None:
+    # Try Redis first for bundle data
+    bundles = _get_bundles_from_redis(current_user.id)
+    if bundles is None:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT * FROM buds WHERE user_id = %s", (current_user.id,))
-            buds = cursor.fetchall()
+            cursor.execute("SELECT * FROM bundles WHERE user_id = %s", (current_user.id,))
+            bundles = cursor.fetchall()
             cursor.close()
     
-    bud_row = next((b for b in buds if int(b['id']) == int(bud_id)), None)
-    if not bud_row:
-        return jsonify({'status': 'error', 'message': 'Bud not found'}), 404
+    bundle_row = next((b for b in bundles if int(b['id']) == int(bundle_id)), None)
+    if not bundle_row:
+        return jsonify({'status': 'error', 'message': 'Bundle not found'}), 404
 
-    bud_name = bud_row['name']
+    bundle_name = bundle_row['name']
 
-    # Try Redis first for bud_items
-    all_bud_items = _get_bud_items_from_redis(current_user.id)
-    if all_bud_items is None:
+    # Try Redis first for bundle_items
+    all_bundle_items = _get_bundle_items_from_redis(current_user.id)
+    if all_bundle_items is None:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("SELECT * FROM bud_items WHERE bud_id IN (SELECT id FROM buds WHERE user_id = %s)", (current_user.id,))
-            all_bud_items = cursor.fetchall()
+            cursor.execute("SELECT * FROM bundle_items WHERE bundle_id IN (SELECT id FROM bundles WHERE user_id = %s)", (current_user.id,))
+            all_bundle_items = cursor.fetchall()
             cursor.close()
     
-    bud_items = [item for item in all_bud_items if int(item['bud_id']) == int(bud_id)]
+    bundle_items = [item for item in all_bundle_items if int(item['bundle_id']) == int(bundle_id)]
 
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -22750,34 +22944,35 @@ def toggle_bud_active():
                 ca_auto_adj_ids[ca_id] = ca_auto_adj['id']
 
         if active == 1:
-            if not bud_row.get('expense_category_id'):
-                cursor.execute("""
-                    SELECT COALESCE(MAX(display_order), 1.0) AS max_do FROM expense_categories WHERE user_id = %s AND FLOOR(display_order) = 1
-                """, (current_user.id,))
-                max_order_val = cursor.fetchone()['max_do']
-                new_display_order = round(float(max_order_val) + 0.0001, 4)
-                cursor.execute("""
-                    INSERT INTO expense_categories (user_id, name, display_order, is_bud, is_system)
-                    VALUES (%s, %s, %s, 1, 0)
-                """, (current_user.id, bud_name, new_display_order))
-                expense_category_id = cursor.lastrowid
-                
-                # Update bud in Redis with new expense_category_id
-                bud_row['expense_category_id'] = expense_category_id
-                bud_row['active'] = active
-                _update_bud_in_redis(current_user.id, bud_row)
-            else:
-                # Update bud active status in Redis
-                bud_row['active'] = active
-                _update_bud_in_redis(current_user.id, bud_row)
+            # The budget category and one mirror per card, all Redis-first and
+            # all stamped with this bundle's id. Called unconditionally: it is
+            # idempotent, and running it every time is also what repairs a bundle
+            # activated before a card was added, which used to be left without a
+            # mirror there for good.
+            expense_category_id = _ensure_bundle_categories(current_user.id, bundle_row)
 
-            # Get list of bud_item_ids for this bud to check against auto adjustments
-            bud_item_ids = [int(item['id']) for item in bud_items]
+            # Un-hide whatever a previous deactivation hid. check_and_hide_bundle
+            # _category runs at the end of this route and will hide it again if
+            # every item really is in the past with nothing left to confirm.
+            if expense_category_id:
+                _update_category_in_redis('expense_categories', current_user.id,
+                                          expense_category_id, {'hidden': 0})
+            for cat in (_get_categories_from_redis('c_expense_categories', current_user.id) or []):
+                if cat.get('bundle_id') is not None and int(cat['bundle_id']) == int(bundle_id):
+                    _update_category_in_redis('c_expense_categories', current_user.id,
+                                              cat['id'], {'hidden': 0})
+
+            bundle_row['expense_category_id'] = expense_category_id
+            bundle_row['active'] = active
+            _update_bundle_in_redis(current_user.id, bundle_row)
+
+            # Get list of bundle_item_ids for this bundle to check against auto adjustments
+            bundle_item_ids = [int(item['id']) for item in bundle_items]
             
             # Group items by date and account for processing
             from collections import defaultdict
             items_by_date_account = defaultdict(list)
-            for item in bud_items:
+            for item in bundle_items:
                 key = (item['date'], item['account'])
                 items_by_date_account[key].append(item)
             
@@ -22797,7 +22992,7 @@ def toggle_bud_active():
                             # Find auto adjustment entries to transfer for ANY item in this group
                             auto_adj_entries_to_transfer = [e for e in expense_entries if (
                                 int(e.get('category_id', 0) or 0) == int(auto_adj_id) and 
-                                int(e.get('bud_item_id') or 0) in group_item_ids
+                                int(e.get('bundle_item_id') or 0) in group_item_ids
                             )]
                             
                             if auto_adj_entries_to_transfer:
@@ -22806,11 +23001,11 @@ def toggle_bud_active():
                                 # Remove auto adjustment entries
                                 entries_to_keep = [e for e in expense_entries if not (
                                     int(e.get('category_id', 0) or 0) == int(auto_adj_id) and 
-                                    int(e.get('bud_item_id') or 0) in group_item_ids
+                                    int(e.get('bundle_item_id') or 0) in group_item_ids
                                 )]
                                 _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
                                 
-                                # Transfer all found entries to bud category (should be just one aggregated entry)
+                                # Transfer all found entries to bundle category (should be just one aggregated entry)
                                 for auto_entry in auto_adj_entries_to_transfer:
                                     entry_date = auto_entry.get('date')
                                     if isinstance(entry_date, str):
@@ -22818,8 +23013,8 @@ def toggle_bud_active():
                                     # Use first item ID as reference
                                     first_item_id = group_item_ids[0]
                                     _update_entry_in_redis('expense_entries', current_user.id, 
-                                                         bud_row['expense_category_id'], entry_date, 
-                                                         float(auto_entry.get('amount', 0)), bud_item_id=first_item_id)
+                                                         bundle_row['expense_category_id'], entry_date, 
+                                                         float(auto_entry.get('amount', 0)), bundle_item_id=first_item_id)
                     
                     # Only create new entries if we didn't transfer from Uncategorized
                     if not auto_adj_transferred:
@@ -22835,8 +23030,8 @@ def toggle_bud_active():
                         
                         # Create single aggregated entry for this date/account group
                         _update_entry_in_redis('expense_entries', current_user.id, 
-                                             bud_row['expense_category_id'], item_date_obj, 
-                                             total_value, bud_item_id=first_item_id)
+                                             bundle_row['expense_category_id'], item_date_obj, 
+                                             total_value, bundle_item_id=first_item_id)
                     
                 elif account and account.lower() != "blankee":
                     # Get all item IDs in this group
@@ -22846,31 +23041,19 @@ def toggle_bud_active():
                     ca_id = _get_credit_account_by_name(current_user.id, account)
                     if not ca_id:
                         continue
-                    # Get or create c_expense_category for this bud (Redis-first)
-                    c_categories = _get_categories_from_redis('c_expense_categories', ca_id)
-                    bud_cat_id = None
-                    if c_categories:
-                        for cat in c_categories:
-                            if cat.get('name') == bud_name:
-                                bud_cat_id = cat['id']
-                                break
-                    
-                    if not bud_cat_id:
-                        # Create new category in Redis
-                        max_order = max([int(c.get('display_order', 0)) for c in c_categories], default=0) if c_categories else 0
-                        category_data = {
-                            'account_id': ca_id,
-                            'name': bud_name,
-                            'display_order': max_order + 1,
-                            'is_bud': 1,
-                            'is_recurring': 0,
-                            'no_end_date': 0,
-                            'hidden': 0,
-                            'is_interest': 0,
-                            'is_auto_adjustment': 0,
-                            'group_id': None
-                        }
-                        bud_cat_id = _add_category_to_redis('c_expense_categories', ca_id, category_data)
+                    # By id, not by name: two bundles can share a name, and
+                    # matching on it put both on one category.
+                    bundle_cat_id = _get_bundle_category_for_account(
+                        current_user.id, ca_id, bundle_id)
+                    if not bundle_cat_id:
+                        # _ensure_bundle_categories mirrors into every card above,
+                        # so this only fires if that failed. Retry rather than
+                        # silently dropping the item's spending.
+                        _ensure_bundle_categories(current_user.id, bundle_row)
+                        bundle_cat_id = _get_bundle_category_for_account(
+                            current_user.id, ca_id, bundle_id)
+                        if not bundle_cat_id:
+                            continue
                     
                     # Transfer any auto adjustment entries for items in this group
                     ca_auto_adj_transferred = False
@@ -22881,7 +23064,7 @@ def toggle_bud_active():
                             # Find auto adjustment entries to transfer for ANY item in this group
                             ca_auto_adj_entries_to_transfer = [e for e in c_expense_entries if (
                                 int(e.get('category_id', 0) or 0) == int(ca_auto_adj_id) and 
-                                int(e.get('bud_item_id') or 0) in group_item_ids
+                                int(e.get('bundle_item_id') or 0) in group_item_ids
                             )]
                             
                             if ca_auto_adj_entries_to_transfer:
@@ -22890,11 +23073,11 @@ def toggle_bud_active():
                             # Remove auto adjustment entries
                             entries_to_keep = [e for e in c_expense_entries if not (
                                 int(e.get('category_id', 0) or 0) == int(ca_auto_adj_id) and 
-                                int(e.get('bud_item_id') or 0) in group_item_ids
+                                int(e.get('bundle_item_id') or 0) in group_item_ids
                             )]
                             _set_entries_to_redis('c_expense_entries', current_user.id, entries_to_keep)
                             
-                            # Transfer all found entries to bud category (should be just one aggregated entry)
+                            # Transfer all found entries to bundle category (should be just one aggregated entry)
                             for ca_auto_entry in ca_auto_adj_entries_to_transfer:
                                 entry_date = ca_auto_entry.get('date')
                                 if isinstance(entry_date, str):
@@ -22902,8 +23085,8 @@ def toggle_bud_active():
                                 # Use first item ID as reference
                                 first_item_id = group_item_ids[0]
                                 _update_entry_in_redis('c_expense_entries', current_user.id, 
-                                                     bud_cat_id, entry_date, 
-                                                     float(ca_auto_entry.get('amount', 0)), bud_item_id=first_item_id)
+                                                     bundle_cat_id, entry_date, 
+                                                     float(ca_auto_entry.get('amount', 0)), bundle_item_id=first_item_id)
                     
                     # Create c_expense entry for new items - only if no auto adjustment was transferred
                     if not ca_auto_adj_transferred:
@@ -22919,12 +23102,12 @@ def toggle_bud_active():
                         
                         # Create single aggregated entry for this date/account group
                         _update_entry_in_redis('c_expense_entries', current_user.id, 
-                                             bud_cat_id, item_date_obj, 
-                                             total_value, bud_item_id=first_item_id)
+                                             bundle_cat_id, item_date_obj, 
+                                             total_value, bundle_item_id=first_item_id)
 
         elif active == 0:
-            if bud_row.get('expense_category_id'):
-                for item in bud_items:
+            if bundle_row.get('expense_category_id'):
+                for item in bundle_items:
                     item_id = item['id']
                     # Get and filter entries from Redis
                     expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
@@ -22933,37 +23116,41 @@ def toggle_bud_active():
                         auto_adj_entries_to_create = []
                         
                         for e in expense_entries:
-                            if int(e.get('category_id', 0) or 0) == int(bud_row['expense_category_id']) and \
-                               int(e.get('bud_item_id') or 0) == int(item_id):
+                            if int(e.get('category_id', 0) or 0) == int(bundle_row['expense_category_id']) and \
+                               int(e.get('bundle_item_id') or 0) == int(item_id):
                                 entry_date = e.get('date')
                                 if isinstance(entry_date, str):
                                     entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
                                 
-                                if entry_date < today and auto_adj_id:
-                                    # Collect for Uncategorized (preserve bud_item_id)
+                                # What survives deactivation is money that actually
+                                # moved, not money dated in the past. Branching on the
+                                # date deleted an entry settled earlier today outright;
+                                # a bucket is only a forecast, so it goes.
+                                if int(e.get('is_bucket', 0) or 0) == 0 and auto_adj_id:
+                                    # Collect for Uncategorized (preserve bundle_item_id)
                                     auto_adj_entries_to_create.append({
                                         'date': entry_date,
                                         'amount': float(e.get('amount', 0)),
-                                        'bud_item_id': int(e.get('bud_item_id', 0))
+                                        'bundle_item_id': int(e.get('bundle_item_id', 0))
                                     })
                         
-                        # Remove entries with this bud category and bud_item_id
+                        # Remove entries with this bundle category and bundle_item_id
                         entries_to_keep = [e for e in expense_entries if not (
-                            int(e.get('category_id', 0) or 0) == int(bud_row['expense_category_id']) and 
-                            int(e.get('bud_item_id') or 0) == int(item_id)
+                            int(e.get('category_id', 0) or 0) == int(bundle_row['expense_category_id']) and 
+                            int(e.get('bundle_item_id') or 0) == int(item_id)
                         )]
                         
                         # Save filtered entries first
                         _set_entries_to_redis('expense_entries', current_user.id, entries_to_keep)
                         
-                        # Now create Uncategorized entries (preserve bud_item_id for reactivation)
+                        # Now create Uncategorized entries (preserve bundle_item_id for reactivation)
                         for auto_adj_entry in auto_adj_entries_to_create:
                             _update_entry_in_redis('expense_entries', current_user.id, 
                                                  auto_adj_id, auto_adj_entry['date'], 
                                                  auto_adj_entry['amount'], 
-                                                 processed=1, bud_item_id=auto_adj_entry['bud_item_id'])
+                                                 processed=1, bundle_item_id=auto_adj_entry['bundle_item_id'])
 
-            for item in bud_items:
+            for item in bundle_items:
                 item_id = item['id']
                 account = item['account']
                 if account and account.lower() != "blankee":
@@ -22973,11 +23160,10 @@ def toggle_bud_active():
                         continue
                     ca_id = ca_row['id']
                     ca_auto_adj_id = ca_auto_adj_ids.get(ca_id)
-                    cursor.execute("SELECT id FROM c_expense_categories WHERE account_id = %s AND name = %s", (ca_id, bud_name))
-                    cat_row = cursor.fetchone()
-                    if not cat_row:
+                    bundle_cat_id = _get_bundle_category_for_account(
+                        current_user.id, ca_id, bundle_id)
+                    if not bundle_cat_id:
                         continue
-                    bud_cat_id = cat_row['id']
                     
                     # Get and filter c_expense entries from Redis
                     c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
@@ -22986,76 +23172,93 @@ def toggle_bud_active():
                         ca_auto_adj_entries_to_create = []
                         
                         for e in c_expense_entries:
-                            if int(e.get('category_id', 0) or 0) == int(bud_cat_id) and \
-                               int(e.get('bud_item_id') or 0) == int(item_id):
+                            if int(e.get('category_id', 0) or 0) == int(bundle_cat_id) and \
+                               int(e.get('bundle_item_id') or 0) == int(item_id):
                                 entry_date = e.get('date')
                                 if isinstance(entry_date, str):
                                     entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
                                 
-                                if entry_date < today and ca_auto_adj_id:
-                                    # Collect for Uncategorized (preserve bud_item_id)
+                                # As above: settled money survives, forecasts do not.
+                                if int(e.get('is_bucket', 0) or 0) == 0 and ca_auto_adj_id:
+                                    # Collect for Uncategorized (preserve bundle_item_id)
                                     ca_auto_adj_entries_to_create.append({
                                         'date': entry_date,
                                         'amount': float(e.get('amount', 0)),
-                                        'bud_item_id': int(e.get('bud_item_id', 0))
+                                        'bundle_item_id': int(e.get('bundle_item_id', 0))
                                     })
                         
-                        # Remove entries with this bud category and bud_item_id
+                        # Remove entries with this bundle category and bundle_item_id
                         ca_entries_to_keep = [e for e in c_expense_entries if not (
-                            int(e.get('category_id', 0) or 0) == int(bud_cat_id) and 
-                            int(e.get('bud_item_id') or 0) == int(item_id)
+                            int(e.get('category_id', 0) or 0) == int(bundle_cat_id) and 
+                            int(e.get('bundle_item_id') or 0) == int(item_id)
                         )]
                         
                         # Save filtered entries first
                         _set_entries_to_redis('c_expense_entries', current_user.id, ca_entries_to_keep)
                         
-                        # Now create Uncategorized entries (preserve bud_item_id for reactivation)
+                        # Now create Uncategorized entries (preserve bundle_item_id for reactivation)
                         for ca_auto_adj_entry in ca_auto_adj_entries_to_create:
                             _update_entry_in_redis('c_expense_entries', current_user.id, 
                                                  ca_auto_adj_id, ca_auto_adj_entry['date'], 
                                                  ca_auto_adj_entry['amount'], 
-                                                 processed=1, bud_item_id=ca_auto_adj_entry['bud_item_id'])
+                                                 processed=1, bundle_item_id=ca_auto_adj_entry['bundle_item_id'])
 
-            # Delete the regular expense category if it exists
-            if bud_row.get('expense_category_id'):
+            # Hide the categories rather than delete them, and keep the
+            # bundle pointing at its own. Deleting meant a toggle off and on
+            # again minted a new category with a new id, so anything that had
+            # referred to the old one - a mirror's bundle_id, an entry's
+            # category_id - was left pointing at a row that no longer existed.
+            # Hidden keeps the ids stable and is what the user sees anyway:
+            # the category disappears from the dashboard either way.
+            if bundle_row.get('expense_category_id'):
+                _update_category_in_redis(
+                    'expense_categories', current_user.id,
+                    bundle_row['expense_category_id'], {'hidden': 1}
+                )
+
+            bundle_row['active'] = active
+            _update_bundle_in_redis(current_user.id, bundle_row)
+
+            # And this bundle's mirrors - by id, so deactivating one bundle
+            # cannot take another of the same name down with it.
+            mirror_cats = _get_categories_from_redis('c_expense_categories', current_user.id)
+            if mirror_cats is None:
                 cursor.execute("""
-                    DELETE FROM expense_categories WHERE id = %s AND user_id = %s
-                """, (bud_row['expense_category_id'], current_user.id))
-                
-                # Update bud in Redis - set inactive and remove expense_category_id
-                bud_row['active'] = active
-                bud_row['expense_category_id'] = None
-                _update_bud_in_redis(current_user.id, bud_row)
+                    SELECT c.id FROM c_expense_categories c
+                    INNER JOIN credit_accounts a ON c.account_id = a.id
+                    WHERE a.user_id = %s AND c.bundle_id = %s
+                """, (current_user.id, bundle_id))
+                mirror_ids = [row['id'] for row in cursor.fetchall()]
             else:
-                # Update bud active status in Redis
-                bud_row['active'] = active
-                _update_bud_in_redis(current_user.id, bud_row)
-            
-            # Delete all credit account expense categories with this bud name
-            cursor.execute("""
-                DELETE FROM c_expense_categories 
-                WHERE name = %s 
-                AND account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
-                AND is_bud = 1
-            """, (bud_name, current_user.id))
+                mirror_ids = [
+                    c['id'] for c in mirror_cats
+                    if c.get('bundle_id') is not None and int(c['bundle_id']) == int(bundle_id)
+                ]
+            for mirror_id in mirror_ids:
+                _update_category_in_redis('c_expense_categories', current_user.id,
+                                          mirror_id, {'hidden': 1})
             
         else:
-            # Update bud active status in Redis
-            bud_row['active'] = active
-            _update_bud_in_redis(current_user.id, bud_row)
+            # Update bundle active status in Redis
+            bundle_row['active'] = active
+            _update_bundle_in_redis(current_user.id, bundle_row)
 
         conn.commit()
         cursor.close()
     
-    # Check if all bud items are in the past and hide category if so (when activating)
+    # Check if all bundle items are in the past and hide category if so (when activating)
     if active == 1:
-        check_and_hide_bud_category(bud_id)
+        check_and_hide_bundle_category(bundle_id)
         # Add notification for activation
-        add_notification(current_user.id, f"Bud '{bud_name}' has been activated.", kind='buds')
+        add_notification(current_user.id, f"Bundle '{bundle_name}' has been activated.", kind='bundles')
     else:
         # Add notification for deactivation
-        add_notification(current_user.id, f"Bud '{bud_name}' has been deactivated.", kind='buds')
-        
+        add_notification(current_user.id, f"Bundle '{bundle_name}' has been deactivated.", kind='bundles')
+
+    # Activating or deactivating adds or removes money on a lot of days at once,
+    # and nothing here recomputed the running totals - so the balance trend stayed
+    # on the old numbers until some unrelated edit happened to refresh it.
+    save_totals_remainders_d()
     save_ca_daily_balance()
     return jsonify({'status': 'success'})
 
@@ -23294,7 +23497,7 @@ def add_credit_account():
             'is_recurring': 0,
             'no_end_date': 0,
             'hidden': 0,
-            'is_bud': 0,
+            'is_bundle': 0,
             'is_interest': 1,
             'is_auto_adjustment': 0,
             'is_system': 1
@@ -23307,7 +23510,7 @@ def add_credit_account():
             'is_recurring': 0,
             'no_end_date': 0,
             'hidden': 0,
-            'is_bud': 0,
+            'is_bundle': 0,
             'is_interest': 0,
             'is_auto_adjustment': 1,
             'is_system': 1
@@ -23320,7 +23523,7 @@ def add_credit_account():
             'is_recurring': 0,
             'no_end_date': 0,
             'hidden': 0,
-            'is_bud': 0,
+            'is_bundle': 0,
             'is_interest': 0,
             'is_auto_adjustment': 0,
             'is_system': 1
@@ -23369,7 +23572,7 @@ def add_credit_account():
         'is_auto_adjustment': 0,
         'no_end_date': no_end_date,
         'hidden': 0,
-        'is_bud': 0,
+        'is_bundle': 0,
         'is_credit_account': 1,
         'credit_account_id': temp_account_id,
         'is_system': 0
@@ -23553,7 +23756,7 @@ def add_credit_account():
                 'is_bucket': 0,
                 'original_amount': None,
                 'processed': 0,
-                'bud_item_id': None
+                'bundle_item_id': None
             })
             
             # Save to Redis
@@ -23684,7 +23887,7 @@ def update_credit_account():
                     'is_auto_adjustment': 0,
                     'no_end_date': 1,
                     'hidden': 0,
-                    'is_bud': 0,
+                    'is_bundle': 0,
                     'is_credit_account': 1,
                     'credit_account_id': account_id
                 })
@@ -24281,13 +24484,40 @@ def delete_credit_account():
                 account_name = account_row['name'] if account_row else None
                 cursor.close()
 
-        # Update bud_items that reference this account
-        if account_name:
+        # Update bundle_items that reference this account.
+        # Redis-first: writing only to MySQL left the old account name in the
+        # Redis blob, and the flush worker put it back within about fifteen
+        # seconds. Matched on credit_account_id where the item has one, so a
+        # card renamed before it was deleted is still recognised.
+        deleted_acct_id = actual_id_to_delete if actual_id_to_delete else account_id
+        bundle_items = _get_bundle_items_from_redis(current_user.id)
+        if bundle_items is not None:
+            for item in bundle_items:
+                item_acct = item.get('credit_account_id')
+                matches = (
+                    (item_acct is not None and deleted_acct_id
+                     and int(item_acct) == int(deleted_acct_id))
+                    or (item_acct is None and account_name
+                        and item.get('account') == account_name)
+                )
+                if matches:
+                    item['account'] = 'deleted account'
+                    item['credit_account_id'] = None
+                    _update_bundle_item_in_redis(current_user.id, item)
+        elif account_name:
+            # Redis unavailable. Scoped through the parent bundle: account names
+            # are not unique across users, so an unscoped match renames every
+            # other user's items that share the name of this card.
             with get_db_pool().get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "UPDATE bud_items SET account = %s WHERE account = %s",
-                    ("deleted account", account_name)
+                    """
+                    UPDATE bundle_items bi
+                    INNER JOIN bundles b ON bi.bundle_id = b.id
+                    SET bi.account = %s, bi.credit_account_id = NULL
+                    WHERE bi.account = %s AND b.user_id = %s
+                    """,
+                    ("deleted account", account_name, current_user.id)
                 )
                 conn.commit()
                 cursor.close()
@@ -25822,12 +26052,12 @@ def _sync_bank_transactions_for_user(user_id, start_date=None, end_date=None, sp
                                     """, (category_id, date, amount))
                                 elif entry_type == 'expense':
                                     _sync_cursor.execute("""
-                                        INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, bud_item_id)
+                                        INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, bundle_item_id)
                                         VALUES (%s, %s, %s, NULL, 0, NULL, 1, 1, 0, NULL)
                                     """, (category_id, date, amount))
                                 elif entry_type == 'c_expense':
                                     _sync_cursor.execute("""
-                                        INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, bud_item_id)
+                                        INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, bundle_item_id)
                                         VALUES (%s, %s, %s, NULL, 0, NULL, 1, 1, 0, NULL)
                                     """, (category_id, date, amount))
                                 elif entry_type == 'c_payment':
@@ -26709,7 +26939,7 @@ def _create_credit_account_auto_adjustment(user_id, linked_account_id, bank_bala
                     'is_recurring': 0,
                     'no_end_date': 0,
                     'hidden': 0,
-                    'is_bud': 0,
+                    'is_bundle': 0,
                     'is_interest': 0,
                     'is_auto_adjustment': 1,
                     'is_system': 1
@@ -27009,7 +27239,7 @@ def _create_single_category(user_id, category_type, category_data, display_order
     
     # Add expense-specific fields
     if category_type == 'expense':
-        new_category['is_bud'] = 0
+        new_category['is_bundle'] = 0
         new_category['is_credit_account'] = 0
     
     # Create category in Redis

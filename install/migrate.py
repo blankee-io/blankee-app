@@ -49,6 +49,7 @@ EXPECTED_TABLES = (
     'bucket_prompts',
     'autobalance_settings',
     'widget_tokens',
+    'bundles', 'bundle_items',
 )
 EXPECTED_COLUMNS = (
     ('users', 'is_admin'),
@@ -62,9 +63,23 @@ EXPECTED_COLUMNS = (
     ('users', 'timezone'),
     ('users', 'email_notify_disabled'),
     ('notifications', 'type'),
+    ('c_expense_categories', 'bundle_id'),
+    ('bundle_items', 'credit_account_id'),
+    ('bundle_items', 'bundle_id'),
+    ('expense_categories', 'is_bundle'),
+    ('c_expense_categories', 'is_bundle'),
+    ('expense_entries', 'bundle_item_id'),
+    ('c_expense_entries', 'bundle_item_id'),
 )
 EXPECTED_CONSTRAINTS = (
     ('totals_remainders_m', 'totals_remainders_m_ibfk_1'),
+    ('c_expense_categories', 'c_expense_categories_bundle_fk'),
+    ('bundle_items', 'bundle_items_account_fk'),
+    ('bundle_items', 'bundle_items_ibfk_1'),
+    ('bundles', 'bundles_ibfk_1'),
+    ('bundles', 'bundles_ibfk_2'),
+    ('expense_entries', 'expense_entries_ibfk_bundle_item'),
+    ('c_expense_entries', 'c_expense_entries_ibfk_bundle_item'),
 )
 
 
@@ -193,6 +208,21 @@ def verify(cfg):
                           f"AND CONSTRAINT_NAME = '{constraint}'")
         if not rows or rows[0] == '0':
             problems.append(f'missing constraint: {table}.{constraint}')
+
+    # A unique index is not a referential constraint, so EXPECTED_CONSTRAINTS
+    # cannot see it - and apply_file runs with --force, so a CREATE UNIQUE INDEX
+    # that failed on colliding rows would neither abort the migration nor show
+    # up anywhere. This is the check that catches it. It is also the whole point
+    # of rename_buds_to_bundles.sql: without it two bundles of the same name
+    # share one category on a card.
+    rows = query(cfg, "SELECT COUNT(*) FROM information_schema.STATISTICS "
+                      "WHERE TABLE_SCHEMA = DATABASE() "
+                      "AND TABLE_NAME = 'c_expense_categories' "
+                      "AND INDEX_NAME = 'idx_c_expense_categories_account_bundle' "
+                      "AND NON_UNIQUE = 0")
+    if not rows or rows[0] == '0':
+        problems.append('missing unique index: '
+                        'c_expense_categories.idx_c_expense_categories_account_bundle')
 
     # The decimal widening is a column type change, so its presence cannot be
     # inferred from a name.
