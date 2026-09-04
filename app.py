@@ -17839,6 +17839,70 @@ def api_autobalance_settings():
                     'next_due': str(settings.get('next_due')) if settings.get('next_due') else None})
 
 
+@app.route('/api/autobalance/categories', methods=['GET', 'POST'])
+@login_required
+def api_autobalance_categories():
+    """Where a balance correction should land, and what it could land in.
+
+    A correction is income when the bank holds more than the app expected and
+    an expense when it holds less, so there are two choices rather than one -
+    an expense category cannot hold an income entry.
+
+    A separate endpoint from /api/autobalance/settings because these are
+    separate decisions: Balance now works whether or not the scheduled reminder
+    is on, so choosing a target must not mean sending the cadence back, and so
+    must not risk rewriting next_due as a side effect.
+
+    GET returns the current choice and the categories to choose from. null
+    means Uncategorized, which is what balancing has always used and what a
+    user who never opens this keeps.
+    """
+    import auto_balance
+
+    if request.method == 'GET':
+        settings = auto_balance.get_settings(current_user.id) or {}
+
+        def options(table):
+            # Hidden categories are left out: they are absent from every other
+            # picker, and offering one here would put corrections somewhere the
+            # user cannot see them. The category currently chosen is kept even
+            # if hidden, so opening Settings cannot silently drop a choice
+            # already made.
+            chosen = settings.get('income_category_id' if table == 'income_entries'
+                                  else 'expense_category_id')
+            out = []
+            for row in auto_balance.user_categories(table, current_user.id):
+                # Same predicate save_correction_categories enforces, so the
+                # picker cannot offer something the save would then refuse.
+                if not auto_balance.can_hold_a_correction(row):
+                    continue
+                if row.get('hidden') and int(row.get('id') or 0) != int(chosen or 0):
+                    continue
+                out.append({'id': int(row['id']), 'name': row.get('name') or ''})
+            out.sort(key=lambda c: c['name'].lower())
+            return out
+
+        return jsonify({
+            'success': True,
+            'income_category_id': (int(settings['income_category_id'])
+                                   if settings.get('income_category_id') else None),
+            'expense_category_id': (int(settings['expense_category_id'])
+                                    if settings.get('expense_category_id') else None),
+            'income_categories': options('income_entries'),
+            'expense_categories': options('expense_entries'),
+            'default_name': auto_balance.CORRECTION_CATEGORY,
+        })
+
+    data = request.get_json(silent=True) or {}
+    ok, message = auto_balance.save_correction_categories(
+        current_user.id,
+        data.get('income_category_id'),
+        data.get('expense_category_id'))
+    if not ok:
+        return jsonify({'success': False, 'error': message}), 400
+    return jsonify({'success': True, 'message': message})
+
+
 @app.route('/api/autobalance/state')
 @login_required
 def api_autobalance_state():
