@@ -15146,40 +15146,45 @@ transform: scale(1.2);
 /* ── Category Group Styles ── */
 
 /* Group header row */
-/* ── Rows fading in and out of a collapsing group ────────────────────────────
-   Opacity on the cells, not on the row: a <tr> is not a paint target in every
-   engine, and its cells reliably are. The small lift is on the cells for the
-   same reason, and is a nicety - an engine that ignores transforms on a table
-   cell still gets the fade, which is what carries the effect.
+/* ── Rows collapsing out of a group ──────────────────────────────────────────
+   The table shrinks, rather than the rows fading where they stand.
 
-   The row still takes its space in one step, because table layout decides a
-   row's height and no rule here can transition it. What this buys is telling
-   the eye where to look, rather than a block of the table blinking away. */
-@keyframes rowRevealIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to   { opacity: 1; transform: none; }
+   A row's height comes from the tallest cell in it, and height on a cell is a
+   minimum rather than a limit - so neither can be animated down. The script
+   puts each cell's content in .row-reveal-wrap for the duration, and it is the
+   wrapper's height that moves. With the cell's vertical padding going to zero
+   alongside it, the row really does collapse to nothing and the table closes
+   up behind it.
+
+   The wrapper is added and removed by the script, so it exists only while
+   something is animating. */
+.row-reveal-wrap {
+    overflow: hidden;
+    transition: height 200ms ease;
 }
 
-@keyframes rowRevealOut {
-    from { opacity: 1; transform: none; }
-    to   { opacity: 0; transform: translateY(-4px); }
+/* The padding is on the cell, not the wrapper, so it has to be animated
+   separately or the row keeps that much height after the content has gone. */
+tr.row-animating > td {
+    transition: padding-top 200ms ease, padding-bottom 200ms ease;
 }
 
-.row-revealing > td {
-    animation: rowRevealIn 180ms ease-out both;
+/* Padding and borders both, or the row keeps that much height after its
+   content has gone and leaves a line across the gap it is closing. */
+tr.row-collapsing > td {
+    padding-top: 0;
+    padding-bottom: 0;
+    border-top-width: 0;
+    border-bottom-width: 0;
 }
 
-.row-hiding > td {
-    animation: rowRevealOut 130ms ease-in both;
-}
-
-/* Someone who has asked their system for less motion gets none. The JS also
-   skips the timers, so this is the belt to that braces - a stylesheet cached
-   ahead of the script should not animate either. */
+/* Someone who has asked their system for less motion gets none. The script
+   also skips the animation entirely, so this is the belt to that braces - a
+   stylesheet cached ahead of the script should not animate on its own. */
 @media (prefers-reduced-motion: reduce) {
-    .row-revealing > td,
-    .row-hiding > td {
-        animation: none;
+    .row-reveal-wrap,
+    tr.row-animating > td {
+        transition: none;
     }
 }
 

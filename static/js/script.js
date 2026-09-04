@@ -2915,25 +2915,33 @@ window.sortableAutoScroll = (function () {
  */
 /* ── Animating table rows in and out ─────────────────────────────────────────
  *
- * A <tr> cannot be transitioned the way a block can: display is not an
- * animatable property, and height on a table row is decided by the table
- * layout rather than by the rule you write. So this animates what can be
- * animated - the opacity of the cells, and a small vertical shift - and
- * changes display around it, before the reveal and after the hide.
+ * The table has to shrink, not just its contents fade - so this animates the
+ * height the rows actually occupy.
  *
- * That means the row still takes its space in one step. What the animation
- * buys is that the eye is told where to look: the rows fade up out of the
- * header they belong to rather than a block of the table blinking out of
- * existence.
+ * A <tr> cannot be transitioned directly: display is not animatable, and a
+ * table row's height is decided by the table layout from the tallest cell in
+ * it, not by any rule written for the row. Setting height on the row or the
+ * cell is treated as a minimum and will not shrink below the content.
  *
- * Rapid toggling is the case that breaks a naive version - the hide finishes
- * after the user has already reopened the group, and sets display:none on a
- * row that should be visible. Each row therefore carries the id of the
- * animation currently in charge, and a callback that is no longer the current
- * one does nothing.
+ * What does work is giving each cell's content a block wrapper and
+ * transitioning the wrapper's height, with the cell's vertical padding going
+ * to zero alongside it. The row is then as tall as its tallest wrapper, and
+ * that is a real number that can be animated to nothing.
+ *
+ * The wrapper is added for the animation and taken away afterwards, so the
+ * markup a page ships is the markup it keeps - which matters because rows on
+ * the dashboards are built in JavaScript and there would be no single place to
+ * put a permanent wrapper. Nothing styles a cell's children by direct descent,
+ * so the wrapper is invisible to the stylesheet while it exists.
+ *
+ * Rapid toggling is the case a naive version gets wrong: the hide finishes
+ * after the user has already reopened the group and sets display:none on a row
+ * that should be visible. Each row carries the id of the animation currently in
+ * charge, and a callback that is no longer the current one does nothing.
  */
 window.rowReveal = (function () {
 
+    var DURATION = 200;
     var seq = 0;
 
     function reduced() {
@@ -2945,58 +2953,110 @@ window.rowReveal = (function () {
         }
     }
 
-    function clear(row) {
-        row.classList.remove('row-revealing', 'row-hiding');
+    function wrapperIn(cell) {
+        for (var i = 0; i < cell.children.length; i++) {
+            if (cell.children[i].classList
+                    && cell.children[i].classList.contains('row-reveal-wrap')) {
+                return cell.children[i];
+            }
+        }
+        return null;
+    }
+
+    function wrap(row) {
+        var wraps = [];
+        for (var i = 0; i < row.cells.length; i++) {
+            var cell = row.cells[i];
+            var existing = wrapperIn(cell);
+            if (existing) { wraps.push(existing); continue; }
+            var box = document.createElement('div');
+            box.className = 'row-reveal-wrap';
+            while (cell.firstChild) { box.appendChild(cell.firstChild); }
+            cell.appendChild(box);
+            wraps.push(box);
+        }
+        return wraps;
+    }
+
+    function unwrap(row) {
+        for (var i = 0; i < row.cells.length; i++) {
+            var cell = row.cells[i];
+            var box = wrapperIn(cell);
+            if (!box) { continue; }
+            while (box.firstChild) { cell.insertBefore(box.firstChild, box); }
+            cell.removeChild(box);
+        }
+    }
+
+    function finish(row) {
+        unwrap(row);
+        row.classList.remove('row-animating', 'row-collapsing');
+    }
+
+    function animate(row, opening, done) {
+        var mine = ++seq;
+        row._revealSeq = mine;
+
+        // Anything already running on this row is abandoned rather than left to
+        // fight with what follows.
+        finish(row);
+
+        if (reduced()) {
+            row.style.display = opening ? '' : 'none';
+            if (done) { done(); }
+            return;
+        }
+
+        if (opening) { row.style.display = ''; }
+
+        var wraps = wrap(row);
+        var heights = wraps.map(function (box) { return box.scrollHeight; });
+
+        // Start state, then a forced layout read so the browser sees the change
+        // that follows as something to animate rather than folding the two
+        // together and jumping to the end.
+        wraps.forEach(function (box, i) {
+            box.style.height = (opening ? 0 : heights[i]) + 'px';
+        });
+        row.classList.add('row-animating');
+        // Forced layout read, both ways. Without it the browser can fold the
+        // start and end heights into one change and show the end state at
+        // once, which is the whole animation gone.
+        void row.offsetHeight;
+
+        window.requestAnimationFrame(function () {
+            if (row._revealSeq !== mine) { return; }
+            if (!opening) { row.classList.add('row-collapsing'); }
+            wraps.forEach(function (box, i) {
+                box.style.height = (opening ? heights[i] : 0) + 'px';
+            });
+        });
+
+        window.setTimeout(function () {
+            if (row._revealSeq !== mine) { return; }
+            if (!opening) { row.style.display = 'none'; }
+            finish(row);
+            if (done) { done(); }
+        }, DURATION + 20);
     }
 
     function show(rows) {
-        Array.prototype.forEach.call(rows, function (row) {
-            var mine = ++seq;
-            row._revealSeq = mine;
-            clear(row);
-            row.style.display = '';
-            if (reduced()) { return; }
-            // Read a layout property so the browser treats the class that
-            // follows as a change to animate rather than folding the two
-            // together and showing the end state immediately.
-            void row.offsetHeight;
-            row.classList.add('row-revealing');
-            window.setTimeout(function () {
-                if (row._revealSeq === mine) { clear(row); }
-            }, 200);
-        });
+        Array.prototype.forEach.call(rows, function (row) { animate(row, true); });
     }
 
     function hide(rows) {
-        Array.prototype.forEach.call(rows, function (row) {
-            var mine = ++seq;
-            row._revealSeq = mine;
-            clear(row);
-            if (reduced()) {
-                row.style.display = 'none';
-                return;
-            }
-            row.classList.add('row-hiding');
-            window.setTimeout(function () {
-                // Only if this hide is still the one in charge. Without the
-                // check, reopening a group mid-animation leaves rows that
-                // should be visible with display:none.
-                if (row._revealSeq === mine) {
-                    row.style.display = 'none';
-                    clear(row);
-                }
-            }, 140);
-        });
+        Array.prototype.forEach.call(rows, function (row) { animate(row, false); });
     }
 
     /* One entry point for "these rows should now be visible or not", so a
-       caller does not have to decide which of the two to use. */
+       caller does not have to choose between the two. */
     function set(rows, visible) {
         if (visible) { show(rows); } else { hide(rows); }
     }
 
     return { show: show, hide: hide, set: set };
 })();
+
 
 /* ── Collapsible category groups on the recurring pages ──────────────────────
  *
