@@ -2915,33 +2915,40 @@ window.sortableAutoScroll = (function () {
  */
 /* ── Animating table rows in and out ─────────────────────────────────────────
  *
- * The table has to shrink, not just its contents fade - so this animates the
- * height the rows actually occupy.
+ * The table shrinks, and the content shrinks with it.
  *
  * A <tr> cannot be transitioned directly: display is not animatable, and a
- * table row's height is decided by the table layout from the tallest cell in
- * it, not by any rule written for the row. Setting height on the row or the
- * cell is treated as a minimum and will not shrink below the content.
+ * row's height is decided by the table layout from the tallest cell in it -
+ * and height on a cell is a minimum rather than a limit, so setting it to zero
+ * does not shrink past the content. What works is giving each cell's content a
+ * block wrapper and transitioning the wrapper's height, with the cell's
+ * vertical padding and borders going to zero alongside it.
  *
- * What does work is giving each cell's content a block wrapper and
- * transitioning the wrapper's height, with the cell's vertical padding going
- * to zero alongside it. The row is then as tall as its tallest wrapper, and
- * that is a real number that can be animated to nothing.
+ * Two things make the difference between that being a smooth shrink and a
+ * guillotine:
  *
- * The wrapper is added for the animation and taken away afterwards, so the
- * markup a page ships is the markup it keeps - which matters because rows on
- * the dashboards are built in JavaScript and there would be no single place to
- * put a permanent wrapper. Nothing styles a cell's children by direct descent,
- * so the wrapper is invisible to the stylesheet while it exists.
+ *   The whole batch moves as one. Every row is wrapped, then every row is
+ *   measured, then every start state is written, then ONE forced layout read
+ *   for the lot, then every end state. Doing that per row means a forced
+ *   synchronous layout per row - the browser recalculating the whole table
+ *   once for each of them - which is exactly the stutter that makes an
+ *   animation look cheap.
  *
- * Rapid toggling is the case a naive version gets wrong: the hide finishes
- * after the user has already reopened the group and sets display:none on a row
- * that should be visible. Each row carries the id of the animation currently in
- * charge, and a callback that is no longer the current one does nothing.
+ *   The content leaves with the row rather than being cut off by it. The
+ *   wrapper fades as it shrinks, so the text goes with the edge that is
+ *   closing over it instead of being sliced through.
+ *
+ * The wrapper is added for the animation and removed afterwards, so the markup
+ * a page ships is the markup it keeps - the dashboard rows are built in
+ * JavaScript and there is no single place a permanent wrapper could go.
+ *
+ * Rapid toggling: each row carries the id of the animation in charge, and a
+ * callback that is no longer the current one does nothing. Without it, a hide
+ * finishing after the user reopened the group hides rows that should be shown.
  */
 window.rowReveal = (function () {
 
-    var DURATION = 200;
+    var DURATION = 220;
     var seq = 0;
 
     function reduced() {
@@ -2983,6 +2990,9 @@ window.rowReveal = (function () {
             var cell = row.cells[i];
             var box = wrapperIn(cell);
             if (!box) { continue; }
+            // insertBefore(box.firstChild, box) each time round puts the
+            // children back in their original order, which is the property that
+            // would corrupt the table if it were wrong.
             while (box.firstChild) { cell.insertBefore(box.firstChild, box); }
             cell.removeChild(box);
         }
@@ -2993,69 +3003,81 @@ window.rowReveal = (function () {
         row.classList.remove('row-animating', 'row-collapsing');
     }
 
-    function animate(row, opening, done) {
-        var mine = ++seq;
-        row._revealSeq = mine;
+    function run(rows, opening) {
+        rows = Array.prototype.slice.call(rows || []);
+        if (!rows.length) { return; }
 
-        // Anything already running on this row is abandoned rather than left to
-        // fight with what follows.
-        finish(row);
+        var mine = ++seq;
+        rows.forEach(function (row) {
+            row._revealSeq = mine;
+            finish(row);                 // abandon anything already running
+        });
 
         if (reduced()) {
-            row.style.display = opening ? '' : 'none';
-            if (done) { done(); }
+            rows.forEach(function (row) {
+                row.style.display = opening ? '' : 'none';
+            });
             return;
         }
 
-        if (opening) { row.style.display = ''; }
+        if (opening) {
+            rows.forEach(function (row) { row.style.display = ''; });
+        }
 
-        var wraps = wrap(row);
-        var heights = wraps.map(function (box) { return box.scrollHeight; });
-
-        // Start state, then a forced layout read so the browser sees the change
-        // that follows as something to animate rather than folding the two
-        // together and jumping to the end.
-        wraps.forEach(function (box, i) {
-            box.style.height = (opening ? 0 : heights[i]) + 'px';
+        // 1. Wrap every row (writes).
+        var plan = rows.map(function (row) {
+            return { row: row, wraps: wrap(row), heights: [] };
         });
-        row.classList.add('row-animating');
-        // Forced layout read, both ways. Without it the browser can fold the
-        // start and end heights into one change and show the end state at
-        // once, which is the whole animation gone.
-        void row.offsetHeight;
 
-        window.requestAnimationFrame(function () {
-            if (row._revealSeq !== mine) { return; }
-            if (!opening) { row.classList.add('row-collapsing'); }
-            wraps.forEach(function (box, i) {
-                box.style.height = (opening ? heights[i] : 0) + 'px';
+        // 2. Measure every row (reads). Separated from the writes above and
+        //    below so the browser lays out once, not once per row.
+        plan.forEach(function (item) {
+            item.heights = item.wraps.map(function (box) {
+                return box.scrollHeight;
             });
         });
 
+        // 3. Start state for every row (writes).
+        plan.forEach(function (item) {
+            item.wraps.forEach(function (box, i) {
+                box.style.height = (opening ? 0 : item.heights[i]) + 'px';
+            });
+            item.row.classList.add('row-animating');
+            // Opening starts collapsed and ends open; closing the other way.
+            item.row.classList.toggle('row-collapsing', opening);
+        });
+
+        // 4. One forced layout read for the whole batch. Without it the browser
+        //    folds the start and end states together and shows the end at once.
+        void document.body.offsetHeight;
+
+        // 5. End state for every row (writes).
+        plan.forEach(function (item) {
+            item.wraps.forEach(function (box, i) {
+                box.style.height = (opening ? item.heights[i] : 0) + 'px';
+            });
+            item.row.classList.toggle('row-collapsing', !opening);
+        });
+
         window.setTimeout(function () {
-            if (row._revealSeq !== mine) { return; }
-            if (!opening) { row.style.display = 'none'; }
-            finish(row);
-            if (done) { done(); }
-        }, DURATION + 20);
+            plan.forEach(function (item) {
+                if (item.row._revealSeq !== mine) { return; }
+                if (!opening) { item.row.style.display = 'none'; }
+                finish(item.row);
+            });
+        }, DURATION + 30);
     }
 
-    function show(rows) {
-        Array.prototype.forEach.call(rows, function (row) { animate(row, true); });
-    }
-
-    function hide(rows) {
-        Array.prototype.forEach.call(rows, function (row) { animate(row, false); });
-    }
+    function show(rows) { run(rows, true); }
+    function hide(rows) { run(rows, false); }
 
     /* One entry point for "these rows should now be visible or not", so a
        caller does not have to choose between the two. */
-    function set(rows, visible) {
-        if (visible) { show(rows); } else { hide(rows); }
-    }
+    function set(rows, visible) { run(rows, !!visible); }
 
     return { show: show, hide: hide, set: set };
 })();
+
 
 
 /* ── Collapsible category groups on the recurring pages ──────────────────────
