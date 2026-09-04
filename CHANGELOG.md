@@ -8,6 +8,17 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.18.1 — 2026-09-03
+
+### Fixed
+- **The Bundles icon appears in the menu again.** It was asking for a style of
+  the icon that only exists in the paid Font Awesome set, and the menu forces
+  its icons to a weight this particular icon has no drawing for — so it came out
+  as nothing at all.
+- **The arrow on scheduled raise and price-change rows is no longer an empty
+  box** on installations without a Font Awesome Pro licence. It has been blank
+  there since 1.16.0.
+
 ## 1.18.0 — 2026-09-03
 
 ### Added
