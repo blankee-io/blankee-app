@@ -47,6 +47,7 @@
 
 /* solid */
 .fa-arrow-left-from-bracket { --fa: "\f2f5"; --fa-style: 900; }  /* fa-right-from-bracket */
+.fa-arrow-turn-down-right { --fa: "\f3be"; --fa-style: 900; }  /* fa-turn-down */
 .fa-arrows-repeat { --fa: "\f021"; --fa-style: 900; }  /* fa-arrows-rotate */
 .fa-broom-wide { --fa: "\f51a"; --fa-style: 900; }  /* fa-broom */
 .fa-calendar-exclamation { --fa: "\f274"; --fa-style: 900; }  /* fa-calendar-check */
@@ -94,6 +95,7 @@
    elsewhere is untouched. */
 .fa-regular.fa-arrow-left-from-bracket, .far.fa-arrow-left-from-bracket { --fa-style: 900; }  /* via fa-right-from-bracket, solid-only */
 .fa-regular.fa-arrows-repeat, .far.fa-arrows-repeat { --fa-style: 900; }  /* via fa-arrows-rotate, solid-only */
+.fa-regular.fa-boxes-stacked, .far.fa-boxes-stacked { --fa-style: 900; }  /* fa-boxes-stacked is solid-only */
 .fa-regular.fa-gear, .far.fa-gear { --fa-style: 900; }  /* fa-gear is solid-only */
 .fa-regular.fa-lock, .far.fa-lock { --fa-style: 900; }  /* fa-lock is solid-only */
 .fa-regular.fa-percent, .far.fa-percent { --fa-style: 900; }  /* fa-percent is solid-only */

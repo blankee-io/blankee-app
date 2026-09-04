@@ -27,6 +27,10 @@
   },
   "icons": {
     "_about": "Pro-only icon names and Kit icon names. style is solid or regular.",
+    "fa-arrow-turn-down-right": {
+      "icon": "fa-turn-down",
+      "style": "solid"
+    },
     "fa-arrows-repeat": {
       "icon": "fa-arrows-rotate",
       "style": "solid"

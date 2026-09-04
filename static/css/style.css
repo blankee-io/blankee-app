@@ -925,10 +925,24 @@ body {
     text-decoration: none;
 }
 
+/* boxes-stacked has no Light face to fall back to, so the rule below coerced
+   it into a weight where the glyph does not exist and it rendered as nothing.
+   Deferring to the icon's own style gives it the solid face it asks for, in Pro
+   and in Free alike - which is also the icon the Bundles page's own button uses.
+
+   Scoped to this one icon rather than lifting the rule for all of them: every
+   other icon in the menu does have a Light face, and they are meant to match. */
+.dropdown-link i.fa-boxes-stacked {
+    font-weight: var(--fa-style, 900);
+}
+
 .dropdown-link i{
     display: flex;
     align-items: center;
     color: white;
+    /* 300 is Font Awesome Light, which is Pro-only. install/build_fa_fallback.py
+       rewrites this to var(--fa-style, 900) for installs without Pro, so the
+       menu is not blank there. See the icon exception below. */
     font-weight: 300;
 }
 
