@@ -2470,8 +2470,12 @@ function _abApply(balance, savings, cards) {
                            (d.confirmed === 1 ? "entry" : "entries") + ".");
             }
             if (d.entry_written) {
+                // Where it actually went, not "Uncategorized" - that is only
+                // the default now, and saying it regardless would be wrong for
+                // anyone who chose somewhere else.
                 parts.push("Recorded " + Math.abs(d.difference).toFixed(2) +
-                           " as Uncategorized " + d.direction + ".");
+                           " " + d.direction + " in " +
+                           (d.category_name || "Uncategorized") + ".");
             } else {
                 parts.push("Your balance matches.");
             }
@@ -2909,6 +2913,289 @@ window.sortableAutoScroll = (function () {
  * stylesheet resumes - its :nth-child rules carry :not([class*="zebra-"]), so
  * exactly one of the two ever applies to a row.
  */
+/* ── Animating table rows in and out ─────────────────────────────────────────
+ *
+ * The table shrinks, and the content shrinks with it.
+ *
+ * A <tr> cannot be transitioned directly: display is not animatable, and a
+ * row's height is decided by the table layout from the tallest cell in it -
+ * and height on a cell is a minimum rather than a limit, so setting it to zero
+ * does not shrink past the content. What works is giving each cell's content a
+ * block wrapper and transitioning the wrapper's height, with the cell's
+ * vertical padding and borders going to zero alongside it.
+ *
+ * Two things make the difference between that being a smooth shrink and a
+ * guillotine:
+ *
+ *   The whole batch moves as one. Every row is wrapped, then every row is
+ *   measured, then every start state is written, then ONE forced layout read
+ *   for the lot, then every end state. Doing that per row means a forced
+ *   synchronous layout per row - the browser recalculating the whole table
+ *   once for each of them - which is exactly the stutter that makes an
+ *   animation look cheap.
+ *
+ *   The content leaves with the row rather than being cut off by it. The
+ *   wrapper fades as it shrinks, so the text goes with the edge that is
+ *   closing over it instead of being sliced through.
+ *
+ * The wrapper is added for the animation and removed afterwards, so the markup
+ * a page ships is the markup it keeps - the dashboard rows are built in
+ * JavaScript and there is no single place a permanent wrapper could go.
+ *
+ * Rapid toggling: each row carries the id of the animation in charge, and a
+ * callback that is no longer the current one does nothing. Without it, a hide
+ * finishing after the user reopened the group hides rows that should be shown.
+ */
+window.rowReveal = (function () {
+
+    var DURATION = 220;
+    var seq = 0;
+
+    function reduced() {
+        try {
+            return window.matchMedia
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function wrapperIn(cell) {
+        for (var i = 0; i < cell.children.length; i++) {
+            if (cell.children[i].classList
+                    && cell.children[i].classList.contains('row-reveal-wrap')) {
+                return cell.children[i];
+            }
+        }
+        return null;
+    }
+
+    function wrap(row) {
+        var wraps = [];
+        for (var i = 0; i < row.cells.length; i++) {
+            var cell = row.cells[i];
+            var existing = wrapperIn(cell);
+            if (existing) { wraps.push(existing); continue; }
+            var box = document.createElement('div');
+            box.className = 'row-reveal-wrap';
+            while (cell.firstChild) { box.appendChild(cell.firstChild); }
+            cell.appendChild(box);
+            wraps.push(box);
+        }
+        return wraps;
+    }
+
+    function unwrap(row) {
+        for (var i = 0; i < row.cells.length; i++) {
+            var cell = row.cells[i];
+            var box = wrapperIn(cell);
+            if (!box) { continue; }
+            // insertBefore(box.firstChild, box) each time round puts the
+            // children back in their original order, which is the property that
+            // would corrupt the table if it were wrong.
+            while (box.firstChild) { cell.insertBefore(box.firstChild, box); }
+            cell.removeChild(box);
+        }
+    }
+
+    function finish(row) {
+        unwrap(row);
+        row.classList.remove('row-animating', 'row-collapsing');
+    }
+
+    function run(rows, opening) {
+        rows = Array.prototype.slice.call(rows || []);
+        if (!rows.length) { return; }
+
+        var mine = ++seq;
+        rows.forEach(function (row) {
+            row._revealSeq = mine;
+            finish(row);                 // abandon anything already running
+        });
+
+        if (reduced()) {
+            rows.forEach(function (row) {
+                row.style.display = opening ? '' : 'none';
+            });
+            return;
+        }
+
+        if (opening) {
+            rows.forEach(function (row) { row.style.display = ''; });
+        }
+
+        // 1. Wrap every row (writes).
+        var plan = rows.map(function (row) {
+            return { row: row, wraps: wrap(row), heights: [] };
+        });
+
+        // 2. Measure every row (reads). Separated from the writes above and
+        //    below so the browser lays out once, not once per row.
+        plan.forEach(function (item) {
+            item.heights = item.wraps.map(function (box) {
+                return box.scrollHeight;
+            });
+        });
+
+        // 3. Start state for every row (writes).
+        plan.forEach(function (item) {
+            item.wraps.forEach(function (box, i) {
+                box.style.height = (opening ? 0 : item.heights[i]) + 'px';
+            });
+            item.row.classList.add('row-animating');
+            // Opening starts collapsed and ends open; closing the other way.
+            item.row.classList.toggle('row-collapsing', opening);
+        });
+
+        // 4. One forced layout read for the whole batch. Without it the browser
+        //    folds the start and end states together and shows the end at once.
+        void document.body.offsetHeight;
+
+        // 5. End state for every row (writes).
+        plan.forEach(function (item) {
+            item.wraps.forEach(function (box, i) {
+                box.style.height = (opening ? item.heights[i] : 0) + 'px';
+            });
+            item.row.classList.toggle('row-collapsing', !opening);
+        });
+
+        window.setTimeout(function () {
+            plan.forEach(function (item) {
+                if (item.row._revealSeq !== mine) { return; }
+                if (!opening) { item.row.style.display = 'none'; }
+                finish(item.row);
+            });
+        }, DURATION + 30);
+    }
+
+    function show(rows) { run(rows, true); }
+    function hide(rows) { run(rows, false); }
+
+    /* One entry point for "these rows should now be visible or not", so a
+       caller does not have to choose between the two. */
+    function set(rows, visible) { run(rows, !!visible); }
+
+    return { show: show, hide: hide, set: set };
+})();
+
+
+
+/* ── Collapsible category groups on the recurring pages ──────────────────────
+ *
+ * The rows arrive already ordered and already stamped with the group they
+ * belong to, so a group is just "the rows sharing a data-group-key" - there is
+ * no nesting to manage and no second source of truth about which category is in
+ * which group.
+ *
+ * Collapsed state is remembered per page in localStorage, because the whole
+ * point is navigating a long list: springing back open on every save would undo
+ * the thing the user did to make the page manageable. It is a display
+ * preference and it is per browser, which is what localStorage is for - and it
+ * is read defensively, because a private window can throw on access rather than
+ * simply return nothing.
+ */
+window.recurringGroups = (function () {
+
+    function storeKey() {
+        return 'recurring-collapsed:' + window.location.pathname;
+    }
+
+    function readCollapsed() {
+        try {
+            return JSON.parse(localStorage.getItem(storeKey()) || '[]') || [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function writeCollapsed(keys) {
+        try {
+            localStorage.setItem(storeKey(), JSON.stringify(keys));
+        } catch (e) {
+            /* The groups still collapse; they just will not be remembered.
+               Not worth telling the user about. */
+        }
+    }
+
+    function members(header) {
+        var key = header.getAttribute('data-group-key');
+        var out = [];
+        var row = header.nextElementSibling;
+        while (row && !row.classList.contains('recurring-group-header')) {
+            if (row.getAttribute('data-group-key') === key) { out.push(row); }
+            row = row.nextElementSibling;
+        }
+        return out;
+    }
+
+    function paint(header, collapsed, animate) {
+        header.classList.toggle('is-collapsed', collapsed);
+        var btn = header.querySelector('.recurring-group-toggle');
+        if (btn) { btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true'); }
+        var rows = members(header);
+        rows.forEach(function (row) {
+            // An attribute rather than a direct style, so this and the search
+            // are not both writing row.style.display and undoing each other.
+            if (collapsed) {
+                row.setAttribute('data-collapsed', '1');
+            } else {
+                row.removeAttribute('data-collapsed');
+            }
+        });
+        // animate is false on the first paint: rows arriving already collapsed
+        // should simply be collapsed, not play a hide the user did not ask for.
+        if (animate === false) {
+            rows.forEach(function (row) { row.style.display = collapsed ? 'none' : ''; });
+        } else {
+            window.rowReveal.set(rows, !collapsed);
+        }
+    }
+
+    function attach(root) {
+        root = root || document;
+        var headers = root.querySelectorAll('.recurring-group-header');
+        if (!headers.length) { return; }
+        var collapsed = readCollapsed();
+
+        Array.prototype.forEach.call(headers, function (header) {
+            var key = header.getAttribute('data-group-key');
+
+            var label = header.querySelector('.recurring-group-count');
+            if (label) {
+                // Categories, not rows: a scheduled change is another row for
+                // the same category, and counting those would report more
+                // entries than the user has.
+                var seen = {};
+                members(header).forEach(function (row) {
+                    var id = row.getAttribute('data-category-id');
+                    if (id) { seen[id] = true; }
+                });
+                var n = Object.keys(seen).length;
+                label.textContent = n === 1 ? '1 category' : n + ' categories';
+            }
+
+            paint(header, collapsed.indexOf(key) !== -1, false);
+
+            header.addEventListener('click', function () {
+                var now = readCollapsed();
+                var at = now.indexOf(key);
+                if (at === -1) { now.push(key); } else { now.splice(at, 1); }
+                writeCollapsed(now);
+                paint(header, at === -1);
+                // Opening a group while a search is running would otherwise put
+                // back the rows that did not match it. The search owns which
+                // rows are visible; this just asks it to decide again.
+                var tbody = header.parentNode;
+                if (tbody && typeof tbody._recurringApply === 'function') {
+                    tbody._recurringApply();
+                }
+            });
+        });
+    }
+
+    return { attach: attach, members: members, paint: paint };
+})();
+
 window.recurringSearch = (function () {
 
     function stripe(tbody, oddClass, evenClass) {
@@ -2918,6 +3205,9 @@ window.recurringSearch = (function () {
             var row = rows[i];
             row.classList.remove(oddClass, evenClass);
             if (row.style.display === 'none') { continue; }
+            // A group header is not one of the striped rows; counting it would
+            // flip the colours of everything below it.
+            if (row.classList.contains('recurring-group-header')) { continue; }
             row.classList.add(index % 2 === 0 ? evenClass : oddClass);
             index++;
         }
@@ -2937,10 +3227,37 @@ window.recurringSearch = (function () {
             var rows = tbody.querySelectorAll('tr');
             var shown = 0;
             for (var i = 0; i < rows.length; i++) {
-                var name = (rows[i].getAttribute('data-category-name') || '').toLowerCase();
+                var row = rows[i];
+                // Group headers are placed by the loop below, from whether
+                // anything in the group survived the filter.
+                if (row.classList.contains('recurring-group-header')) { continue; }
+                var name = (row.getAttribute('data-category-name') || '').toLowerCase();
                 var match = !query || name.indexOf(query) !== -1;
-                rows[i].style.display = match ? '' : 'none';
+                // A collapsed group hides its rows, but only while nothing is
+                // being searched for - a match the user asked to see must not
+                // stay hidden because of a group they closed earlier.
+                var collapsedAway = !query && row.hasAttribute('data-collapsed');
+                row.style.display = (match && !collapsedAway) ? '' : 'none';
                 if (match) { shown++; }
+            }
+
+            // A header with nothing left under it goes too, rather than sitting
+            // over a gap - unless it is collapsed and unsearched, which is the
+            // one case where showing no members is the point and the header has
+            // to stay for the group to be opened again.
+            var headers = tbody.querySelectorAll('.recurring-group-header');
+            for (var h = 0; h < headers.length; h++) {
+                var key = headers[h].getAttribute('data-group-key');
+                var visible = 0;
+                var member = headers[h].nextElementSibling;
+                while (member && !member.classList.contains('recurring-group-header')) {
+                    if (member.getAttribute('data-group-key') === key
+                            && member.style.display !== 'none') { visible++; }
+                    member = member.nextElementSibling;
+                }
+                headers[h].style.display =
+                    (visible || (!query && headers[h].classList.contains('is-collapsed')))
+                        ? '' : 'none';
             }
 
             if (query) {
@@ -2956,6 +3273,10 @@ window.recurringSearch = (function () {
 
             if (empty) { empty.style.display = (query && shown === 0) ? '' : 'none'; }
         }
+
+        // So the group toggle can ask the search to decide again after it
+        // changes which rows are collapsed.
+        tbody._recurringApply = apply;
 
         input.addEventListener('input', apply);
         if (clear) {

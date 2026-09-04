@@ -17839,6 +17839,70 @@ def api_autobalance_settings():
                     'next_due': str(settings.get('next_due')) if settings.get('next_due') else None})
 
 
+@app.route('/api/autobalance/categories', methods=['GET', 'POST'])
+@login_required
+def api_autobalance_categories():
+    """Where a balance correction should land, and what it could land in.
+
+    A correction is income when the bank holds more than the app expected and
+    an expense when it holds less, so there are two choices rather than one -
+    an expense category cannot hold an income entry.
+
+    A separate endpoint from /api/autobalance/settings because these are
+    separate decisions: Balance now works whether or not the scheduled reminder
+    is on, so choosing a target must not mean sending the cadence back, and so
+    must not risk rewriting next_due as a side effect.
+
+    GET returns the current choice and the categories to choose from. null
+    means Uncategorized, which is what balancing has always used and what a
+    user who never opens this keeps.
+    """
+    import auto_balance
+
+    if request.method == 'GET':
+        settings = auto_balance.get_settings(current_user.id) or {}
+
+        def options(table):
+            # Hidden categories are left out: they are absent from every other
+            # picker, and offering one here would put corrections somewhere the
+            # user cannot see them. The category currently chosen is kept even
+            # if hidden, so opening Settings cannot silently drop a choice
+            # already made.
+            chosen = settings.get('income_category_id' if table == 'income_entries'
+                                  else 'expense_category_id')
+            out = []
+            for row in auto_balance.user_categories(table, current_user.id):
+                # Same predicate save_correction_categories enforces, so the
+                # picker cannot offer something the save would then refuse.
+                if not auto_balance.can_hold_a_correction(row):
+                    continue
+                if row.get('hidden') and int(row.get('id') or 0) != int(chosen or 0):
+                    continue
+                out.append({'id': int(row['id']), 'name': row.get('name') or ''})
+            out.sort(key=lambda c: c['name'].lower())
+            return out
+
+        return jsonify({
+            'success': True,
+            'income_category_id': (int(settings['income_category_id'])
+                                   if settings.get('income_category_id') else None),
+            'expense_category_id': (int(settings['expense_category_id'])
+                                    if settings.get('expense_category_id') else None),
+            'income_categories': options('income_entries'),
+            'expense_categories': options('expense_entries'),
+            'default_name': auto_balance.CORRECTION_CATEGORY,
+        })
+
+    data = request.get_json(silent=True) or {}
+    ok, message = auto_balance.save_correction_categories(
+        current_user.id,
+        data.get('income_category_id'),
+        data.get('expense_category_id'))
+    if not ok:
+        return jsonify({'success': False, 'error': message}), 400
+    return jsonify({'success': True, 'message': message})
+
+
 @app.route('/api/autobalance/state')
 @login_required
 def api_autobalance_state():
@@ -18968,7 +19032,10 @@ def recurring_income():
             record['prev_bucket_spent'] = None
             record['prev_bucket_date'] = None
 
-    recurring_income_records = _annotate_chain_rows(recurring_income_records)
+    order_categories, order_groups = _categories_and_groups_for_ordering(
+        'income', current_user.id)
+    recurring_income_records = _annotate_chain_rows(
+        recurring_income_records, order_categories, order_groups)
 
     # Pass landing_page to the template
     # Get all income categories for the searchable dropdown
@@ -19269,7 +19336,57 @@ def _delete_chain_link(kind, user_id, category_id, recurring_id):
     return f'The {spec["label"]} was removed; the previous amount now runs on.'
 
 
-def _annotate_chain_rows(records):
+def _categories_and_groups_for_ordering(kind, user_id):
+    """The full category rows and their groups, for ordering a recurring page.
+
+    Full rows, not the trimmed selects the pages use for their dropdowns:
+    ordering needs display_order, group_id and is_system, and a dropdown does
+    not. Redis holds whole rows, so the fallback is the only place the column
+    list has to be written out.
+    """
+    cat_table = {'income': 'income_categories',
+                 'expense': 'expense_categories',
+                 'c_expense': 'c_expense_categories'}[kind]
+    group_table = cat_table.replace('categories', 'category_groups')
+
+    categories = _get_categories_from_redis(cat_table, user_id)
+    if categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            if kind == 'c_expense':
+                cursor.execute(
+                    """
+                    SELECT c.* FROM c_expense_categories c
+                    INNER JOIN credit_accounts a ON c.account_id = a.id
+                    WHERE a.user_id = %s
+                    """, (user_id,))
+            else:
+                cursor.execute(
+                    f"SELECT * FROM {cat_table} WHERE user_id = %s", (user_id,))
+            categories = list(cursor.fetchall())
+            cursor.close()
+
+    groups = _get_category_groups_from_redis(group_table, user_id)
+    if groups is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            if kind == 'c_expense':
+                cursor.execute(
+                    """
+                    SELECT g.* FROM c_expense_category_groups g
+                    INNER JOIN credit_accounts a ON g.account_id = a.id
+                    WHERE a.user_id = %s
+                    """, (user_id,))
+            else:
+                cursor.execute(
+                    f"SELECT * FROM {group_table} WHERE user_id = %s", (user_id,))
+            groups = list(cursor.fetchall())
+            cursor.close()
+
+    return categories or [], groups or []
+
+
+def _annotate_chain_rows(records, categories=None, groups=None):
     """Order rows so each category's chain reads top to bottom, and flag them.
 
     Without the sort the rows arrive in whatever order Redis holds them and a
@@ -19277,9 +19394,49 @@ def _annotate_chain_rows(records):
     nonsense. is_raise says a row is a change rather than the original;
     is_chain_end says it is the last link, which is the only row that gets the
     "schedule a change" action.
+
+    Given the categories and their groups, the order is the one Manage
+    Categories uses - groups by display_order descending, then Ungrouped, then
+    System, and inside each the categories by their own display_order - so a
+    category sits in the same place on both screens. Alphabetical order is the
+    fallback for a caller that has no category list to offer.
+
+    Every row of a chain shares a category, so it shares the whole sort key up
+    to start_date: the chain stays contiguous however the categories are
+    ordered. Each row is also stamped with group_key and group_name, which is
+    what lets the template start a new group header when the key changes rather
+    than looping the categories a second time.
     """
-    records = sorted(records or [],
-                     key=lambda r: (str(r.get('category_name') or '').lower(),
+    cat_by_id = {int(c['id']): c for c in (categories or []) if c.get('id') is not None}
+    group_by_id = {int(g['id']): g for g in (groups or []) if g.get('id') is not None}
+
+    def placement(record):
+        """(section, group order, category order, group key, group name)."""
+        cat = cat_by_id.get(int(record.get('category_id') or 0)) or {}
+        cat_order = float(cat.get('display_order') or 0)
+        group_id = cat.get('group_id')
+
+        if group_id is not None:
+            group = group_by_id.get(int(group_id)) or {}
+            return (0, float(group.get('display_order') or 0), cat_order,
+                    'g%d' % int(group_id), group.get('name') or 'Group')
+        if int(cat.get('is_system') or 0):
+            return (2, 0.0, cat_order, '_system', 'System')
+        return (1, 0.0, cat_order, '_ungrouped', 'Ungrouped')
+
+    records = list(records or [])
+    if categories:
+        for record in records:
+            section, group_order, cat_order, key, name = placement(record)
+            record['group_key'] = key
+            record['group_name'] = name
+            record['_sort'] = (section, -group_order, -cat_order)
+        records.sort(key=lambda r: (r['_sort'],
+                                    _as_date(r.get('start_date')) or date.min))
+        for record in records:
+            record.pop('_sort', None)
+    else:
+        records.sort(key=lambda r: (str(r.get('category_name') or '').lower(),
                                     _as_date(r.get('start_date')) or date.min))
     seen = set()
     for record in records:
@@ -20244,7 +20401,9 @@ def recurring_expense():
 
     return render_template(
         'recurring_e.html', 
-        recurring_expense_records=_annotate_chain_rows(recurring_expense_records),
+        recurring_expense_records=_annotate_chain_rows(
+            recurring_expense_records, *_categories_and_groups_for_ordering(
+                'expense', current_user.id)),
         expense_categories=all_expense_categories,
         profile_picture=profile_picture,
         first_name=first_name,
@@ -21170,7 +21329,9 @@ def recurring_ca_expense():
 
     return render_template(
         'recurring_ca_e.html',
-        recurring_ca_expense_records=_annotate_chain_rows(recurring_ca_expense_records),
+        recurring_ca_expense_records=_annotate_chain_rows(
+            recurring_ca_expense_records, *_categories_and_groups_for_ordering(
+                'c_expense', current_user.id)),
         credit_accounts=credit_accounts,  # <-- Pass this to the template
         ca_categories_for_dropdown=ca_categories_for_dropdown,  # <-- Available categories for new recurring
         profile_picture=profile_picture,

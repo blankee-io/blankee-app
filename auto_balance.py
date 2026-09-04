@@ -105,7 +105,8 @@ def _row_to_settings(row):
         return None
     keys = ('id', 'user_id', 'enabled', 'cadence_interval', 'cadence_unit',
             'weekdays', 'monthly_days', 'notify_time', 'anchor_date',
-            'next_due', 'pending_date', 'last_balanced', 'last_adjustment')
+            'next_due', 'pending_date', 'last_balanced', 'last_adjustment',
+            'income_category_id', 'expense_category_id')
     if isinstance(row, dict):
         return {k: row.get(k) for k in keys}
     return dict(zip(keys, row[:len(keys)]))
@@ -118,7 +119,8 @@ def get_settings(user_id):
             cursor.execute(
                 "SELECT id, user_id, enabled, cadence_interval, cadence_unit, "
                 "       weekdays, monthly_days, notify_time, anchor_date, "
-                "       next_due, pending_date, last_balanced, last_adjustment "
+                "       next_due, pending_date, last_balanced, last_adjustment, "
+                "       income_category_id, expense_category_id "
                 "  FROM autobalance_settings WHERE user_id = %s", (user_id,))
             return _row_to_settings(cursor.fetchone())
     except Exception as e:
@@ -673,6 +675,153 @@ def _uncategorized_id(table, user_id):
     return None
 
 
+def user_categories(table, user_id):
+    """The user's categories for an entry table, Redis first.
+
+    Same source _uncategorized_id reads, so the two cannot disagree about what
+    exists.
+    """
+    cat_table = ('income_categories' if table == 'income_entries'
+                 else 'expense_categories')
+    rows = redis_manager.get_table_cache(cat_table, user_id)
+    if rows is not None:
+        return rows
+    try:
+        with get_db_pool().get_cursor() as cursor:
+            cursor.execute(
+                f"SELECT * FROM {cat_table} WHERE user_id = %s", (user_id,))
+            return list(cursor.fetchall() or [])
+    except Exception as e:
+        log_warning(logger, 'AUTOBALANCE',
+                    f"Could not read {cat_table} for user {user_id}: {e}")
+        return []
+
+
+def _category_name(table, user_id, category_id):
+    """The name of the category a correction went to, for the message.
+
+    The user chose where corrections land, so the confirmation has to say where
+    it actually went - "Uncategorized" was hardcoded in the browser and would
+    now be a lie for anyone who changed it.
+    """
+    for row in user_categories(table, user_id):
+        if int(row.get('id') or 0) == int(category_id):
+            return row.get('name') or CORRECTION_CATEGORY
+    return CORRECTION_CATEGORY
+
+
+def can_hold_a_correction(row):
+    """Is this a category a balance correction may be pointed at?
+
+    System categories are excluded, which is four things at once:
+
+      Uncategorized     the default already, offered as "(default)" rather
+                        than twice
+      Savings           reconciled on its own, through savings_adjustments
+                        with no category at all - a correction here would be
+                        counted against the savings figure as well
+      Starting Balance  the anchor the whole projection is measured from
+      Interest Charge   a card mechanism, not somewhere cash goes
+
+    Credit-account payment categories go too: a cash correction does not belong
+    against a card.
+
+    Used by the picker AND by save_correction_categories. The picker is a
+    convenience; the check on save is the guarantee, because a request does not
+    have to come from the picker.
+    """
+    return (not int(row.get('is_system') or 0)
+            and not int(row.get('is_credit_account') or 0))
+
+
+def correction_category_id(table, user_id, settings=None):
+    """Where a correction in this direction should land.
+
+    The user's choice if they made one and it still exists, and Uncategorized
+    otherwise. "Still exists" is checked rather than trusted: the foreign key
+    is ON DELETE SET NULL, so a deleted category clears the setting - but a
+    category can also stop belonging to this user's list between the setting
+    being written and being read, and a correction landing somewhere unexpected
+    is the one outcome this whole feature is meant to avoid.
+
+    Returns None when there is no Uncategorized either, which apply() reports
+    rather than guessing at another category.
+    """
+    settings = settings if settings is not None else (get_settings(user_id) or {})
+    key = ('income_category_id' if table == 'income_entries'
+           else 'expense_category_id')
+    chosen = settings.get(key)
+
+    if chosen:
+        chosen = int(chosen)
+        for row in user_categories(table, user_id):
+            if int(row.get('id') or 0) == chosen:
+                return chosen
+        log_warning(logger, 'AUTOBALANCE',
+                    f"User {user_id} chose category {chosen} for {table}, but it "
+                    f"is not in their categories; using {CORRECTION_CATEGORY}")
+
+    return _uncategorized_id(table, user_id)
+
+
+def save_correction_categories(user_id, income_category_id, expense_category_id):
+    """Store where corrections should land. None or 0 means Uncategorized.
+
+    Separate from save_settings because the two are separate decisions: Balance
+    now works whether or not the scheduled reminder is on, so choosing a target
+    must not require sending - and so must not risk rewriting - the cadence and
+    its next_due.
+
+    Returns (ok, message). Validates ownership rather than trusting: these
+    arrive from a browser, and an id belonging to another user would silently
+    write this user's corrections into someone else's category.
+    """
+    resolved = {}
+    for table, value, label in (
+            ('income_entries', income_category_id, 'income'),
+            ('expense_entries', expense_category_id, 'expense')):
+        if value in (None, '', 0, '0'):
+            resolved[table] = None
+            continue
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            return False, f'That {label} category is not valid.'
+        row = next((r for r in user_categories(table, user_id)
+                    if int(r.get('id') or 0) == value), None)
+        if row is None:
+            return False, f'That {label} category does not exist.'
+        if not can_hold_a_correction(row):
+            return False, (f"Corrections cannot go to '{row.get('name')}' - "
+                           f"it is one Blankee manages itself.")
+        resolved[table] = value
+
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            # INSERT ... ON DUPLICATE KEY so a user who has never opened the
+            # cadence settings can still choose a target. The defaults on the
+            # other columns are what a fresh row gets, and enabled is 0, so this
+            # does not switch the reminder on as a side effect.
+            cursor.execute(
+                "INSERT INTO autobalance_settings "
+                "  (user_id, income_category_id, expense_category_id) "
+                "VALUES (%s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE "
+                "  income_category_id = VALUES(income_category_id), "
+                "  expense_category_id = VALUES(expense_category_id)",
+                (user_id, resolved['income_entries'], resolved['expense_entries']))
+    except Exception as e:
+        log_exception(logger, 'AUTOBALANCE',
+                      f"Could not save correction categories for user {user_id}: {e}")
+        return False, 'Could not save that.'
+
+    log_info(logger, 'AUTOBALANCE',
+             f"User {user_id} correction categories: "
+             f"income={resolved['income_entries']}, "
+             f"expense={resolved['expense_entries']}")
+    return True, 'Saved.'
+
+
 def pending_bucket_count(user_id, on_date=None):
     """How many confirmations auto-balance would answer Yes to."""
     import bucket_confirmation
@@ -909,7 +1058,7 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
         table, direction = 'expense_entries', 'expense'
     amount = abs(difference)
 
-    category_id = _uncategorized_id(table, user_id)
+    category_id = correction_category_id(table, user_id)
     if category_id is None:
         log_warning(logger, 'AUTOBALANCE',
                     f"No {CORRECTION_CATEGORY} category in {table} for user "
@@ -923,9 +1072,36 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
     _update_entry_in_redis(table, user_id, category_id, on_date.isoformat(),
                            float(amount), processed=1)
 
+    # And it depletes a bucket in that category, exactly as the same entry typed
+    # by hand would. A correction is the user saying this money moved and they
+    # had not recorded it, so it has to behave like the record they did not make
+    # - otherwise the spending counts once as the correction and again as the
+    # forecast it was actually part of.
+    #
+    # This did not matter while corrections always went to Uncategorized, which
+    # has no buckets. It matters now that they can be pointed at a real
+    # category, which may well be a recurring one.
+    #
+    # cadence_info is left out so process_manual_entry_with_bucket looks the
+    # wage_bill up itself - passing 0 here would silently treat every category
+    # as an allowance.
+    try:
+        from bucket_utils import process_manual_entry_with_bucket
+        process_manual_entry_with_bucket(table, category_id, on_date,
+                                         float(amount), user_id)
+    except Exception as e:
+        # The correction is already written and is the point of the operation.
+        # A bucket left undepleted is visible and fixable; losing the correction
+        # would put the app back out of step with the bank by exactly the amount
+        # we just measured.
+        log_exception(logger, 'AUTOBALANCE',
+                      f"Correction written but bucket depletion failed for user "
+                      f"{user_id}: {e}")
+
     result['entry_written'] = True
     result['direction'] = direction
     result['category_id'] = category_id
+    result['category_name'] = _category_name(table, user_id, category_id)
     _record_balanced(user_id, difference)
     clear_pending(user_id)
     _correct_the_rest(user_id, on_date, actual_savings, actual_cards, result)
