@@ -1061,7 +1061,7 @@ body {
     box-shadow: 0 4px 16px var(--shadow-lg);
 }
 
-/* ── Shared Modal & Form Styles (used by buds, credit accounts, dashboard-d) ── */
+/* ── Shared Modal & Form Styles (used by bundles, credit accounts, dashboard-d) ── */
 
 /* Modal container */
 .footer-modal {
@@ -1167,6 +1167,7 @@ body {
 .footer-form-group input[type="email"],
 .footer-form-group input[type="password"],
 .footer-form-group input[type="number"],
+.footer-form-group input[type="date"],
 .footer-form-group select {
     width: 100%;
     height: 38px;
@@ -1186,6 +1187,7 @@ body {
 .footer-form-group input[type="email"]:focus,
 .footer-form-group input[type="password"]:focus,
 .footer-form-group input[type="number"]:focus,
+.footer-form-group input[type="date"]:focus,
 .footer-form-group select:focus {
     background-color: var(--text-light);
     border-color: var(--primary);
@@ -1315,7 +1317,7 @@ transform: scale(1.2);
 #recurring-i-body .calendarnavbuttonscontainer,
 #credit-accounts-body .calendarnavbuttonscontainer,
 #profile-body .calendarnavbuttonscontainer,
-#buds-body .calendarnavbuttonscontainer,
+#bundles-body .calendarnavbuttonscontainer,
 #notifications-body .calendarnavbuttonscontainer,
 #pending-transactions-body .calendarnavbuttonscontainer,
 #manage-categories-body .calendarnavbuttonscontainer {
@@ -1359,7 +1361,7 @@ transform: scale(1.2);
     #recurring-i-body .calendarnavbuttonscontainer,
     #credit-accounts-body .calendarnavbuttonscontainer,
     #profile-body .calendarnavbuttonscontainer,
-    #buds-body .calendarnavbuttonscontainer,
+    #bundles-body .calendarnavbuttonscontainer,
     #notifications-body .calendarnavbuttonscontainer,
     #pending-transactions-body .calendarnavbuttonscontainer,
     #manage-categories-body .calendarnavbuttonscontainer {
@@ -1369,7 +1371,7 @@ transform: scale(1.2);
     #recurring-i-body .calendarnav,
     #credit-accounts-body .calendarnav,
     #profile-body .calendarnav,
-    #buds-body .calendarnav,
+    #bundles-body .calendarnav,
     #notifications-body .calendarnav,
     #pending-transactions-body .calendarnav,
     #manage-categories-body .calendarnav {
@@ -4901,7 +4903,7 @@ transform: scale(1.2);
    signals emphasis (dark header row, dark total rows, white text).
 
    :has() scopes this to cells whose input is actually editable, so locked cells
-   (bank-locked, bud-derived, before-member-since) keep the ring from the rule
+   (bank-locked, bundle-derived, before-member-since) keep the ring from the rule
    above without pretending to be typeable. :has() is already used in this file
    - see td:has(.bucket-progress-container) further down.
 
@@ -9462,7 +9464,7 @@ transform: scale(1.2);
 /* ---------------------------------------------------------------------------
    The canonical sheet. Every overlay in the app - .footer-modal,
    .dashboard-d-modal, .modal-setup-profile, .category-edit-modal,
-   .center-modal-overlay, .test-purchase-modal, .bud-input-overlay, the
+   .center-modal-overlay, .test-purchase-modal, .bundle-input-overlay, the
    category input overlay and .loading-screen - is built to these three rules,
    and each of them points back here rather than restating them:
 
@@ -11472,9 +11474,9 @@ form button[type="submit"] {
     transform: scale(1.2);
 }
 
-/* /////////////////////////////  Buds /////////////////////////// */
+/* /////////////////////////////  Bundles /////////////////////////// */
 
-.buds-empty-info {
+.bundles-empty-info {
     max-width: 500px;
     margin: 40px auto;
     padding: 32px 24px;
@@ -11485,22 +11487,22 @@ form button[type="submit"] {
     text-align: center;
 }
 
-.buds-empty-info h2 {
+.bundles-empty-info h2 {
     margin-bottom: 18px;
     color: var(--primary);
     font-size: 22px;
 }
 
-.buds-empty-info p {
+.bundles-empty-info p {
     margin-bottom: 14px;
     font-size: 15px;
 }
 
-.buds-empty-info strong {
+.bundles-empty-info strong {
     color: var(--accent);
 }
 
-.buds-container {
+.bundles-container {
     display: flex;
 
     /* Stack header and table vertically */
@@ -11517,7 +11519,7 @@ form button[type="submit"] {
     will-change: transform;
 }
 
-.buds-title {
+.bundles-title {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -11526,7 +11528,7 @@ form button[type="submit"] {
     margin: 20px auto;
 }
 
-.buds-title span {
+.bundles-title span {
     position: relative;
     flex: 1;  
     padding-left: 120px;
@@ -11536,26 +11538,53 @@ form button[type="submit"] {
     text-align: center;
 }
 
-.add-bud-btn {
+/* The same add button the rest of the app uses: text and icon in the brand
+   teal on no background, growing slightly on hover. It was orange, which is
+   the accent colour reserved for expenses - on a page that is neither income
+   nor expense it just read as a different kind of button. */
+.add-bundle-btn {
     position: relative;
     align-self: flex-end;
-    width: 120px;
-    height: 35px;
-    padding: 0;
-    background-color: transparent;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    background: none;
     border: none;
-    border-radius: 50%;
-    color: white;
-    color: var(--accent);
+    color: var(--primary);
+    font-size: 15px;
+    line-height: 28px;
+    white-space: nowrap;
     cursor: pointer;
 }
 
-.add-bud-btn:hover {
-    Color: var(--text-dark);
-    transform: scale(1.2);
+.add-bundle-btn:hover {
+    color: var(--primary-hover);
+    background: none;
+    transform: scale(1.1);
 }
 
-.bud-header {
+/* The date picker's own indicator is the one browser-drawn part of the field.
+   Left alone it sits in the browser's blue, which is the only colour on the
+   form that belongs to no palette. */
+.footer-form-group input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.6;
+}
+
+.footer-form-group input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+}
+
+/* Safari and Chrome give a date input an intrinsic width and centre its text
+   on iOS; without these it comes out narrower than every other field in the
+   form and sits oddly against them. */
+.footer-form-group input[type="date"] {
+    min-height: 38px;
+    text-align: left;
+}
+
+.bundle-header {
     display: flex;
     justify-content: space-between;
     width: 100%;
@@ -11564,7 +11593,7 @@ form button[type="submit"] {
     border-top-right-radius: 10px; 
 }
 
-.bud-name {
+.bundle-name {
     position: relative;
     right: 50px;
     flex: 1;  
@@ -11572,7 +11601,7 @@ form button[type="submit"] {
     text-align: center;
 }
 
-.delete-bud-btn {
+.delete-bundle-btn {
     position: relative;
     width: 20px;
     height: 20px;
@@ -11586,12 +11615,12 @@ form button[type="submit"] {
     cursor: pointer;
 }
 
-.delete-bud-btn:hover {
+.delete-bundle-btn:hover {
     color: var(--danger);
     transform: scale(1.2);
 }
 
-.bud-table {
+.bundle-table {
     /* Subtract 20px from each side */
     width: 100%; 
     border-collapse: collapse;
@@ -11599,41 +11628,45 @@ form button[type="submit"] {
     text-align: left;
 }
 
-.bud-table th, .bud-table td {
+.bundle-table th, .bundle-table td {
     width: 20%;
     height: 20px;
     padding-right: 10px;
     padding-left: 10px;
     box-sizing: border-box;
+    /* baseline is the initial value, and it lines cells up on their first line
+       of text - so on a narrow screen, where Payment Date wraps to two lines,
+       every other cell sat at the top of a taller row. */
+    vertical-align: middle;
 }
 
-.bud-table th {
+.bundle-table th {
     color: white;
 }
 
-.bud-table thead {
+.bundle-table thead {
     background-color: var(--primary);
 }
 
-.bud-table tfoot tr td {
+.bundle-table tfoot tr td {
     border-bottom-left-radius: 10px; 
     border-bottom-right-radius: 10px; 
 }
 
-.bud-table tbody tr:nth-child(even) {
+.bundle-table tbody tr:nth-child(even) {
     background-color: var(--primary-lighter);
 }
 
-.bud-table tbody tr:nth-child(odd) {
+.bundle-table tbody tr:nth-child(odd) {
     background-color: var(--primary-hover);
 }
 
-.bud-table tfoot tr {
+.bundle-table tfoot tr {
     background-color: var(--secondary);
 }
 
 /* Overlay for modal background */
-.bud-input-overlay {
+.bundle-input-overlay {
     position: fixed;
     top: 0; left: 0;
     z-index: 9998;
@@ -11650,7 +11683,7 @@ form button[type="submit"] {
     background: var(--shadow-xl);
 }
 
-.bud-input-container {
+.bundle-input-container {
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -11667,7 +11700,7 @@ form button[type="submit"] {
     box-shadow: 0 0 6px var(--shadow-xxl);
 }
 
-.bud-input-container input {
+.bundle-input-container input {
     flex: 1;
     padding: 8px;
     border: 1px solid var(--secondary-hover);
@@ -11675,7 +11708,7 @@ form button[type="submit"] {
     font-size: 1rem;
 }
 
-.bud-input-container button {
+.bundle-input-container button {
     width: 35px;
     height: 35px;
     margin-left: 8px;
@@ -11688,27 +11721,35 @@ form button[type="submit"] {
     cursor: pointer;
 }
 
-.bud-input-container button:hover {
+.bundle-input-container button:hover {
     background: var(--primary-hover);
     transform: scale(1.2);
 }
 
-.bud-item-action-cell {
-    display: flex;
-    justify-content: flex-end;
+/* No flex here. display:flex on a <td> stops it being a table cell: it no
+   longer takes the row's height, vertical-align stops applying to it, and
+   height:100% has nothing definite to resolve against - so the button sat at
+   the top of any row tall enough to notice. There is one child in this cell,
+   so the cell's own alignment is all it needs.
+
+   width:100% was wrong too - it asked the actions column for the whole table
+   and squeezed the four columns that hold the content. */
+.bundle-table td.bundle-item-action-cell {
+    width: 1%;
+    box-sizing: border-box;
+    text-align: right;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.delete-bundle-item-btn {
+    /* inline-flex centres the glyph inside the button's own box, which is a
+       different question from where that box sits in the row - the cell's
+       vertical-align settles that. */
+    display: inline-flex;
     align-items: center;
-    width: 100%;
-    height: 100%;
-    box-sizing: border-box;
-}
-
-.bud-table td.bud-item-action-cell {
-    width: 100%;
-    height: 100%;
-    box-sizing: border-box;
-}
-
-.delete-bud-item-btn {
+    justify-content: center;
+    vertical-align: middle;
     width: 20px;
     height: 20px;
     background: transparent;
@@ -11718,33 +11759,33 @@ form button[type="submit"] {
     cursor: pointer;
 }
 
-.delete-bud-item-btn:hover {
+.delete-bundle-item-btn:hover {
     color: var(--text-dark);
     transform: scale(1.2);
 }
 
-.add-bud-items {
+.add-bundle-items {
     color: white;
     font-style: italic;
     text-align: left;
 }
 
-.add-bud-items a {
+.add-bundle-items a {
     color: white;
     font-style: normal;
     text-decoration: none;
 }
 
-.add-bud-items a:hover {
+.add-bundle-items a:hover {
     color: var(--secondary-hover);
     transform: scale(1.2);
 }
 
-.bud-item-input-row td {
+.bundle-item-input-row td {
     background: transparent;
 }
 
-.bud-item-input {
+.bundle-item-input {
     width: 100%;
     height: 100%;
     padding: 0;
@@ -11755,12 +11796,12 @@ form button[type="submit"] {
     box-sizing: border-box;
 }
 
-.bud-item-input:focus {
+.bundle-item-input:focus {
     background: transparent;
     border-color: var(--text-dark);
 }
 
-.bud-item-edit-input {
+.bundle-item-edit-input {
     width: 100%;
     height: 100%;
     padding: 8px 10px;
@@ -11772,13 +11813,13 @@ form button[type="submit"] {
     box-sizing: border-box;
 }
 
-.bud-item-edit-input:focus {
+.bundle-item-edit-input:focus {
     background-color: var(--text-light);
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-lighter);
 }
 
-.bud-total {
+.bundle-total {
     display: flex;
     flex-direction: row;
     width: 100%;
@@ -11789,16 +11830,16 @@ form button[type="submit"] {
     text-align: right;
 }
 
-.bud-total-label {
+.bundle-total-label {
     flex: 1;
 }
 
-.bud-total-amount {
+.bundle-total-amount {
     width: 100px;
     padding-right: 10px;
 }
 
-.bud-active-toggle {
+.bundle-active-toggle {
     display: inline-flex;
     align-items: center;
     margin-left: 10px;
@@ -11811,21 +11852,21 @@ form button[type="submit"] {
     vertical-align: middle;
 }
 
-.bud-toggle-on {
+.bundle-toggle-on {
     color: var(--primary);
     transition: color 0.2s;
 }
 
-.bud-toggle-off {
+.bundle-toggle-off {
     color: var(--secondary-hover);
     transition: color 0.2s;
 }
 
-.bud-toggle-hidden {
+.bundle-toggle-hidden {
     display: none !important;
 }
 
-.bud-status-text {
+.bundle-status-text {
     position: relative;
     display: flex;
     align-items: center;
@@ -11833,29 +11874,29 @@ form button[type="submit"] {
     font-size: 12px;
 }
 
-.bud-status-active,
-.bud-status-inactive {
+.bundle-status-active,
+.bundle-status-inactive {
     position: absolute;
     left: 5px;
     width: 100%;
     text-align: left;
 }
 
-.bud-status-active {
+.bundle-status-active {
     color: var(--primary) !important;
 }
 
-.bud-status-inactive {
+.bundle-status-inactive {
     color: var(--secondary-hover) !important;
 }
 
-.bud-toggle-container {
+.bundle-toggle-container {
     position: relative;
     display: flex;
     align-items: center;
 }
 
-.bud-toggle-tooltip {
+.bundle-toggle-tooltip {
     position: absolute;
     bottom: 100%;
     left: 0;
@@ -11873,7 +11914,7 @@ form button[type="submit"] {
     visibility: hidden;
 }
 
-.bud-toggle-tooltip::after {
+.bundle-toggle-tooltip::after {
     position: absolute;
     top: 100%;
     left: 20px;
@@ -11883,7 +11924,7 @@ form button[type="submit"] {
     content: "";
 }
 
-.bud-toggle-container:hover .bud-toggle-tooltip {
+.bundle-toggle-container:hover .bundle-toggle-tooltip {
     visibility: visible;
     opacity: 1;
     transform: scale(1.2);
@@ -17954,7 +17995,7 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 
    An i icon beside an option label, explaining what the option does on hover.
 
-   Modelled on .bud-toggle-tooltip rather than .nav-tooltip: nav tooltips are
+   Modelled on .bundle-toggle-tooltip rather than .nav-tooltip: nav tooltips are
    nowrap and sized for two or three words, which is wrong for a sentence. Same
    dark bubble, same arrow, same fade, so this reads as the one tooltip style the
    app already had rather than a second one.

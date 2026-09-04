@@ -413,7 +413,7 @@
 
         function getFilteredExpenseCategories() {
             return (typeof expenseCategories !== 'undefined' ? expenseCategories : []).filter(cat =>
-                cat.is_recurring != 1 && cat.is_bud != 1 &&
+                cat.is_recurring != 1 && cat.is_bundle != 1 &&
                 cat.name !== 'Starting Balance' && cat.name !== 'Uncategorized' &&
                 cat.name !== 'Interest Charge'
             ).sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
@@ -424,7 +424,7 @@
                 String(cat.account_id) === String(accountId) &&
                 cat.is_recurring != 1 &&
                 cat.is_interest != 1 &&
-                cat.is_bud != 1 &&
+                cat.is_bundle != 1 &&
                 cat.name !== 'Uncategorized'
             ).sort((a, b) => (b.display_order || 0) - (a.display_order || 0));
         }

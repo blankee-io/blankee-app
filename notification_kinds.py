@@ -34,8 +34,8 @@ KINDS = (
     ('pending_transactions', 'Pending transactions',
      'Sent when transactions synced from a bank account are waiting to be given '
      'a category.'),
-    ('buds', 'Buds',
-     'Sent when one of your buds is activated or deactivated.'),
+    ('bundles', 'Bundles',
+     'Sent when one of your bundles is activated or deactivated.'),
     ('account', 'Account changes',
      'Sent when your password is reset or your email address is changed. '
      'Turning this off means those changes are not announced by email.'),

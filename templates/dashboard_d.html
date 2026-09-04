@@ -456,20 +456,20 @@
 
             if (entryType === 'income') {
                 incomeCategories.forEach(category => {
-                    if (!category.hidden && category.name !== "Starting Balance" && !category.is_bud) {
+                    if (!category.hidden && category.name !== "Starting Balance" && !category.is_bundle) {
                         dashboardDCategories.push({ id: category.id, name: category.name, display_order: category.display_order, is_recurring: category.is_recurring, is_auto_adjustment: category.is_auto_adjustment });
                     }
                 });
             } else if (entryType === 'expense') {
                 expenseCategories.forEach(category => {
-                    if (!category.hidden && !category.is_bud && category.name !== 'Interest Charge') {
+                    if (!category.hidden && !category.is_bundle && category.name !== 'Interest Charge') {
                         dashboardDCategories.push({ id: category.id, name: category.name, display_order: category.display_order, is_recurring: category.is_recurring, is_credit_account: category.is_credit_account, is_auto_adjustment: category.is_auto_adjustment });
                     }
                 });
             } else if (entryType.startsWith('ca_')) {
                 const accountId = parseInt(entryType.split('_')[1]);
                 c_expense_categories.forEach(category => {
-                    if (category.account_id === accountId && !category.hidden && category.name !== "Starting Balance" && !category.is_bud) {
+                    if (category.account_id === accountId && !category.hidden && category.name !== "Starting Balance" && !category.is_bundle) {
                         dashboardDCategories.push({ id: category.id, name: category.name, display_order: category.display_order, is_recurring: category.is_recurring, is_interest: category.is_interest, is_auto_adjustment: category.is_auto_adjustment });
                     }
                 });
@@ -644,7 +644,7 @@
                                 name: categoryName.trim(),
                                 account_id: accountId,
                                 hidden: false,
-                                is_bud: false
+                                is_bundle: false
                             });
                             
                             // Also add to expense_categories since they're synced
@@ -652,7 +652,7 @@
                                 id: response.new_category_id,
                                 name: categoryName.trim(),
                                 hidden: false,
-                                is_bud: false
+                                is_bundle: false
                             });
                             
                             // Refresh the categories list first
@@ -690,7 +690,7 @@
                             id: response.new_category_id, 
                             name: categoryName.trim(),
                             hidden: false,
-                            is_bud: false
+                            is_bundle: false
                         });
                         
                         // Refresh the categories list first
@@ -951,15 +951,15 @@
                     const paidTitle = isPending ? 'This entry is pending categorization — go to Pending Transactions to confirm' : (entry.processed == 1 ? 'This entry is marked as paid' : '');
                     
                     const catObj = incomeCategories.find(cat => String(cat.id) === String(entry.category_id));
-                    const isBud = catObj && catObj.is_bud;
+                    const isBundle = catObj && catObj.is_bundle;
                     const isStartingBalance = entry.category_name === 'Starting Balance' || (catObj && catObj.name === 'Starting Balance');
                     const isBankLocked = isEntryLockedByBankSync(date, entry.category_id, 'income');
-                    const isReadonly = isBud || isStartingBalance || isBankLocked;
+                    const isReadonly = isBundle || isStartingBalance || isBankLocked;
                     let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                     if (isStartingBalance) {
                         iconHtml = '<i class="fa-solid fa-flag-checkered category-icon"></i>';
                     } else if (catObj) {
-                        if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                        if (catObj.is_bundle) iconHtml = '<i class="fa-regular fa-boxes-stacked category-icon"></i>';
                         else if (Number(catObj.is_savings) === 1 && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
                         else if (Number(catObj.is_savings) === 1) iconHtml = '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
                         else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
@@ -1030,12 +1030,12 @@
                     const paidTitle = isPending ? 'This entry is pending categorization — go to Pending Transactions to confirm' : (entry.processed == 1 ? 'This entry is marked as paid' : '');
                     
                     const catObj = expenseCategories.find(cat => String(cat.id) === String(entry.category_id));
-                    const isBud = catObj && catObj.is_bud;
+                    const isBundle = catObj && catObj.is_bundle;
                     const isExpenseBankLocked = isEntryLockedByBankSync(date, entry.category_id, 'expense');
-                    const isExpenseReadonly = isBud || isExpenseBankLocked;
+                    const isExpenseReadonly = isBundle || isExpenseBankLocked;
                     let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                     if (catObj) {
-                        if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                        if (catObj.is_bundle) iconHtml = '<i class="fa-regular fa-boxes-stacked category-icon"></i>';
                         else if (catObj.is_credit_account && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
                         else if (Number(catObj.is_savings) === 1 && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
                         else if (Number(catObj.is_savings) === 1) iconHtml = '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
@@ -1153,12 +1153,12 @@
                     entriesForDate.forEach(entry => {
                         const catObj = c_expense_categories.find(cat => cat.id == entry.category_id);
                         if (catObj && catObj.name === "Starting Balance") return;
-                        const isBud = catObj && catObj.is_bud;
+                        const isBundle = catObj && catObj.is_bundle;
                         const isCaBankLocked = isEntryLockedByBankSync(date, entry.category_id, 'ca', account.id);
-                        const isCaReadonly = isBud || isCaBankLocked;
+                        const isCaReadonly = isBundle || isCaBankLocked;
                         let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
                         if (catObj) {
-                            if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                            if (catObj.is_bundle) iconHtml = '<i class="fa-regular fa-boxes-stacked category-icon"></i>';
                             else if (catObj.is_recurring) iconHtml = '<i class="fa-regular fa-arrows-repeat category-icon"></i>';
                             else if (catObj.is_interest) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
                             else if (catObj.is_auto_adjustment) iconHtml = '<i class="fa-regular fa-lock category-icon"></i>';
@@ -2271,10 +2271,10 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             
             // Determine icon
             let iconHtml = '<i class="fa-regular fa-folder category-icon"></i>';
-            const isBud = catObj.is_bud || false;
+            const isBundle = catObj.is_bundle || false;
             
             if (catObj) {
-                if (catObj.is_bud) iconHtml = '<i class="fa-regular fa-seedling category-icon"></i>';
+                if (catObj.is_bundle) iconHtml = '<i class="fa-regular fa-boxes-stacked category-icon"></i>';
                 else if (entryType === 'expense' && catObj.is_credit_account && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
                 else if (Number(catObj.is_savings) === 1 && catObj.is_recurring) iconHtml = '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
                 else if (Number(catObj.is_savings) === 1) iconHtml = '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
@@ -2285,7 +2285,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             
             // Build the HTML
             row.innerHTML = `
-                ${!isBud ? `<span class="dashboard-d-move-btn" title="Move to date">
+                ${!isBundle ? `<span class="dashboard-d-move-btn" title="Move to date">
                     <span class="calendar-icon">
                     <i class="fa-light fa-up-down-left-right"></i>
                     </span>
@@ -2302,7 +2302,7 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
                         data-entry-id="new"
                         data-category-id="${categoryId}"
                         data-date="${formattedDate}"
-                        ${isBud ? 'readonly tabindex="-1"' : ''}
+                        ${isBundle ? 'readonly tabindex="-1"' : ''}
                     />
                 </div>
             `;

@@ -110,6 +110,98 @@ def _wage_bill_map(table, user_id):
     return out
 
 
+def _defer_bundle_items(user_id, category_id, old_date, new_date):
+    """Move a bundle's items from old_date to new_date, if this is a bundle.
+
+    Quietly does nothing for an ordinary recurring bucket, which has no items
+    behind it.
+    """
+    try:
+        cats = list(redis_manager.get_table_cache('expense_categories', user_id) or [])
+        cats += list(redis_manager.get_table_cache('c_expense_categories', user_id) or [])
+        bundle_id = next(
+            (c.get('bundle_id') for c in cats
+             if c.get('id') is not None and int(c['id']) == int(category_id)
+             and c.get('bundle_id') is not None),
+            None
+        )
+        if bundle_id is None:
+            return
+
+        items = redis_manager.get_table_cache('bundle_items', user_id)
+        if not items:
+            return
+
+        moved = 0
+        for item in items:
+            if int(item.get('bundle_id', 0) or 0) != int(bundle_id):
+                continue
+            if str(item.get('date'))[:10] != str(old_date)[:10]:
+                continue
+            item['date'] = str(new_date)[:10]
+            moved += 1
+
+        if moved:
+            redis_manager.set_table_cache('bundle_items', user_id, items)
+            log_info(logger, 'BUCKET_CONFIRM',
+                     f"Deferred {moved} bundle item(s) for bundle {bundle_id} "
+                     f"from {old_date} to {new_date}")
+    except Exception as e:
+        # A bucket that moved without its items is recoverable - the next edit
+        # reconciles it. Failing the whole defer over it would not be.
+        log_warning(logger, 'BUCKET_CONFIRM',
+                    f"Could not move bundle items for category {category_id}: {e}")
+
+
+def _bundle_map(table, user_id):
+    """{category_id: bundle name} for the bundle categories behind a table."""
+    cat_table = ENTRY_TABLES.get(table)
+    rows = redis_manager.get_table_cache(cat_table, user_id) or []
+    return {
+        int(r['id']): r.get('name', '')
+        for r in rows
+        if r.get('id') is not None
+        and (r.get('bundle_id') is not None or r.get('is_bundle'))
+    }
+
+
+def _bundle_item_label(user_id, category_id, bucket_date, is_bundle):
+    """Which item this bucket is for: "Sofa", or "Sofa + 2 more".
+
+    A bundle bucket aggregates every item that bundle plans for one date, so
+    the amount on its own says nothing about what it is. Without this the row
+    reads as a bare number against the trip's name.
+    """
+    if not is_bundle:
+        return ''
+    try:
+        cats = redis_manager.get_table_cache('expense_categories', user_id) or []
+        ccats = redis_manager.get_table_cache('c_expense_categories', user_id) or []
+        bundle_id = next(
+            (c.get('bundle_id') for c in list(cats) + list(ccats)
+             if c.get('id') is not None and int(c['id']) == int(category_id)
+             and c.get('bundle_id') is not None),
+            None
+        )
+        if bundle_id is None:
+            return ''
+        items = redis_manager.get_table_cache('bundle_items', user_id) or []
+        wanted = bucket_date.isoformat() if hasattr(bucket_date, 'isoformat') else str(bucket_date)
+        names = [
+            i.get('name') for i in items
+            if int(i.get('bundle_id', 0) or 0) == int(bundle_id)
+            and str(i.get('date'))[:10] == wanted[:10]
+            and i.get('name')
+        ]
+        if not names:
+            return ''
+        if len(names) == 1:
+            return names[0]
+        return '%s + %d more' % (names[0], len(names) - 1)
+    except Exception:
+        return ''
+
+
 def pending_buckets(user_id, on_date=None):
     """
     Every unresolved bucket dated on or before `on_date`, newest first.
@@ -139,6 +231,7 @@ def pending_buckets(user_id, on_date=None):
         names = _categories(table, user_id)
         accounts = _account_names(table, user_id)
         wage_bill = _wage_bill_map(table, user_id)
+        bundles = _bundle_map(table, user_id)
 
         for e in entries:
             if e.get('is_bucket') != 1:
@@ -190,7 +283,12 @@ def pending_buckets(user_id, on_date=None):
                 'date': e_date.isoformat(),
                 'amount': amount,
                 'original_amount': float(e.get('original_amount') or amount),
-                'wage_bill': wage_bill.get(cid, 0),
+                # A bundle has no recurring template, so _wage_bill_map answers
+                # 0 for it and the prompt labelled it "Allowance". Bundles are
+                # all-or-nothing: one plan, one purchase, gone.
+                'wage_bill': 1 if cid in bundles else wage_bill.get(cid, 0),
+                'is_bundle': cid in bundles,
+                'bundle_item': _bundle_item_label(user_id, cid, e_date, cid in bundles),
                 'days_overdue': (on_date - e_date).days,
                 'days_pushed': days_pushed,
             })
@@ -534,6 +632,11 @@ def resolve(user_id, table, entry_id, action, amount=None):
 
         _apply_to_record(table, user_id, category_id, bucket_date, move)
         _save_entries(table, user_id, entries)
+        # A bundle's bucket is generated from its items' dates, so moving the
+        # bucket alone leaves the item still saying the old date - and the next
+        # edit of that bundle would rebuild a second forecast there. One plan,
+        # one date.
+        _defer_bundle_items(user_id, category_id, bucket_date, tomorrow)
         return True, 'Moved to tomorrow.', _state(target)
 
     # skip

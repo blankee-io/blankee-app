@@ -304,8 +304,8 @@
                             <td class="manage-cat-type-col">
                                 {% if category.is_recurring %}
                                     <i class="fa-regular fa-arrows-repeat category-icon"></i> Recurring
-                                {% elif category.is_bud %}
-                                    <i class="fa-regular fa-seedling category-icon"></i> Bud
+                                {% elif category.is_bundle %}
+                                    <i class="fa-regular fa-boxes-stacked category-icon"></i> Bundle
                                 {% else %}
                                     <i class="fa-regular fa-folder category-icon"></i> Standard
                                 {% endif %}
@@ -364,8 +364,8 @@
                             <td class="manage-cat-type-col">
                                 {% if category.is_recurring %}
                                     <i class="fa-regular fa-arrows-repeat category-icon"></i> Recurring
-                                {% elif category.is_bud %}
-                                    <i class="fa-regular fa-seedling category-icon"></i> Bud
+                                {% elif category.is_bundle %}
+                                    <i class="fa-regular fa-boxes-stacked category-icon"></i> Bundle
                                 {% else %}
                                     <i class="fa-regular fa-folder category-icon"></i> Standard
                                 {% endif %}
@@ -1589,7 +1589,7 @@
                         },
                         {
                             selector: '#expense-manage-table',
-                            text: 'Your <b>expense categories</b> are listed here — including standard, recurring, credit payment, and bud categories.'
+                            text: 'Your <b>expense categories</b> are listed here — including standard, recurring, credit payment, and bundle categories.'
                         },
                         {
                             selector: '.sort-handle',

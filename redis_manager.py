@@ -72,8 +72,8 @@ USER_TABLES = [
     'c_a_balances',
     'c_a_balances_d',
     'c_a_balances_m',
-    'buds',
-    'bud_items',
+    'bundles',
+    'bundle_items',
     # bank-link integration tables
     'linked_provider_profiles',
     'linked_connections',
@@ -207,8 +207,64 @@ def is_user_hydrated(user_id: int) -> bool:
         return user_id in _hydrated_users
 
 
+# The Redis key IS the table name, so renaming bundles -> bundles renamed the
+# keys too. The updater flushes before it applies migrations, but anything
+# written between that flush and the reload sits under the old key, which
+# nothing now reads. Rather than lose it, the first read of a bundles key
+# adopts the bundles one.
+#
+# RENAME is atomic and only fires when the new key is absent, so it cannot
+# overwrite anything - and dirty_tables entries are folded across in the same
+# step, or the adopted rows would never be flushed.
+#
+# Delete this after one release. It only exists for the upgrade window.
+_RENAMED_TABLES = {'bundles': 'bundles', 'bundle_items': 'bundle_items'}
+_adoption_checked = set()
+
+
+def _adopt_legacy_key(table: str, user_id: int):
+    """Move a pre-rename key onto its new name, once per table per process."""
+    legacy = _RENAMED_TABLES.get(table)
+    if not legacy or not _redis_client:
+        return
+    marker = (table, user_id)
+    if marker in _adoption_checked:
+        return
+    _adoption_checked.add(marker)
+
+    try:
+        new_key = f"{table}:{REDIS_KEY_VERSION}:{user_id}"
+        old_key = f"{legacy}:{REDIS_KEY_VERSION}:{user_id}"
+        if _redis_client.exists(new_key) or not _redis_client.exists(old_key):
+            return
+        _redis_client.rename(old_key, new_key)
+
+        dirty_key = f"dirty_tables:{user_id}"
+        members = _redis_client.smembers(dirty_key) or set()
+        members = {m.decode('utf-8') if isinstance(m, bytes) else m for m in members}
+        if legacy in members:
+            _redis_client.srem(dirty_key, legacy)
+            _redis_client.sadd(dirty_key, table)
+            _redis_client.expire(dirty_key, REDIS_TTL)
+
+        # pending_deletes is keyed by table name too.
+        old_pending = f"pending_deletes:{legacy}:{user_id}"
+        new_pending = f"pending_deletes:{table}:{user_id}"
+        if _redis_client.exists(old_pending) and not _redis_client.exists(new_pending):
+            _redis_client.rename(old_pending, new_pending)
+
+        log_info(logger, 'REDIS',
+                 f"Adopted pre-rename key {old_key} as {new_key} for user {user_id}")
+    except Exception as e:
+        # Losing a few seconds of writes is bad; failing every read is worse.
+        log_warning(logger, 'REDIS',
+                    f"Could not adopt legacy key for {table}/{user_id}: {e}")
+
+
 def _get_redis_key(table: str, user_id: int) -> str:
     """Generate Redis key for a table and user"""
+    if table in _RENAMED_TABLES:
+        _adopt_legacy_key(table, user_id)
     return f"{table}:{REDIS_KEY_VERSION}:{user_id}"
 
 
@@ -412,14 +468,14 @@ def _hydrate_table(table: str, user_id: int):
                     INNER JOIN credit_accounts ca ON cec.account_id = ca.id
                     WHERE ca.user_id = %s
                 """
-            elif table == 'bud_items':
-                # bud_items -> buds -> users. It has no user_id of its own, so
+            elif table == 'bundle_items':
+                # bundle_items -> bundles -> users. It has no user_id of its own, so
                 # the default branch below emitted "WHERE user_id = %s" against
                 # a table without that column - a query that failed on every
                 # hydration pass.
                 query = """
-                    SELECT bi.* FROM bud_items bi
-                    INNER JOIN buds b ON bi.bud_id = b.id
+                    SELECT bi.* FROM bundle_items bi
+                    INNER JOIN bundles b ON bi.bundle_id = b.id
                     WHERE b.user_id = %s
                 """
             elif table == 'credit_accounts':
@@ -543,8 +599,8 @@ def _dehydrate_user_data(user_id: int):
                 'recurring_income_buckets',  # Bucket state tracking - must flush before dehydration
                 'recurring_expense_buckets',
                 'recurring_c_expense_buckets',
-                'buds',  # Must flush before bud_items to resolve temp IDs
-                'bud_items',
+                'bundles',  # Must flush before bundle_items to resolve temp IDs
+                'bundle_items',
                 'users',  # User settings (goofy_week_mode, landing_page, etc.)
                 'notifications',  # User notifications
                 'setup_state',  # Setup wizard temporary state
@@ -574,9 +630,9 @@ def _dehydrate_user_data(user_id: int):
         for table in USER_TABLES:
             keys_to_delete.append(_get_redis_key(table, user_id))
         
-        # Bud items (stored by user_id)
-        bud_items_key = f"bud_items:{REDIS_KEY_VERSION}:{user_id}"
-        keys_to_delete.append(bud_items_key)
+        # Bundle items (stored by user_id)
+        bundle_items_key = f"bundle_items:{REDIS_KEY_VERSION}:{user_id}"
+        keys_to_delete.append(bundle_items_key)
         
         # Delete all keys
         if keys_to_delete:
@@ -673,7 +729,9 @@ def _flush_redis_to_mysql():
             'c_expense_category_groups',  # Depends on expense_category_groups
             'income_categories',  # Category definitions - flush before entries/recurring
             'expense_categories',
-            'c_expense_categories',  # Depends on credit_accounts
+            'bundles',  # Between the two: bundles references expense_categories, and
+                     # c_expense_categories.bundle_id references bundles
+            'c_expense_categories',  # Depends on credit_accounts and bundles
             'income_entries',
             'expense_entries',
             'c_expense_entries',
@@ -684,8 +742,8 @@ def _flush_redis_to_mysql():
             'recurring_income_buckets',  # Bucket state tracking
             'recurring_expense_buckets',
             'recurring_c_expense_buckets',
-            'buds',  # Must flush before bud_items to resolve temp IDs
-            'bud_items',
+            'bundle_items',  # After the entry tables, so reassignments land before
+                          # its deletes cascade. bundles itself flushes far earlier.
             'users',  # User settings (balance_threshold, starting_savings)
             'notifications',  # User notifications
             'linked_provider_profiles',  # provider session tokens and profile info
@@ -864,11 +922,11 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 with get_db_pool().get_connection() as conn:
                     cursor = conn.cursor()
                     placeholders = ','.join(['%s'] * len(delete_ids))
-                    if table == 'bud_items':
-                        # No user_id column; scoped through its parent bud.
+                    if table == 'bundle_items':
+                        # No user_id column; scoped through its parent bundle.
                         cursor.execute(f"""
-                            DELETE bi FROM bud_items bi
-                            INNER JOIN buds b ON bi.bud_id = b.id
+                            DELETE bi FROM bundle_items bi
+                            INNER JOIN bundles b ON bi.bundle_id = b.id
                             WHERE bi.id IN ({placeholders}) AND b.user_id = %s
                         """, delete_ids + [user_id])
                     else:
@@ -1273,7 +1331,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
                             'original_date': row.get('original_date'),
                             'processed': int(row.get('processed', 0)),
-                            'bud_item_id': row.get('bud_item_id'),
+                            'bundle_item_id': row.get('bundle_item_id'),
                             'pending': int(row.get('pending', 0)),
                             'auto_confirmed': int(row.get('auto_confirmed', 0)),
                             'is_auto_adjustment': int(row.get('is_auto_adjustment', 0))
@@ -1290,7 +1348,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         float(row.get('original_amount')) if row.get('original_amount') is not None else None,
                         row.get('original_date'),
                         int(row.get('processed', 0)),
-                        row.get('bud_item_id'),
+                        row.get('bundle_item_id'),
                         int(row.get('pending', 0)),
                         int(row.get('auto_confirmed', 0)),
                         int(row.get('is_auto_adjustment', 0))
@@ -1310,7 +1368,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     for entry in temp_id_entries:
                         cursor.execute("""
-                            INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
+                            INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bundle_item_id, pending, auto_confirmed, is_auto_adjustment)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             entry['category_id'],
@@ -1321,7 +1379,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             entry['original_amount'],
                             entry['original_date'],
                             entry['processed'],
-                            entry['bud_item_id'],
+                            entry['bundle_item_id'],
                             entry['pending'],
                             entry['auto_confirmed'],
                             entry['is_auto_adjustment']
@@ -1351,7 +1409,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 if batch_data:
                     cursor.executemany("""
-                        INSERT INTO expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
+                        INSERT INTO expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bundle_item_id, pending, auto_confirmed, is_auto_adjustment)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             date = VALUES(date),
@@ -1362,7 +1420,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             is_bucket = VALUES(is_bucket),
                             original_amount = VALUES(original_amount),
                             original_date = VALUES(original_date),
-                            bud_item_id = VALUES(bud_item_id),
+                            bundle_item_id = VALUES(bundle_item_id),
                             pending = VALUES(pending),
                             auto_confirmed = VALUES(auto_confirmed),
                             is_auto_adjustment = VALUES(is_auto_adjustment)
@@ -1450,7 +1508,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             'original_amount': float(row.get('original_amount')) if row.get('original_amount') is not None else None,
                             'original_date': row.get('original_date'),
                             'processed': int(row.get('processed', 0)),
-                            'bud_item_id': row.get('bud_item_id'),
+                            'bundle_item_id': row.get('bundle_item_id'),
                             'pending': int(row.get('pending', 0)),
                             'auto_confirmed': int(row.get('auto_confirmed', 0)),
                             'is_auto_adjustment': int(row.get('is_auto_adjustment', 0))
@@ -1467,7 +1525,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         float(row.get('original_amount')) if row.get('original_amount') is not None else None,
                         row.get('original_date'),
                         int(row.get('processed', 0)),
-                        row.get('bud_item_id'),
+                        row.get('bundle_item_id'),
                         int(row.get('pending', 0)),
                         int(row.get('auto_confirmed', 0)),
                         int(row.get('is_auto_adjustment', 0))
@@ -1487,7 +1545,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     for entry in temp_id_entries:
                         cursor.execute("""
-                            INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
+                            INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bundle_item_id, pending, auto_confirmed, is_auto_adjustment)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             entry['category_id'],
@@ -1498,7 +1556,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             entry['original_amount'],
                             entry['original_date'],
                             entry['processed'],
-                            entry['bud_item_id'],
+                            entry['bundle_item_id'],
                             entry['pending'],
                             entry['auto_confirmed'],
                             entry['is_auto_adjustment']
@@ -1528,7 +1586,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 if batch_data:
                     cursor.executemany("""
-                        INSERT INTO c_expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bud_item_id, pending, auto_confirmed, is_auto_adjustment)
+                        INSERT INTO c_expense_entries (id, category_id, date, amount, recurring_id, is_bucket, original_amount, original_date, processed, bundle_item_id, pending, auto_confirmed, is_auto_adjustment)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             date = VALUES(date),
@@ -1539,7 +1597,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             is_bucket = VALUES(is_bucket),
                             original_amount = VALUES(original_amount),
                             original_date = VALUES(original_date),
-                            bud_item_id = VALUES(bud_item_id),
+                            bundle_item_id = VALUES(bundle_item_id),
                             pending = VALUES(pending),
                             auto_confirmed = VALUES(auto_confirmed),
                             is_auto_adjustment = VALUES(is_auto_adjustment)
@@ -2581,25 +2639,25 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 log_info(logger, 'FLUSH', f"→ recurring_c_expense_buckets: {total_rows} rows (updates: {len(update_data)}, inserts: {len(insert_data)})")
                 return total_rows
                 
-            elif table == 'buds':
-                # Buds table
+            elif table == 'bundles':
+                # Bundles table
                 
-                # First, delete any buds marked for deletion
-                pending_key = f"pending_deletes:buds:{user_id}"
+                # First, delete any bundles marked for deletion
+                pending_key = f"pending_deletes:bundles:{user_id}"
                 pending_deletes = _redis_client.smembers(pending_key)
                 
                 if pending_deletes:
                     delete_ids = [int(id_str) for id_str in pending_deletes]
                     placeholders = ','.join(['%s'] * len(delete_ids))
                     cursor.execute(f"""
-                        DELETE FROM buds WHERE id IN ({placeholders}) AND user_id = %s
+                        DELETE FROM bundles WHERE id IN ({placeholders}) AND user_id = %s
                     """, delete_ids + [user_id])
-                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} buds from MySQL")
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} bundles from MySQL")
                 
-                # Track temp ID to real ID mappings for updating bud_items
+                # Track temp ID to real ID mappings for updating bundle_items
                 temp_id_mappings = {}
                 
-                # Process buds one at a time to get auto-generated IDs for temp IDs
+                # Process bundles one at a time to get auto-generated IDs for temp IDs
                 for row in rows:
                     old_id = row.get('id')
                     is_temp = old_id and int(old_id) < 0
@@ -2607,7 +2665,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     if is_temp:
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
-                            INSERT INTO buds (id, user_id, name, expense_category_id, active, created_at)
+                            INSERT INTO bundles (id, user_id, name, expense_category_id, active, created_at)
                             VALUES (NULL, %s, %s, %s, %s, %s)
                         """, (
                             user_id,
@@ -2618,11 +2676,11 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
-                        log_info(logger, 'FLUSH', f"Bud temp ID {old_id} → real ID {new_id}")
+                        log_info(logger, 'FLUSH', f"Bundle temp ID {old_id} → real ID {new_id}")
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
-                            INSERT INTO buds (id, user_id, name, expense_category_id, active, created_at)
+                            INSERT INTO bundles (id, user_id, name, expense_category_id, active, created_at)
                             VALUES (%s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
@@ -2640,72 +2698,101 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 conn.commit()
                 cursor.close()
                 
-                # Update Redis buds cache with new IDs
+                # Update Redis bundles cache with new IDs
                 if temp_id_mappings:
                     for i, row in enumerate(rows):
                         old_id = row.get('id')
                         if old_id and int(old_id) in temp_id_mappings:
                             rows[i]['id'] = temp_id_mappings[int(old_id)]
                     
-                    # Save updated buds back to Redis
-                    redis_key = _get_redis_key('buds', user_id)
+                    # Save updated bundles back to Redis
+                    redis_key = _get_redis_key('bundles', user_id)
                     _redis_client.setex(
                         redis_key,
                         INACTIVITY_TIMEOUT + 60,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
-                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} bud temp IDs in Redis")
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} bundle temp IDs in Redis")
                     
-                    # Update bud_items in Redis with new bud_ids
-                    bud_items_key = _get_redis_key('bud_items', user_id)
-                    bud_items_data = _redis_client.get(bud_items_key)
-                    if bud_items_data:
-                        bud_items = json.loads(bud_items_data)
+                    # Update bundle_items in Redis with new bundle_ids
+                    bundle_items_key = _get_redis_key('bundle_items', user_id)
+                    bundle_items_data = _redis_client.get(bundle_items_key)
+                    if bundle_items_data:
+                        bundle_items = json.loads(bundle_items_data)
                         updated_count = 0
-                        for item in bud_items:
-                            old_bud_id = item.get('bud_id')
-                            if old_bud_id and int(old_bud_id) in temp_id_mappings:
-                                item['bud_id'] = temp_id_mappings[int(old_bud_id)]
+                        for item in bundle_items:
+                            old_bundle_id = item.get('bundle_id')
+                            if old_bundle_id and int(old_bundle_id) in temp_id_mappings:
+                                item['bundle_id'] = temp_id_mappings[int(old_bundle_id)]
                                 updated_count += 1
                         
                         if updated_count > 0:
                             _redis_client.setex(
-                                bud_items_key,
+                                bundle_items_key,
                                 INACTIVITY_TIMEOUT + 60,
-                                json.dumps(bud_items, cls=DecimalEncoder)
+                                json.dumps(bundle_items, cls=DecimalEncoder)
                             )
-                            log_info(logger, 'FLUSH', f"Updated {updated_count} bud_item bud_id references in Redis")
+                            log_info(logger, 'FLUSH', f"Updated {updated_count} bundle_item bundle_id references in Redis")
+
+                    # Same for the per-card mirror categories. They carry bundle_id
+                    # now, and they flush immediately after this - so a temp id
+                    # left here would fail the foreign key insert.
+                    mirrors_key = _get_redis_key('c_expense_categories', user_id)
+                    mirrors_data = _redis_client.get(mirrors_key)
+                    if mirrors_data:
+                        mirrors = json.loads(mirrors_data)
+                        mirrors_updated = 0
+                        for mirror in mirrors:
+                            old_bundle_id = mirror.get('bundle_id')
+                            if old_bundle_id and int(old_bundle_id) in temp_id_mappings:
+                                mirror['bundle_id'] = temp_id_mappings[int(old_bundle_id)]
+                                mirrors_updated += 1
+
+                        if mirrors_updated > 0:
+                            _redis_client.setex(
+                                mirrors_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(mirrors, cls=DecimalEncoder)
+                            )
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
+                            log_info(logger, 'FLUSH', f"Updated {mirrors_updated} c_expense_category bundle_id references in Redis")
                 
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
                 
-                log_info(logger, 'FLUSH', f"→ buds: {len(rows)} rows")
+                log_info(logger, 'FLUSH', f"→ bundles: {len(rows)} rows")
                 return len(rows)
                 
-            elif table == 'bud_items':
-                # Bud items table
+            elif table == 'bundle_items':
+                # Bundle items table
                 
-                # First, delete any bud_items marked for deletion
-                pending_key = f"pending_deletes:bud_items:{user_id}"
+                # First, delete any bundle_items marked for deletion
+                pending_key = f"pending_deletes:bundle_items:{user_id}"
                 pending_deletes = _redis_client.smembers(pending_key)
                 
                 if pending_deletes:
                     delete_ids = [int(id_str) for id_str in pending_deletes]
                     placeholders = ','.join(['%s'] * len(delete_ids))
+                    # bundle_items has no user_id of its own, so the owner is reached
+                    # through its parent bundle. Without the join an id in one user's
+                    # pending_deletes set deletes another user's row. Same shape as
+                    # the no-Redis-data path above.
                     cursor.execute(f"""
-                        DELETE FROM bud_items WHERE id IN ({placeholders})
-                    """, delete_ids)
-                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} bud_items from MySQL")
+                        DELETE bi FROM bundle_items bi
+                        INNER JOIN bundles b ON bi.bundle_id = b.id
+                        WHERE bi.id IN ({placeholders}) AND b.user_id = %s
+                    """, delete_ids + [user_id])
+                    log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} bundle_items from MySQL")
                 
                 # Track temp ID to real ID mappings for updating Redis
                 temp_id_mappings = {}
                 
-                # Process bud_items to handle temp IDs
+                # Process bundle_items to handle temp IDs
                 for row in rows:
-                    # Skip if bud_id is negative (temp ID) - parent bud hasn't been flushed yet
-                    bud_id_val = row.get('bud_id')
-                    if bud_id_val and int(bud_id_val) < 0:
-                        log_info(logger, 'FLUSH', f"Skipping bud_item {row.get('id')} - bud_id {bud_id_val} is temp (negative)")
+                    # Skip if bundle_id is negative (temp ID) - parent bundle hasn't been flushed yet
+                    bundle_id_val = row.get('bundle_id')
+                    if bundle_id_val and int(bundle_id_val) < 0:
+                        log_info(logger, 'FLUSH', f"Skipping bundle_item {row.get('id')} - bundle_id {bundle_id_val} is temp (negative)")
                         continue
                     
                     old_id = row.get('id')
@@ -2714,11 +2801,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     if is_temp:
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
-                            INSERT INTO bud_items (id, bud_id, account, name, value, date, description)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO bundle_items (id, bundle_id, account, credit_account_id, name, value, date, description)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s)
                         """, (
-                            bud_id_val,
+                            bundle_id_val,
                             row.get('account'),
+                            row.get('credit_account_id'),
                             row.get('name'),
                             float(row.get('value', 0)),
                             row.get('date'),
@@ -2726,23 +2814,25 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         ))
                         new_id = cursor.lastrowid
                         temp_id_mappings[int(old_id)] = new_id
-                        log_info(logger, 'FLUSH', f"Bud_item temp ID {old_id} → real ID {new_id}")
+                        log_info(logger, 'FLUSH', f"Bundle_item temp ID {old_id} → real ID {new_id}")
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
-                            INSERT INTO bud_items (id, bud_id, account, name, value, date, description)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO bundle_items (id, bundle_id, account, credit_account_id, name, value, date, description)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
-                                bud_id = VALUES(bud_id),
+                                bundle_id = VALUES(bundle_id),
                                 account = VALUES(account),
+                                credit_account_id = COALESCE(VALUES(credit_account_id), credit_account_id),
                                 name = VALUES(name),
                                 value = VALUES(value),
                                 date = VALUES(date),
                                 description = VALUES(description)
                         """, (
                             old_id,
-                            bud_id_val,
+                            bundle_id_val,
                             row.get('account'),
+                            row.get('credit_account_id'),
                             row.get('name'),
                             float(row.get('value', 0)),
                             row.get('date'),
@@ -2752,23 +2842,23 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 conn.commit()
                 cursor.close()
                 
-                # Update Redis bud_items cache with new IDs
+                # Update Redis bundle_items cache with new IDs
                 if temp_id_mappings:
                     for i, row in enumerate(rows):
                         old_id = row.get('id')
                         if old_id and int(old_id) in temp_id_mappings:
                             rows[i]['id'] = temp_id_mappings[int(old_id)]
                     
-                    # Save updated bud_items back to Redis
-                    redis_key = _get_redis_key('bud_items', user_id)
+                    # Save updated bundle_items back to Redis
+                    redis_key = _get_redis_key('bundle_items', user_id)
                     _redis_client.setex(
                         redis_key,
                         INACTIVITY_TIMEOUT + 60,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
-                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} bud_item temp IDs in Redis")
+                    log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} bundle_item temp IDs in Redis")
                     
-                    # Update expense_entries and c_expense_entries with new bud_item_ids
+                    # Update expense_entries and c_expense_entries with new bundle_item_ids
                     for table in ['expense_entries', 'c_expense_entries']:
                         entries_key = _get_redis_key(table, user_id)
                         entries_data = _redis_client.get(entries_key)
@@ -2776,9 +2866,9 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             entries = json.loads(entries_data)
                             updated_count = 0
                             for entry in entries:
-                                old_bud_item_id = entry.get('bud_item_id')
-                                if old_bud_item_id and int(old_bud_item_id) in temp_id_mappings:
-                                    entry['bud_item_id'] = temp_id_mappings[int(old_bud_item_id)]
+                                old_bundle_item_id = entry.get('bundle_item_id')
+                                if old_bundle_item_id and int(old_bundle_item_id) in temp_id_mappings:
+                                    entry['bundle_item_id'] = temp_id_mappings[int(old_bundle_item_id)]
                                     updated_count += 1
                             
                             if updated_count > 0:
@@ -2787,12 +2877,12 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                     INACTIVITY_TIMEOUT + 60,
                                     json.dumps(entries, cls=DecimalEncoder)
                                 )
-                                log_info(logger, 'FLUSH', f"Updated {updated_count} bud_item_id references in {table}")
+                                log_info(logger, 'FLUSH', f"Updated {updated_count} bundle_item_id references in {table}")
                 
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
                 
-                log_info(logger, 'FLUSH', f"→ bud_items: {len(rows)} rows")
+                log_info(logger, 'FLUSH', f"→ bundle_items: {len(rows)} rows")
                 return len(rows)
                 
             elif table == 'users':
@@ -3492,7 +3582,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
                             INSERT INTO expense_categories (id, user_id, name, display_order, group_id,
-                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account, credit_account_id, is_system, is_savings)
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bundle, is_credit_account, credit_account_id, is_system, is_savings)
                             VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             user_id,
@@ -3503,7 +3593,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('is_auto_adjustment', 0)),
                             int(row.get('no_end_date', 0)),
                             int(row.get('hidden', 0)),
-                            int(row.get('is_bud', 0)),
+                            int(row.get('is_bundle', 0)),
                             int(row.get('is_credit_account', 0)),
                             row.get('credit_account_id'),
                             int(row.get('is_system', 0)),
@@ -3516,7 +3606,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
                             INSERT INTO expense_categories (id, user_id, name, display_order, group_id,
-                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bud, is_credit_account, credit_account_id, is_system, is_savings)
+                                is_recurring, is_auto_adjustment, no_end_date, hidden, is_bundle, is_credit_account, credit_account_id, is_system, is_savings)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
@@ -3526,7 +3616,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 is_auto_adjustment = VALUES(is_auto_adjustment),
                                 no_end_date = VALUES(no_end_date),
                                 hidden = VALUES(hidden),
-                                is_bud = VALUES(is_bud),
+                                is_bundle = VALUES(is_bundle),
                                 is_credit_account = VALUES(is_credit_account),
                                 credit_account_id = VALUES(credit_account_id),
                                 is_system = VALUES(is_system),
@@ -3541,7 +3631,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('is_auto_adjustment', 0)),
                             int(row.get('no_end_date', 0)),
                             int(row.get('hidden', 0)),
-                            int(row.get('is_bud', 0)),
+                            int(row.get('is_bundle', 0)),
                             int(row.get('is_credit_account', 0)),
                             row.get('credit_account_id'),
                             int(row.get('is_system', 0)),
@@ -3628,6 +3718,30 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             # Mark as dirty so recurring_expense gets flushed in this cycle
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_expense')
                             log_info(logger, 'FLUSH', f"Updated {recurring_updated} recurring_expense records with new category IDs")
+
+                    # And bundles.expense_category_id. Activating a bundle creates its
+                    # category through Redis, so the bundle holds a negative temp id
+                    # until this runs. Without it the bundles flush writes -1 into a
+                    # foreign key column and the insert fails outright.
+                    bundles_key = _get_redis_key('bundles', user_id)
+                    bundles_data = _redis_client.get(bundles_key)
+                    if bundles_data:
+                        bundle_rows = json.loads(bundles_data)
+                        bundles_updated = 0
+                        for bundle in bundle_rows:
+                            old_cat_id = bundle.get('expense_category_id')
+                            if old_cat_id and int(old_cat_id) in temp_id_mappings:
+                                bundle['expense_category_id'] = temp_id_mappings[int(old_cat_id)]
+                                bundles_updated += 1
+                        if bundles_updated > 0:
+                            _redis_client.setex(
+                                bundles_key,
+                                INACTIVITY_TIMEOUT + 60,
+                                json.dumps(bundle_rows, cls=DecimalEncoder)
+                            )
+                            # Mark as dirty so bundles get flushed in this cycle
+                            _redis_client.sadd(f"dirty_tables:{user_id}", 'bundles')
+                            log_info(logger, 'FLUSH', f"Updated {bundles_updated} bundles with new expense_category IDs")
                 
                 # Clear pending deletions
                 _redis_client.delete(pending_key)
@@ -3694,8 +3808,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
                             INSERT INTO c_expense_categories (id, account_id, name, display_order, group_id,
-                                is_recurring, no_end_date, hidden, is_bud, is_interest, is_auto_adjustment, is_system)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, no_end_date, hidden, is_bundle, bundle_id, is_interest, is_auto_adjustment, is_system)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             row.get('account_id'),
                             row.get('name'),
@@ -3704,7 +3818,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('is_recurring', 0)),
                             int(row.get('no_end_date', 0)),
                             int(row.get('hidden', 0)),
-                            int(row.get('is_bud', 0)),
+                            int(row.get('is_bundle', 0)),
+                            row.get('bundle_id'),
                             int(row.get('is_interest', 0)),
                             int(row.get('is_auto_adjustment', 0)),
                             int(row.get('is_system', 0))
@@ -3716,8 +3831,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
                             INSERT INTO c_expense_categories (id, account_id, name, display_order, group_id,
-                                is_recurring, no_end_date, hidden, is_bud, is_interest, is_auto_adjustment, is_system)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                is_recurring, no_end_date, hidden, is_bundle, bundle_id, is_interest, is_auto_adjustment, is_system)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
                                 display_order = VALUES(display_order),
@@ -3725,7 +3840,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                                 is_recurring = VALUES(is_recurring),
                                 no_end_date = VALUES(no_end_date),
                                 hidden = VALUES(hidden),
-                                is_bud = VALUES(is_bud),
+                                is_bundle = VALUES(is_bundle),
+                                bundle_id = COALESCE(VALUES(bundle_id), bundle_id),
                                 is_interest = VALUES(is_interest),
                                 is_auto_adjustment = VALUES(is_auto_adjustment),
                                 is_system = VALUES(is_system)
@@ -3738,7 +3854,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('is_recurring', 0)),
                             int(row.get('no_end_date', 0)),
                             int(row.get('hidden', 0)),
-                            int(row.get('is_bud', 0)),
+                            int(row.get('is_bundle', 0)),
+                            row.get('bundle_id'),
                             int(row.get('is_interest', 0)),
                             int(row.get('is_auto_adjustment', 0)),
                             int(row.get('is_system', 0))
@@ -4977,6 +5094,7 @@ def flush_dirty_tables_for_user(user_id: int):
             'c_a_balances_m',
             'income_categories',  # Category definitions
             'expense_categories',
+            'bundles',  # Between the two, as above
             'c_expense_categories',
             'income_entries',
             'expense_entries',
@@ -4987,8 +5105,7 @@ def flush_dirty_tables_for_user(user_id: int):
             'recurring_income_buckets',  # Bucket state tracking
             'recurring_expense_buckets',
             'recurring_c_expense_buckets',
-            'buds',  # Must flush before bud_items to resolve temp IDs
-            'bud_items',
+            'bundle_items',  # bundles itself flushes far earlier, before the mirrors
             'users',  # User settings (balance_threshold, starting_savings)
             'notifications',  # User notifications
             'setup_state',  # Setup wizard temporary state

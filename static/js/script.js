@@ -149,12 +149,12 @@ function _removeToast(el) {
 /**
  * Return the icon HTML for a category based on its properties.
  * Works for income, expense, and credit account categories.
- * @param {object} cat  Category object with name, is_bud, is_recurring, is_credit_account, is_auto_adjustment, is_interest
+ * @param {object} cat  Category object with name, is_bundle, is_recurring, is_credit_account, is_auto_adjustment, is_interest
  * @returns {string} HTML string for the icon <i> element
  */
 function getCategoryIcon(cat) {
     if (!cat) return '<i class="fa-regular fa-folder category-icon"></i>';
-    if (cat.is_bud) return '<i class="fa-regular fa-seedling category-icon"></i>';
+    if (cat.is_bundle) return '<i class="fa-regular fa-seedling category-icon"></i>';
     if (cat.is_credit_account && cat.is_recurring) return '<i class="fa-kit fa-regular-credit-card-sync category-icon"></i>';
     if (Number(cat.is_savings) === 1 && cat.is_recurring) return '<i class="fa-kit fa-regular-piggy-bank-sync-bl category-icon category-icon-flip"></i>';
     if (Number(cat.is_savings) === 1) return '<i class="fa-regular fa-piggy-bank category-icon category-icon-flip"></i>';
@@ -1678,9 +1678,13 @@ function _bucketItemHtml(item, symbol) {
     // that varies is Variable Income, spending you allot yourself an Allowance.
     var income = item.table === "income_entries";
     var credit = item.table === "c_expense_entries";
-    var kind = item.wage_bill
-        ? (income ? "Wage" : "Bill")
-        : (income ? "Variable Income" : "Allowance");
+    // A bundle is neither: it is one planned purchase out of a named list,
+    // so calling it a Bill told the user the wrong thing about what it is.
+    var kind = item.is_bundle
+        ? "Bundle"
+        : item.wage_bill
+            ? (income ? "Wage" : "Bill")
+            : (income ? "Variable Income" : "Allowance");
 
     // Three tones, not two. Credit spending is money out, but it leaves a card
     // rather than the bank, and telling them apart at a glance is the point of
@@ -1696,6 +1700,12 @@ function _bucketItemHtml(item, symbol) {
     var title = credit && item.account_name
         ? _bucketEscape(item.account_name) + " - " + _bucketEscape(item.category_name)
         : _bucketEscape(item.category_name);
+    // Which item, not just which bundle. A bundle bucket aggregates everything
+    // planned for one date, so the trip's name and an amount say nothing about
+    // what is actually being confirmed.
+    if (item.is_bundle && item.bundle_item) {
+        title += ': ' + _bucketEscape(item.bundle_item);
+    }
     return "" +
       '<div class="bucket-prompt-item ' + tone + '" data-entry-id="' + _bucketEscape(item.entry_id) +
           '" data-table="' + _bucketEscape(item.table) + '">' +
@@ -2111,7 +2121,7 @@ function refreshAfterBucketAnswers(changes) {
     // next time a dashboard is opened, and leave this page untouched.
     //
     // Deliberately not calling the page's own saveDailyTotalsAndRemainders as a
-    // fallback. Most of them redraw in place, but buds.html reloads inside it
+    // fallback. Most of them redraw in place, but bundles.html reloads inside it
     // and dashboard_summary.html's returns early unless one of its own edits set
     // a flag - so "call whatever the page has" quietly reloads on one page and
     // silently skips the recalculation on another. Pages that can redraw say so

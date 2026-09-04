@@ -117,7 +117,7 @@
         const expenseEntries = {{ expense_entries | tojson }};
         const c_expense_categories = {{ c_expense_categories | tojson }};
         const c_expense_entries = {{ c_expense_entries | tojson }};
-        const buds = {{ buds | default([]) | tojson }};
+        const bundles = {{ bundles | default([]) | tojson }};
         let goofyWeekMode = {{ goofy_week_mode|tojson }};
         let selectedDate = new Date("{{ selected_date }}");
         const currentMonthDate = new Date(selectedDate);  // Store the initially selected date
