@@ -8,6 +8,31 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.19.0 — 2026-09-03
+
+### Added
+- **Choose where a balance correction goes.** Balancing writes the difference
+  between Blankee and your real balance as one entry, and that entry has always
+  gone to Uncategorized. Settings now lets you send it somewhere you will
+  actually see it. There are two choices, because a correction is income when
+  your bank holds more than expected and an expense when it holds less: where a
+  shortfall goes, and where extra goes. Leave either alone to keep Uncategorized.
+- **The recurring pages are ordered like Manage Categories**, with collapsible
+  groups. A category now sits in the same place on both screens, and a long list
+  can be folded down to the groups you are working on. What you collapse is
+  remembered.
+
+### Fixed
+- **A balance correction now counts against the category it lands in.** If it
+  goes to a category with money set aside, that money is drawn down, exactly as
+  it would be if you had recorded the spending yourself — so the correction and
+  the forecast it belongs to are not counted twice. This could not arise while
+  corrections always went to Uncategorized.
+- **The message after balancing names the category it used**, rather than always
+  saying Uncategorized.
+- **Collapsing a group animates**, on the recurring pages and on both
+  dashboards, instead of rows disappearing in one step.
+
 ## 1.18.1 — 2026-09-03
 
 ### Fixed

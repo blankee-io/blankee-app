@@ -38,6 +38,7 @@ MIGRATIONS = [
     'remove_autobalance_categories.sql',
     'add_widget_tokens.sql',
     'rename_buds_to_bundles.sql',
+    'add_autobalance_target_categories.sql',
 ]
 
 # install/sql/ holds only what a fresh install applies. The rollback scripts and

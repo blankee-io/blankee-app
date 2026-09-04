@@ -179,6 +179,23 @@
                                 <p class="balance-next-check" id="balance-next-check"></p>
                                 </div>
                             </form>
+                            <!-- Where a correction lands. Its own form because it is
+                                 its own decision: Balance now works whether or not the
+                                 reminder above is switched on, so this saves without
+                                 touching the cadence. -->
+                            <form id="balance-categories-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="balance-expense-category">Shortfall goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds less than Blankee expected, the difference is written here as an expense.</span></span></label>
+                                    <select id="balance-expense-category" class="login-input"></select>
+                                </div>
+                                <div class="input-group">
+                                    <label for="balance-income-category">Extra goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds more than Blankee expected, the difference is written here as income.</span></span></label>
+                                    <select id="balance-income-category" class="login-input"></select>
+                                    <button type="submit" class="submit-button">
+                                        <i id="balance-categories-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
                             <form id="balance-now-form" class="profile-form">
                                 <div class="input-group">
                                     <label>Balance now:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Reconcile straight away rather than waiting for the next scheduled check.</span></span></label>
@@ -734,6 +751,68 @@
                 showForEnabled();
                 save();
             });
+
+            // ---- Where a correction lands ---------------------------------
+            // Two selects, because a correction is income when the bank holds
+            // more than the app expected and an expense when it holds less -
+            // and an expense category cannot hold an income entry.
+            (function () {
+                var form = document.getElementById('balance-categories-form');
+                var incomeSel = document.getElementById('balance-income-category');
+                var expenseSel = document.getElementById('balance-expense-category');
+                if (!form || !incomeSel || !expenseSel) { return; }
+
+                function fill(select, options, chosen, defaultName) {
+                    select.innerHTML = '';
+                    // The empty value is the default rather than a "none":
+                    // leaving it alone is what every user has today.
+                    var blank = document.createElement('option');
+                    blank.value = '';
+                    blank.textContent = defaultName + ' (default)';
+                    select.appendChild(blank);
+                    options.forEach(function (c) {
+                        var o = document.createElement('option');
+                        o.value = c.id;
+                        o.textContent = c.name;
+                        if (chosen && Number(chosen) === Number(c.id)) { o.selected = true; }
+                        select.appendChild(o);
+                    });
+                }
+
+                fetch('/api/autobalance/categories')
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (!d || !d.success) { return; }
+                        fill(incomeSel, d.income_categories || [],
+                             d.income_category_id, d.default_name || 'Uncategorized');
+                        fill(expenseSel, d.expense_categories || [],
+                             d.expense_category_id, d.default_name || 'Uncategorized');
+                    })
+                    .catch(function () { /* leave the selects empty rather than guess */ });
+
+                form.addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    fetch('/api/autobalance/categories', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            income_category_id: incomeSel.value || null,
+                            expense_category_id: expenseSel.value || null
+                        })
+                    })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (d && d.success) {
+                            showToast('Saved.', 'success');
+                        } else {
+                            showToast((d && d.error) || 'Could not save that.', 'error');
+                        }
+                    })
+                    .catch(function () {
+                        showToast('Could not save that.', 'error');
+                    });
+                });
+            })();
 
             var now = document.getElementById('balance-now-btn');
             if (now) {

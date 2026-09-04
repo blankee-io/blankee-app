@@ -1771,17 +1771,18 @@
                 sidebarTbody = document.querySelector(`#${sidebarId} tbody`);
             }
 
-            // Show/hide category rows in main table
+            // Show/hide category rows in main table.
+            // Through rowReveal so the rows fade rather than blink. The main
+            // table and the sidebar are two tables whose rows have to stay
+            // aligned, so both go through the same call and pick up the same
+            // timings - anything else would let one side change height while
+            // the other was still fading.
             const catRows = tbody.querySelectorAll(`tr[data-group-id="${groupId}"]:not(.group-header-row)`);
-            catRows.forEach(row => {
-                row.style.display = newState === 'collapsed' ? 'none' : '';
-            });
+            window.rowReveal.set(catRows, newState !== 'collapsed');
 
             // Show/hide in sidebar
             const sidebarCats = sidebarTbody.querySelectorAll(`tr[data-group-id="${groupId}"]:not(.sidebar-group-header)`);
-            sidebarCats.forEach(row => {
-                row.style.display = newState === 'collapsed' ? 'none' : '';
-            });
+            window.rowReveal.set(sidebarCats, newState !== 'collapsed');
 
             // Update group header sums
             const groupHeaderRow = tbody.querySelector(`tr.group-header-row[data-group-id="${groupId}"]`);

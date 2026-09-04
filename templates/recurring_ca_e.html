@@ -81,8 +81,25 @@
                         </tr>
                     </thead>
                     <tbody>
+                        {# One table per card, so the namespace resets here and the group key
+                           is prefixed with the account: "_ungrouped" means a different group
+                           on each card, and the toggle has to be able to tell them apart. #}
+                        {% set ns = namespace(group=None) %}
                         {% for record in recurring_ca_expense_records if record.account_id == account.id %}
-                        <tr class="{% if record.is_raise %}recurring-raise-row{% endif %}" data-recurring-id="{{ record.id }}" data-category-id="{{ record.category_id }}" data-category-name="{{ record.category_name }}" data-start-date="{{ record.start_date }}" data-amount="{{ record.amount }}" data-cadence-interval="{{ record.cadence_interval }}" data-cadence-unit="{{ record.cadence_unit }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}1{% else %}0{% endif %}" data-wage-bill="{{ record.wage_bill }}">
+                        {% if record.group_key and record.group_key != ns.group %}
+                        {% set ns.group = record.group_key %}
+                        <tr class="recurring-group-header" data-group-key="{{ account.id }}:{{ record.group_key }}">
+                            <td colspan="8">
+                                <button type="button" class="recurring-group-toggle" aria-expanded="true"
+                                        title="Collapse or expand this group">
+                                    <i class="fa-solid fa-chevron-down"></i>
+                                </button>
+                                <span class="recurring-group-name">{{ record.group_name }}</span>
+                                <span class="recurring-group-count"></span>
+                            </td>
+                        </tr>
+                        {% endif %}
+                        <tr class="{% if record.is_raise %}recurring-raise-row{% endif %}" data-group-key="{{ account.id }}:{{ record.group_key }}" data-recurring-id="{{ record.id }}" data-category-id="{{ record.category_id }}" data-category-name="{{ record.category_name }}" data-start-date="{{ record.start_date }}" data-amount="{{ record.amount }}" data-cadence-interval="{{ record.cadence_interval }}" data-cadence-unit="{{ record.cadence_unit }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}1{% else %}0{% endif %}" data-wage-bill="{{ record.wage_bill }}">
                             {# A scheduled price change is the same expense later on, so it does not
                                repeat the name - it says the date it takes over. Not editable
                                either: renaming from one of these rows would rename the whole
@@ -1799,6 +1816,9 @@
         // page is still parsing, before script.js has defined recurringSearch.
         document.querySelectorAll('.ca-recurring-table[data-account-id]').forEach(function (table) {
             var id = table.getAttribute('data-account-id');
+            // Groups first: the search reads data-collapsed to decide whether a row
+            // is hidden by its group, so it has to be set before the search runs.
+            recurringGroups.attach();
             recurringSearch.attach({
                 input: 'ca-recurring-search-' + id,
                 clear: 'ca-recurring-clear-' + id,

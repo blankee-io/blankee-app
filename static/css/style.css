@@ -15146,6 +15146,138 @@ transform: scale(1.2);
 /* ── Category Group Styles ── */
 
 /* Group header row */
+/* ── Rows collapsing out of a group ──────────────────────────────────────────
+   The table shrinks, rather than the rows fading where they stand.
+
+   A row's height comes from the tallest cell in it, and height on a cell is a
+   minimum rather than a limit - so neither can be animated down. The script
+   puts each cell's content in .row-reveal-wrap for the duration, and it is the
+   wrapper's height that moves. With the cell's vertical padding going to zero
+   alongside it, the row really does collapse to nothing and the table closes
+   up behind it.
+
+   The wrapper is added and removed by the script, so it exists only while
+   something is animating. */
+.row-reveal-wrap {
+    overflow: hidden;
+    /* The fade is what keeps the content attached to the row. Height alone
+       clips the text where the closing edge crosses it, which reads as the row
+       being cut through rather than going away. Fading as it shrinks means the
+       text leaves with the edge instead of being sliced by it.
+
+       ease-in-out rather than ease: the row should start and finish gently, so
+       a group of them settles rather than snapping to a stop. */
+    transition: height 220ms ease-in-out, opacity 180ms ease-in-out;
+}
+
+tr.row-collapsing > td > .row-reveal-wrap {
+    opacity: 0;
+}
+
+/* The padding is on the cell, not the wrapper, so it has to be animated
+   separately or the row keeps that much height after the content has gone. */
+/* The same curve and duration as the wrapper, or the padding finishes at a
+   different moment from the content and the row lands in two steps. */
+tr.row-animating > td {
+    transition: padding-top 220ms ease-in-out, padding-bottom 220ms ease-in-out,
+                border-top-width 220ms ease-in-out,
+                border-bottom-width 220ms ease-in-out;
+}
+
+/* Padding and borders both, or the row keeps that much height after its
+   content has gone and leaves a line across the gap it is closing. */
+tr.row-collapsing > td {
+    padding-top: 0;
+    padding-bottom: 0;
+    border-top-width: 0;
+    border-bottom-width: 0;
+}
+
+/* Someone who has asked their system for less motion gets none. The script
+   also skips the animation entirely, so this is the belt to that braces - a
+   stylesheet cached ahead of the script should not animate on its own. */
+@media (prefers-reduced-motion: reduce) {
+    .row-reveal-wrap,
+    tr.row-animating > td {
+        transition: none;
+    }
+}
+
+/* ── Group headers on the recurring pages ────────────────────────────────────
+   The same colours, weight and shadow Manage Categories gives its group
+   headers - primary for income, accent for expense - so a group reads as the
+   same object on both screens rather than as a lighter echo of one. */
+.recurring-group-header {
+    position: relative;
+    z-index: 1;
+    cursor: pointer;
+    user-select: none;
+}
+
+.recurring-group-header td {
+    padding: 10px 8px;
+    background: var(--primary-mid);
+    box-shadow: 0 3px 3px -2px var(--shadow-xxl);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-light);
+}
+
+.expense-recurring-table .recurring-group-header td,
+.ca-recurring-table .recurring-group-header td {
+    background: var(--accent-mid);
+}
+
+/* Collapsed, the shadow has nothing to cast onto - it would sit on the header
+   below it. Manage Categories drops it for the same reason. */
+.recurring-group-header.is-collapsed td {
+    box-shadow: none;
+}
+
+.recurring-group-header:hover td {
+    filter: brightness(1.04);
+}
+
+.recurring-group-toggle {
+    padding: 0 6px 0 0;
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 1.05rem;
+    cursor: pointer;
+}
+
+/* The chevron turns rather than swapping glyph: one icon, and the rotation
+   says which way the group is about to go. */
+.recurring-group-toggle i {
+    transition: transform 0.15s ease;
+}
+
+.recurring-group-header.is-collapsed .recurring-group-toggle i {
+    transform: rotate(-90deg);
+}
+
+.recurring-group-name {
+    margin-right: 8px;
+}
+
+/* The count is context, not content - it should not compete with the name.
+   Dimmed against the filled header rather than given its own colour, so it
+   works on both the primary and the accent background. */
+.recurring-group-count {
+    color: inherit;
+    opacity: 0.75;
+    font-size: 0.8rem;
+    font-weight: normal;
+}
+
+/* A collapsed group's rows are hidden by script, which sets display directly.
+   This is here so they are also hidden before the script runs, on a page drawn
+   from a remembered state - otherwise the group flashes open and then shuts. */
+tr[data-collapsed] {
+    display: none;
+}
+
 .manage-cat-table .group-header-row {
     background: var(--primary-lighter);
     position: relative;
