@@ -70,6 +70,8 @@ EXPECTED_COLUMNS = (
     ('c_expense_categories', 'is_bundle'),
     ('expense_entries', 'bundle_item_id'),
     ('c_expense_entries', 'bundle_item_id'),
+    ('autobalance_settings', 'income_category_id'),
+    ('autobalance_settings', 'expense_category_id'),
 )
 EXPECTED_CONSTRAINTS = (
     ('totals_remainders_m', 'totals_remainders_m_ibfk_1'),
@@ -80,6 +82,8 @@ EXPECTED_CONSTRAINTS = (
     ('bundles', 'bundles_ibfk_2'),
     ('expense_entries', 'expense_entries_ibfk_bundle_item'),
     ('c_expense_entries', 'c_expense_entries_ibfk_bundle_item'),
+    ('autobalance_settings', 'autobalance_settings_income_fk'),
+    ('autobalance_settings', 'autobalance_settings_expense_fk'),
 )
 
 
