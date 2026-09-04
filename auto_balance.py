@@ -697,6 +697,19 @@ def user_categories(table, user_id):
         return []
 
 
+def _category_name(table, user_id, category_id):
+    """The name of the category a correction went to, for the message.
+
+    The user chose where corrections land, so the confirmation has to say where
+    it actually went - "Uncategorized" was hardcoded in the browser and would
+    now be a lie for anyone who changed it.
+    """
+    for row in user_categories(table, user_id):
+        if int(row.get('id') or 0) == int(category_id):
+            return row.get('name') or CORRECTION_CATEGORY
+    return CORRECTION_CATEGORY
+
+
 def can_hold_a_correction(row):
     """Is this a category a balance correction may be pointed at?
 
@@ -1059,9 +1072,36 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
     _update_entry_in_redis(table, user_id, category_id, on_date.isoformat(),
                            float(amount), processed=1)
 
+    # And it depletes a bucket in that category, exactly as the same entry typed
+    # by hand would. A correction is the user saying this money moved and they
+    # had not recorded it, so it has to behave like the record they did not make
+    # - otherwise the spending counts once as the correction and again as the
+    # forecast it was actually part of.
+    #
+    # This did not matter while corrections always went to Uncategorized, which
+    # has no buckets. It matters now that they can be pointed at a real
+    # category, which may well be a recurring one.
+    #
+    # cadence_info is left out so process_manual_entry_with_bucket looks the
+    # wage_bill up itself - passing 0 here would silently treat every category
+    # as an allowance.
+    try:
+        from bucket_utils import process_manual_entry_with_bucket
+        process_manual_entry_with_bucket(table, category_id, on_date,
+                                         float(amount), user_id)
+    except Exception as e:
+        # The correction is already written and is the point of the operation.
+        # A bucket left undepleted is visible and fixable; losing the correction
+        # would put the app back out of step with the bank by exactly the amount
+        # we just measured.
+        log_exception(logger, 'AUTOBALANCE',
+                      f"Correction written but bucket depletion failed for user "
+                      f"{user_id}: {e}")
+
     result['entry_written'] = True
     result['direction'] = direction
     result['category_id'] = category_id
+    result['category_name'] = _category_name(table, user_id, category_id)
     _record_balanced(user_id, difference)
     clear_pending(user_id)
     _correct_the_rest(user_id, on_date, actual_savings, actual_cards, result)

@@ -2470,8 +2470,12 @@ function _abApply(balance, savings, cards) {
                            (d.confirmed === 1 ? "entry" : "entries") + ".");
             }
             if (d.entry_written) {
+                // Where it actually went, not "Uncategorized" - that is only
+                // the default now, and saying it regardless would be wrong for
+                // anyone who chose somewhere else.
                 parts.push("Recorded " + Math.abs(d.difference).toFixed(2) +
-                           " as Uncategorized " + d.direction + ".");
+                           " " + d.direction + " in " +
+                           (d.category_name || "Uncategorized") + ".");
             } else {
                 parts.push("Your balance matches.");
             }
