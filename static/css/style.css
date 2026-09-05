@@ -13470,6 +13470,13 @@ transform: scale(1.2);
 .summary-row {
     display: flex;
     align-items: center;
+    /* A fixed height so the tinted bands are even down the list. The rows hold
+       a two-up bucket display whose content varies - a bill shows a word, an
+       allowance a bar and two amounts - and left to itself that makes every
+       band a slightly different depth. box-sizing keeps the padding inside the
+       50, so the number is the height the row actually occupies. */
+    height: 50px;
+    box-sizing: border-box;
     padding: 4px 10px;
     border-bottom: 1px solid var(--secondary-lighter);
     gap: 16px;
@@ -14283,6 +14290,9 @@ transform: scale(1.2);
     .summary-row {
         flex-direction: column;
         align-items: stretch;
+        /* Released here: stacked into a column, the row needs whatever its
+           content comes to, and 50px would cut the amounts off. */
+        height: auto;
         padding: 12px 16px;
         gap: 10px;
     }
