@@ -1320,27 +1320,29 @@
             // Determine if this is a bill (wage_bill == 1) or allowance
             const isBill = wageBillLookup[category.id] === 1;
             
-            if (prevBucket) {
-                // The last occurrence on the left, dimmed, and the one coming up
-                // on the right. findCurrentBucket already falls forward to the
-                // next bucket when there is none this week, so the right-hand
-                // side is the upcoming one rather than a third column being
-                // needed for it.
-                progressContainer.innerHTML = `
-                    <div class="bucket-dual">
-                        <div class="bucket-side bucket-prev">
-                            ${renderBucketSideHTML(prevBucket, isBill, true)}
-                        </div>
-                        <div class="bucket-dual-divider"></div>
-                        <div class="bucket-side bucket-cur">
-                            ${renderBucketSideHTML(bucket, isBill, true)}
-                        </div>
+            // Always both sides: the last occurrence on the left, dimmed, and
+            // the one coming up on the right. findCurrentBucket already falls
+            // forward to the next bucket when there is none this week, so the
+            // right-hand side is the upcoming one.
+            //
+            // A missing side is drawn as a dash rather than collapsing the row
+            // to a single full-width panel. Collapsing made a category with no
+            // history look like a different kind of thing entirely - wider, and
+            // in the long form with the word "Paid" and the amount spelled out -
+            // and it put the upcoming occurrence under the left half of the row
+            // while every other row had it under the right. Same shape for every
+            // row means the columns mean the same thing all the way down.
+            progressContainer.innerHTML = `
+                <div class="bucket-dual">
+                    <div class="bucket-side bucket-prev">
+                        ${renderBucketSideHTML(prevBucket, isBill, true)}
                     </div>
-                `;
-            } else {
-                // Single layout (no previous bucket exists)
-                progressContainer.innerHTML = renderBucketSideHTML(bucket, isBill, false);
-            }
+                    <div class="bucket-dual-divider"></div>
+                    <div class="bucket-side bucket-cur">
+                        ${renderBucketSideHTML(bucket, isBill, true)}
+                    </div>
+                </div>
+            `;
             
             row.appendChild(categoryName);
             row.appendChild(progressContainer);
