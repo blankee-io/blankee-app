@@ -13460,8 +13460,11 @@ transform: scale(1.2);
     text-align: center;
 }
 
+/* No padding: the rows are tinted bands now, and a gap above the first and
+   below the last leaves the section's own background showing through as a
+   stripe that means nothing. */
 .summary-list {
-    padding: 8px 0;
+    padding: 0;
 }
 
 .summary-row {
@@ -13490,16 +13493,6 @@ transform: scale(1.2);
 
 .summary-row-credit {
     background: var(--secondary-lighter);
-}
-
-/* A shade deeper on hover, so running a finger down the list tells you which
-   row you are on without changing what it means. */
-.summary-row-budget:hover {
-    background: var(--accent-hover);
-}
-
-.summary-row-credit:hover {
-    background: var(--secondary-hover);
 }
 
 /* The card's name rides on the row it belongs to, so it takes the neutral tone
