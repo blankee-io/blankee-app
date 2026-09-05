@@ -72,6 +72,8 @@ EXPECTED_COLUMNS = (
     ('c_expense_entries', 'bundle_item_id'),
     ('autobalance_settings', 'income_category_id'),
     ('autobalance_settings', 'expense_category_id'),
+    ('credit_accounts', 'statement_day'),
+    ('credit_accounts', 'payment_due_day'),
 )
 EXPECTED_CONSTRAINTS = (
     ('totals_remainders_m', 'totals_remainders_m_ibfk_1'),
@@ -227,6 +229,16 @@ def verify(cfg):
     if not rows or rows[0] == '0':
         problems.append('missing unique index: '
                         'c_expense_categories.idx_c_expense_categories_account_bundle')
+
+    # interest_rate is a widening, not a new column, so its presence cannot be
+    # inferred from a name either. The projection multiplies by this, and the
+    # form has always offered three decimals, so losing the third is a wrong
+    # number rather than a cosmetic one.
+    rows = query(cfg, "SELECT COLUMN_TYPE FROM information_schema.COLUMNS "
+                      "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'credit_accounts' "
+                      "AND COLUMN_NAME = 'interest_rate'")
+    if rows and 'decimal(6,3)' not in rows[0]:
+        problems.append(f'credit_accounts.interest_rate is {rows[0]}, expected decimal(6,3)')
 
     # The decimal widening is a column type change, so its presence cannot be
     # inferred from a name.
