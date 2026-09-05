@@ -9226,12 +9226,16 @@ transform: scale(1.2);
     justify-content: center;
 }
 
+/* Everything below is sized so an allowance side comes to about 38px inside
+   the 40px the row leaves it: a 9px date on a 1.1 line (~10px), 1px, a 4px
+   bar, 1px, and two 10px lines (~22px). The row stays 50px; the content is
+   what gives. */
 .bucket-side .bucket-status {
-    gap: 2px;
+    gap: 1px;
 }
 
 .bucket-side .bucket-bar-container {
-    height: 6px;
+    height: 4px;
     width: 100%;
 }
 
@@ -9242,6 +9246,8 @@ transform: scale(1.2);
 .bucket-side .summary-amounts {
     width: 100%;
     gap: 6px;
+    font-size: 10px;
+    line-height: 1.1;
 }
 
 /* Each half takes its own end. Right-aligned rather than merely last, because
@@ -9262,6 +9268,11 @@ transform: scale(1.2);
 .bucket-side .bucket-date {
     font-size: 0.7em;
     margin-bottom: 1px;
+}
+
+.bucket-side .summary-week-label {
+    font-size: 9px;
+    line-height: 1.1;
 }
 
 .bucket-side .status-paid,
@@ -13477,7 +13488,12 @@ transform: scale(1.2);
        50, so the number is the height the row actually occupies. */
     height: 50px;
     box-sizing: border-box;
-    padding: 4px 10px;
+    /* 5px top and bottom, and the bucket display below is sized to fit inside
+       what is left. An allowance side is a date, a bar and two amounts that
+       wrap onto two lines, which at the old sizes came to about 51px in a 42px
+       box - so it was not tight, it was overflowing, and sat flush against both
+       edges. */
+    padding: 5px 10px;
     border-bottom: 1px solid var(--secondary-lighter);
     gap: 16px;
 }
