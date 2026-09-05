@@ -9232,6 +9232,27 @@ transform: scale(1.2);
 
 .bucket-side .bucket-bar-container {
     height: 6px;
+    width: 100%;
+}
+
+/* .bucket-side centres its children, so this row came out only as wide as its
+   own text and the space-between had nothing to spread across - spent and
+   remaining ended up bunched in the middle. Full width gives the two ends
+   something to sit against. */
+.bucket-side .summary-amounts {
+    width: 100%;
+    gap: 6px;
+}
+
+/* Each half takes its own end. Right-aligned rather than merely last, because
+   these wrap onto two lines in a narrow column and the second line would
+   otherwise start at the left of the half and read as unaligned. */
+.bucket-side .spent-amount {
+    text-align: left;
+}
+
+.bucket-side .remaining-amount {
+    text-align: right;
 }
 
 .bucket-side .bucket-text {
@@ -9248,6 +9269,8 @@ transform: scale(1.2);
     font-size: 1em;
 }
 
+/* The occurrence that has been is context for the one coming up, so it is
+   dimmed and the upcoming one is not. */
 .bucket-prev {
     opacity: 0.45;
 }
@@ -13437,13 +13460,23 @@ transform: scale(1.2);
     text-align: center;
 }
 
+/* No padding: the rows are tinted bands now, and a gap above the first and
+   below the last leaves the section's own background showing through as a
+   stripe that means nothing. */
 .summary-list {
-    padding: 8px 0;
+    padding: 0;
 }
 
 .summary-row {
     display: flex;
     align-items: center;
+    /* A fixed height so the tinted bands are even down the list. The rows hold
+       a two-up bucket display whose content varies - a bill shows a word, an
+       allowance a bar and two amounts - and left to itself that makes every
+       band a slightly different depth. box-sizing keeps the padding inside the
+       50, so the number is the height the row actually occupies. */
+    height: 50px;
+    box-sizing: border-box;
     padding: 4px 10px;
     border-bottom: 1px solid var(--secondary-lighter);
     gap: 16px;
@@ -13451,6 +13484,38 @@ transform: scale(1.2);
 
 .summary-row:last-child {
     border-bottom: none;
+}
+
+/* Upcoming Bills holds the budget's bills and every card's in one list, so
+   each row has to say which it is without a heading to lean on. The tones are
+   the ones the app already uses for the distinction: the accent for money
+   leaving the budget, neutral for money leaving a card - the same pairing the
+   evening confirmation prompt uses for its rows.
+
+   Tints rather than fills. These are alternating bands behind readable text,
+   not badges, and a filled row would shout louder than the amounts on it. */
+.summary-row-budget {
+    background: var(--accent-lighter);
+}
+
+/* White, not a grey tint. The section behind these is white too, so a tint
+   that close to it read as a smudge rather than as a distinction. The contrast
+   that matters is against the accent-tinted budget rows above and below, and
+   plain against tinted carries that on its own - with the card's name on the
+   row to say what the absence of colour means. */
+.summary-row-credit {
+    background: var(--white);
+}
+
+/* The card's name rides on the row it belongs to, so it takes the neutral tone
+   rather than the teal the label wears elsewhere - in teal it read as a third
+   kind of thing on a row that is already saying "card".
+
+   Grey on white, now that the row is white: the badge was white-on-tint and
+   would otherwise vanish into the row it sits on. */
+.summary-row-credit .summary-category-name .account-label {
+    background: var(--secondary-lighter);
+    color: var(--text-dark);
 }
 
 .summary-category-name {
@@ -14225,6 +14290,9 @@ transform: scale(1.2);
     .summary-row {
         flex-direction: column;
         align-items: stretch;
+        /* Released here: stacked into a column, the row needs whatever its
+           content comes to, and 50px would cut the amounts off. */
+        height: auto;
         padding: 12px 16px;
         gap: 10px;
     }

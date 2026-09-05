@@ -8,6 +8,20 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.20.0 — 2026-09-05
+
+### Changed
+- **Expense Buckets is now Upcoming Bills, and it is one list.** Your budget's
+  bills and every credit card's used to be separate sections — one for the
+  budget and another inside each account — so answering "what is due next" meant
+  reading three places. They are now a single list in due order, wherever the
+  money comes from. Rows tinted orange come out of your budget; plain rows come
+  off a card and carry that card's name.
+- **The graphs sit above it**, in the order you think about the money: checking,
+  then each credit account, then savings.
+- **Spent and remaining sit at opposite ends of their column**, rather than
+  bunched in the middle.
+
 ## 1.19.0 — 2026-09-03
 
 ### Added
