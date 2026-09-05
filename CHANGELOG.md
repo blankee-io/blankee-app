@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.20.1 — 2026-09-05
+
+### Fixed
+- **Every Upcoming Bills row now has the same two-part shape.** A category with
+  no earlier occurrence used to spread across the whole row instead, which put
+  the one coming up on the left while every other row had it on the right.
+- **The bars and amounts no longer touch the top and bottom of their row.**
+
 ## 1.20.0 — 2026-09-05
 
 ### Changed
