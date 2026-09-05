@@ -1212,6 +1212,41 @@
             return prevBucket;
         }
 
+        // The bucket after the one being shown as current.
+        //
+        // "Current" already falls forward to the next bucket when there is none
+        // this week, so this is the one after THAT - the occurrence beyond the
+        // one being counted down to, which is what makes the row read as a
+        // series rather than as a pair.
+        //
+        // Anchored to the current bucket's own date rather than to today, or a
+        // category whose current bucket is already weeks out would show that
+        // same bucket twice.
+        function findNextBucket(categoryId, bucketLookup, currentBucket) {
+            if (!currentBucket || !currentBucket.week_start) { return null; }
+            const after = currentBucket.week_start;
+
+            let nextBucket = null;
+            let nextDate = null;
+
+            Object.entries(bucketLookup).forEach(([k, bucket]) => {
+                if (k.startsWith(categoryId + '_')) {
+                    const bucketDate = parseDate(bucket.bucket_date);
+                    if (bucketDate && bucketDate > after) {
+                        if (!nextDate || bucketDate < nextDate) {
+                            nextDate = bucketDate;
+                            nextBucket = {
+                                ...bucket,
+                                week_start: bucketDate
+                            };
+                        }
+                    }
+                }
+            });
+
+            return nextBucket;
+        }
+
         // Calculate spent amount for a bucket (entries with is_bucket=1 in that bucket's week)
         function calculateSpent(categoryId, bucketWeekStart, entries) {
             if (!bucketWeekStart) return 0;
@@ -1295,7 +1330,7 @@
         }
 
         // Create a bucket progress row
-        function createBucketRow(category, bucket, entries, accountName = null, prevBucket = null) {
+        function createBucketRow(category, bucket, entries, accountName = null, prevBucket = null, nextBucket = null) {
             const row = document.createElement('div');
             row.className = 'summary-row';
             
@@ -1313,21 +1348,21 @@
             // Determine if this is a bill (wage_bill == 1) or allowance
             const isBill = wageBillLookup[category.id] === 1;
             
-            if (prevBucket) {
-                // Dual layout: previous (left, dimmed) + current (right)
-                progressContainer.innerHTML = `
-                    <div class="bucket-dual">
-                        <div class="bucket-side bucket-prev">
-                            ${renderBucketSideHTML(prevBucket, isBill, true)}
-                        </div>
-                        <div class="bucket-dual-divider"></div>
-                        <div class="bucket-side bucket-cur">
-                            ${renderBucketSideHTML(bucket, isBill, true)}
-                        </div>
-                    </div>
-                `;
+            if (prevBucket || nextBucket) {
+                // Last, current, next - reading left to right in time, with the
+                // current one undimmed in the middle. A side with no bucket is
+                // still drawn, as a dash: leaving it out would slide the current
+                // one off centre and make two rows of the list disagree about
+                // which column means now.
+                const sides = [];
+                sides.push(`<div class="bucket-side bucket-prev">${renderBucketSideHTML(prevBucket, isBill, true)}</div>`);
+                sides.push('<div class="bucket-series-divider"></div>');
+                sides.push(`<div class="bucket-side bucket-cur">${renderBucketSideHTML(bucket, isBill, true)}</div>`);
+                sides.push('<div class="bucket-series-divider"></div>');
+                sides.push(`<div class="bucket-side bucket-next">${renderBucketSideHTML(nextBucket, isBill, true)}</div>`);
+                progressContainer.innerHTML = `<div class="bucket-series">${sides.join('')}</div>`;
             } else {
-                // Single layout (no previous bucket exists)
+                // Single layout: nothing before it and nothing after it.
                 progressContainer.innerHTML = renderBucketSideHTML(bucket, isBill, false);
             }
             
@@ -1351,10 +1386,12 @@
         function bucketsInDueOrder(categories, bucketLookup) {
             return categories
                 .map(function (category) {
+                    const bucket = findCurrentBucket(category.id, bucketLookup);
                     return {
                         category: category,
-                        bucket: findCurrentBucket(category.id, bucketLookup),
-                        prevBucket: findPreviousBucket(category.id, bucketLookup)
+                        bucket: bucket,
+                        prevBucket: findPreviousBucket(category.id, bucketLookup),
+                        nextBucket: findNextBucket(category.id, bucketLookup, bucket)
                     };
                 })
                 .sort(function (a, b) {
@@ -1384,7 +1421,8 @@
             
             bucketsInDueOrder(visibleCategories, bucketLookup).forEach(function (item) {
                 container.appendChild(createBucketRow(
-                    item.category, item.bucket, expenseEntries, null, item.prevBucket));
+                    item.category, item.bucket, expenseEntries, null,
+                    item.prevBucket, item.nextBucket));
             });
         }
 
@@ -1403,7 +1441,9 @@
             visibleCategories.forEach(category => {
                 const bucket = findCurrentBucket(category.id, bucketLookup);
                 const prevBucket = findPreviousBucket(category.id, bucketLookup);
-                const row = createBucketRow(category, bucket, cExpenseEntries, null, prevBucket);
+                const nextBucket = findNextBucket(category.id, bucketLookup, bucket);
+                const row = createBucketRow(category, bucket, cExpenseEntries, null,
+                                            prevBucket, nextBucket);
                 listEl.appendChild(row);
             });
         }

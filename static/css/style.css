@@ -9210,7 +9210,12 @@ transform: scale(1.2);
 }
 
 /* Side-by-side prev + current bucket display */
-.bucket-dual {
+/* .bucket-dual is exactly two - previous and current - which is what the
+   recurring pages show. The summary shows three, so it uses .bucket-series;
+   the layout is the same flex row either way and the two share it rather than
+   having a second copy that can drift. */
+.bucket-dual,
+.bucket-series {
     display: flex;
     align-items: stretch;
     gap: 0;
@@ -9232,6 +9237,27 @@ transform: scale(1.2);
 
 .bucket-side .bucket-bar-container {
     height: 6px;
+    width: 100%;
+}
+
+/* .bucket-side centres its children, so this row came out only as wide as its
+   own text and the space-between had nothing to spread across - spent and
+   remaining ended up bunched in the middle. Full width gives the two ends
+   something to sit against. */
+.bucket-side .summary-amounts {
+    width: 100%;
+    gap: 6px;
+}
+
+/* Each half takes its own end. Right-aligned rather than merely last, because
+   these wrap onto two lines in a narrow column and the second line would
+   otherwise start at the left of the half and read as unaligned. */
+.bucket-side .spent-amount {
+    text-align: left;
+}
+
+.bucket-side .remaining-amount {
+    text-align: right;
 }
 
 .bucket-side .bucket-text {
@@ -9248,15 +9274,30 @@ transform: scale(1.2);
     font-size: 1em;
 }
 
-.bucket-prev {
+/* What has been and what is coming are both context for what is happening
+   now, so both are dimmed and the current one is not. Reading across, the eye
+   lands on the middle. */
+.bucket-prev,
+.bucket-next {
     opacity: 0.45;
 }
 
-.bucket-dual-divider {
+.bucket-dual-divider,
+.bucket-series-divider {
     width: 1px;
     background-color: var(--secondary-hover);
     margin: 2px 4px;
     flex-shrink: 0;
+}
+
+/* Three columns in the width two had. The dividers give back what little they
+   can, and the labels tighten rather than the numbers wrapping. */
+.bucket-series .bucket-side .summary-week-label {
+    font-size: 0.66em;
+}
+
+.bucket-series .bucket-series-divider {
+    margin: 2px 2px;
 }
 
 .add-income-btn {
