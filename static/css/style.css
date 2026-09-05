@@ -13491,15 +13491,23 @@ transform: scale(1.2);
     background: var(--accent-lighter);
 }
 
+/* White, not a grey tint. The section behind these is white too, so a tint
+   that close to it read as a smudge rather than as a distinction. The contrast
+   that matters is against the accent-tinted budget rows above and below, and
+   plain against tinted carries that on its own - with the card's name on the
+   row to say what the absence of colour means. */
 .summary-row-credit {
-    background: var(--secondary-lighter);
+    background: var(--white);
 }
 
 /* The card's name rides on the row it belongs to, so it takes the neutral tone
    rather than the teal the label wears elsewhere - in teal it read as a third
-   kind of thing on a row that is already saying "card". */
+   kind of thing on a row that is already saying "card".
+
+   Grey on white, now that the row is white: the badge was white-on-tint and
+   would otherwise vanish into the row it sits on. */
 .summary-row-credit .summary-category-name .account-label {
-    background: var(--white);
+    background: var(--secondary-lighter);
     color: var(--text-dark);
 }
 
