@@ -131,18 +131,7 @@
                         </div>
                     </div>
 
-                    <!-- Expense Buckets Section -->
-                    <div class="summary-section" id="expense-buckets-section">
-                        <div class="summary-section-header">
-                            <i class="fa-solid fa-minus"></i>
-                            <span>Expense Buckets</span>
-                        </div>
-                        <div class="summary-list" id="expense-buckets-list">
-                            <!-- Populated by JavaScript -->
-                        </div>
-                    </div>
-
-                    <!-- Credit Account Balance Graphs + Buckets (one per account) -->
+                    <!-- Credit Account Balance Graphs (one per account) -->
                     <div id="ca-graphs-container">
                         <!-- Populated by JavaScript -->
                     </div>
@@ -158,6 +147,21 @@
                             <div class="graph-scroll-wrapper" id="savings-graph-scroll-wrapper">
                                 <canvas id="savings-chart"></canvas>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Upcoming Bills: the budget's and every card's, in one
+                         list. They were two sections, which meant reading three
+                         places to answer one question - what is due next. Kept
+                         below the graphs because the graphs are the overview
+                         and this is the detail behind them. -->
+                    <div class="summary-section" id="expense-buckets-section">
+                        <div class="summary-section-header">
+                            <i class="fa-solid fa-receipt"></i>
+                            <span>Upcoming Bills</span>
+                        </div>
+                        <div class="summary-list" id="expense-buckets-list">
+                            <!-- Populated by JavaScript -->
                         </div>
                     </div>
                 </div>
@@ -1297,7 +1301,10 @@
         // Create a bucket progress row
         function createBucketRow(category, bucket, entries, accountName = null, prevBucket = null) {
             const row = document.createElement('div');
-            row.className = 'summary-row';
+            // Budget and card bills share one list now, so each row has to say
+            // which it is on its own - the section heading no longer does it.
+            row.className = 'summary-row ' +
+                (accountName ? 'summary-row-credit' : 'summary-row-budget');
             
             const categoryName = document.createElement('div');
             categoryName.className = 'summary-category-name';
@@ -1314,7 +1321,11 @@
             const isBill = wageBillLookup[category.id] === 1;
             
             if (prevBucket) {
-                // Dual layout: previous (left, dimmed) + current (right)
+                // The last occurrence on the left, dimmed, and the one coming up
+                // on the right. findCurrentBucket already falls forward to the
+                // next bucket when there is none this week, so the right-hand
+                // side is the upcoming one rather than a third column being
+                // needed for it.
                 progressContainer.innerHTML = `
                     <div class="bucket-dual">
                         <div class="bucket-side bucket-prev">
@@ -1337,74 +1348,78 @@
             return row;
         }
 
-        // Categories paired with their buckets, soonest due first.
+        // Everything due, wherever it is paid from.
         //
-        // The order used to be whatever order the categories arrived in, which is
-        // not an order at all from the reader's side: the thing due this week could
-        // be anywhere in the list. Sorting by the date each row actually shows puts
-        // what needs attention at the top.
+        // The budget's bills and each card's used to be separate lists in
+        // separate sections, so answering "what is due next" meant reading
+        // three places and holding the dates in your head. One list, in due
+        // order across all of them, is the same information in the order the
+        // question is actually asked.
         //
-        // A category with no bucket ahead of it has no date to sort by and goes
-        // last, rather than sorting as the epoch and taking over the top of the
-        // list. Ties keep the order the categories came in, because Array.sort is
-        // stable - so two buckets due the same day do not shuffle between renders.
-        function bucketsInDueOrder(categories, bucketLookup) {
-            return categories
-                .map(function (category) {
-                    return {
-                        category: category,
-                        bucket: findCurrentBucket(category.id, bucketLookup),
-                        prevBucket: findPreviousBucket(category.id, bucketLookup)
-                    };
-                })
-                .sort(function (a, b) {
-                    if (!a.bucket && !b.bucket) { return 0; }
-                    if (!a.bucket) { return 1; }
-                    if (!b.bucket) { return -1; }
-                    return a.bucket.week_start - b.bucket.week_start;
-                });
-        }
-
-        // Render expense buckets
+        // Which is which is carried by the row rather than by a heading: a card
+        // row is tinted and wears the card's name, a budget row is not.
         function renderExpenseBuckets() {
             const container = document.getElementById('expense-buckets-list');
             container.innerHTML = '';
-            
-            const bucketLookup = buildBucketLookup(expenseBucketRecords);
-            
-            // Filter to only visible recurring categories
-            const visibleCategories = recurringExpenseCategories.filter(cat => 
-                !cat.hidden && cat.is_recurring === 1
-            );
-            
-            if (visibleCategories.length === 0) {
+
+            const budgetLookup = buildBucketLookup(expenseBucketRecords);
+            const cardLookup = buildBucketLookup(cExpenseBucketRecords);
+
+            const accountNames = {};
+            (creditAccounts || []).forEach(function (account) {
+                accountNames[parseInt(account.id)] = account.name;
+            });
+
+            const rows = [];
+
+            recurringExpenseCategories
+                .filter(function (cat) { return !cat.hidden && cat.is_recurring === 1; })
+                .forEach(function (category) {
+                    rows.push({
+                        category: category,
+                        bucket: findCurrentBucket(category.id, budgetLookup),
+                        prevBucket: findPreviousBucket(category.id, budgetLookup),
+                        entries: expenseEntries,
+                        accountName: null
+                    });
+                });
+
+            recurringCExpenseCategories
+                .filter(function (cat) { return !cat.hidden && cat.is_recurring === 1; })
+                .forEach(function (category) {
+                    rows.push({
+                        category: category,
+                        bucket: findCurrentBucket(category.id, cardLookup),
+                        prevBucket: findPreviousBucket(category.id, cardLookup),
+                        entries: cExpenseEntries,
+                        // The name is what the row shows, so a card deleted since
+                        // the page loaded still reads as a card rather than
+                        // silently becoming a budget row.
+                        accountName: accountNames[parseInt(category.account_id)] || 'Card'
+                    });
+                });
+
+            if (rows.length === 0) {
                 container.innerHTML = '<div class="summary-empty">No recurring expense categories</div>';
                 return;
             }
-            
-            bucketsInDueOrder(visibleCategories, bucketLookup).forEach(function (item) {
-                container.appendChild(createBucketRow(
-                    item.category, item.bucket, expenseEntries, null, item.prevBucket));
-            });
-        }
 
-        // Build bucket rows for a specific credit account (used by renderCaGraphs)
-        function buildCaBucketList(accountId, listEl) {
-            const bucketLookup = buildBucketLookup(cExpenseBucketRecords);
-            const visibleCategories = recurringCExpenseCategories.filter(cat =>
-                !cat.hidden && cat.is_recurring === 1 && parseInt(cat.account_id) === parseInt(accountId)
-            );
-            
-            if (visibleCategories.length === 0) {
-                listEl.innerHTML = '<div class="summary-empty">No recurring categories</div>';
-                return;
-            }
-            
-            visibleCategories.forEach(category => {
-                const bucket = findCurrentBucket(category.id, bucketLookup);
-                const prevBucket = findPreviousBucket(category.id, bucketLookup);
-                const row = createBucketRow(category, bucket, cExpenseEntries, null, prevBucket);
-                listEl.appendChild(row);
+            // Soonest first, and anything with no bucket ahead of it last rather
+            // than sorting as the epoch and taking over the top of the list.
+            // Array.sort is stable, so two due the same day keep the order they
+            // were added in - budget before cards - instead of shuffling between
+            // renders.
+            rows.sort(function (a, b) {
+                if (!a.bucket && !b.bucket) { return 0; }
+                if (!a.bucket) { return 1; }
+                if (!b.bucket) { return -1; }
+                return a.bucket.week_start - b.bucket.week_start;
+            });
+
+            rows.forEach(function (item) {
+                container.appendChild(createBucketRow(
+                    item.category, item.bucket, item.entries,
+                    item.accountName, item.prevBucket));
             });
         }
 
@@ -2446,7 +2461,6 @@
                 const wrapperId = `ca-graph-scroll-wrapper-${account.id}`;
                 const canvasId = `ca-chart-${account.id}`;
                 const trendId = `ca-trend-${account.id}`;
-                const bucketsListId = `ca-buckets-list-${account.id}`;
                 
                 const section = document.createElement('div');
                 section.className = 'summary-section';
@@ -2469,11 +2483,6 @@
                         <span id="${trendId}" class="trend-indicator"></span>
                     </div>
                     ${graphHtml}
-                    <div class="summary-section-header ca-bucket-header">
-                        <i class="fa-kit fa-solid-credit-card-circle-minus"></i>
-                        <span>Expense Buckets</span>
-                    </div>
-                    <div class="summary-list" id="${bucketsListId}"></div>
                 `;
                 container.appendChild(section);
                 
@@ -2497,8 +2506,6 @@
                 }
                 
                 // Render buckets for this account
-                const bucketsListEl = document.getElementById(bucketsListId);
-                buildCaBucketList(account.id, bucketsListEl);
             });
         }
 
@@ -2545,9 +2552,9 @@
                 { selector: '#test-raise-open-btn', text: 'Test a Raise takes one of your recurring incomes - a raise, a cut, a new payday - and shows the forecast with that change in place of what is there now.' },
                 { selector: '#balance-graph-section', text: 'The balance trend chart shows how your balance changes over time.' },
                 { selector: '#trend-indicator', text: 'The arrow shows whether your balance is trending up or down. If you see a red <span class=\"tutorial-negative-badge\">!</span> badge on the header, it means your balance goes negative at some point in the future.' },
-                { selector: '#expense-buckets-section', text: 'Recurring expense buckets show what\'s been paid and what\'s still remaining this period.' },
-                { selector: '#ca-graphs-container', text: 'Credit account trends and recurring expense buckets for each account.' },
-                { selector: '#savings-graph-section', text: 'Your savings trend over time.' }
+                { selector: '#ca-graphs-container', text: 'A trend for each credit account, the same way as your checking balance.' },
+                { selector: '#savings-graph-section', text: 'Your savings trend over time.' },
+                { selector: '#expense-buckets-section', text: 'Everything due, wherever it is paid from \u2014 your budget and every card in one list, soonest first. Rows tinted orange come out of your budget; grey ones come off a card and carry its name.' }
             ], { onComplete: function() { window.scrollTo({ top: 0, behavior: 'smooth' }); } });
 
             // Drag-to-scroll functionality
