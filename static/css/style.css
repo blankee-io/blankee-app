@@ -9210,12 +9210,7 @@ transform: scale(1.2);
 }
 
 /* Side-by-side prev + current bucket display */
-/* .bucket-dual is exactly two - previous and current - which is what the
-   recurring pages show. The summary shows three, so it uses .bucket-series;
-   the layout is the same flex row either way and the two share it rather than
-   having a second copy that can drift. */
-.bucket-dual,
-.bucket-series {
+.bucket-dual {
     display: flex;
     align-items: stretch;
     gap: 0;
@@ -9274,30 +9269,17 @@ transform: scale(1.2);
     font-size: 1em;
 }
 
-/* What has been and what is coming are both context for what is happening
-   now, so both are dimmed and the current one is not. Reading across, the eye
-   lands on the middle. */
-.bucket-prev,
-.bucket-next {
+/* The occurrence that has been is context for the one coming up, so it is
+   dimmed and the upcoming one is not. */
+.bucket-prev {
     opacity: 0.45;
 }
 
-.bucket-dual-divider,
-.bucket-series-divider {
+.bucket-dual-divider {
     width: 1px;
     background-color: var(--secondary-hover);
     margin: 2px 4px;
     flex-shrink: 0;
-}
-
-/* Three columns in the width two had. The dividers give back what little they
-   can, and the labels tighten rather than the numbers wrapping. */
-.bucket-series .bucket-side .summary-week-label {
-    font-size: 0.66em;
-}
-
-.bucket-series .bucket-series-divider {
-    margin: 2px 2px;
 }
 
 .add-income-btn {
