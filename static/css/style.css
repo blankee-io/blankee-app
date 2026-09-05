@@ -13476,6 +13476,40 @@ transform: scale(1.2);
     border-bottom: none;
 }
 
+/* Upcoming Bills holds the budget's bills and every card's in one list, so
+   each row has to say which it is without a heading to lean on. The tones are
+   the ones the app already uses for the distinction: the accent for money
+   leaving the budget, neutral for money leaving a card - the same pairing the
+   evening confirmation prompt uses for its rows.
+
+   Tints rather than fills. These are alternating bands behind readable text,
+   not badges, and a filled row would shout louder than the amounts on it. */
+.summary-row-budget {
+    background: var(--accent-lighter);
+}
+
+.summary-row-credit {
+    background: var(--secondary-lighter);
+}
+
+/* A shade deeper on hover, so running a finger down the list tells you which
+   row you are on without changing what it means. */
+.summary-row-budget:hover {
+    background: var(--accent-hover);
+}
+
+.summary-row-credit:hover {
+    background: var(--secondary-hover);
+}
+
+/* The card's name rides on the row it belongs to, so it takes the neutral tone
+   rather than the teal the label wears elsewhere - in teal it read as a third
+   kind of thing on a row that is already saying "card". */
+.summary-row-credit .summary-category-name .account-label {
+    background: var(--white);
+    color: var(--text-dark);
+}
+
 .summary-category-name {
     flex: 0 0 200px;
     font-size: 14px;
