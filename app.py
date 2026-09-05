@@ -23609,6 +23609,30 @@ def credit_accounts():
         currency_type=currency_type
     )
 
+def _clean_cycle_day(value):
+    """A day of the month for a card's billing cycle: 1-31, LAST_DAY, or None.
+
+    Same shape the recurring forms store monthly_days in, so the day pickers and
+    everything that already reads that convention work unchanged.
+
+    None for anything unrecognised rather than a guess. These arrive from a
+    browser, and a bad day would place the statement date somewhere the user did
+    not choose - a wrong interest charge is worse than none.
+    """
+    if value is None:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    if value.upper() in ('LAST_DAY', 'LAST DAY'):
+        return 'LAST_DAY'
+    try:
+        day = int(value)
+    except (TypeError, ValueError):
+        return None
+    return str(day) if 1 <= day <= 31 else None
+
+
 @app.route('/add-credit-account', methods=['POST'])
 @login_required
 def add_credit_account():
@@ -23617,6 +23641,8 @@ def add_credit_account():
     interest_rate = data.get('interest_rate')
     account_type = data.get('type')
     starting_balance = data.get('starting_balance', None)
+    statement_day = _clean_cycle_day(data.get('statement_day'))
+    payment_due_day = _clean_cycle_day(data.get('payment_due_day'))
 
     if not name or interest_rate is None or interest_rate == '' or not account_type:
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
@@ -23628,6 +23654,11 @@ def add_credit_account():
     account_data = {
         'name': name,
         'interest_rate': float(interest_rate),
+        # Both or neither: a statement day with no due day cannot answer whether
+        # the grace period applied, and a due day with no statement day has no
+        # cycle to close. Half a cycle would forecast interest off a guess.
+        'statement_day': statement_day if (statement_day and payment_due_day) else None,
+        'payment_due_day': payment_due_day if (statement_day and payment_due_day) else None,
         'is_card': is_card,
         'is_line': is_line,
         'starting_balance': float(starting_balance) if starting_balance else 0.0
@@ -23640,9 +23671,11 @@ def add_credit_account():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                INSERT INTO credit_accounts (user_id, name, interest_rate, is_card, is_line)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (current_user.id, name, interest_rate, is_card, is_line))
+                INSERT INTO credit_accounts (user_id, name, interest_rate, statement_day, payment_due_day, is_card, is_line)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (current_user.id, name, interest_rate,
+                  account_data['statement_day'], account_data['payment_due_day'],
+                  is_card, is_line))
             conn.commit()
             temp_account_id = cursor.lastrowid
             cursor.close()
@@ -23977,9 +24010,16 @@ def update_credit_account():
     name = data.get('name')
     interest_rate = data.get('interest_rate')
     account_type = data.get('type')
-    recurring_payment = data.get('recurring_payment', False)
+    # None, not False. Nothing in the app has ever sent this field, and
+    # defaulting it to False meant every edit of a card - a rename, a rate
+    # change - read as "turn the recurring payment off" and ran the branch that
+    # deletes its future entries. Absent now means leave it exactly as it is;
+    # only a caller that says something gets to change it.
+    recurring_payment = data.get('recurring_payment', None)
     payment_amount = float(data.get('payment_amount', 0) or 0)
     due_date = data.get('due_date', '1')
+    statement_day = _clean_cycle_day(data.get('statement_day'))
+    payment_due_day = _clean_cycle_day(data.get('payment_due_day'))
     
     if not account_id or not name or interest_rate is None or not account_type:
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
@@ -24003,6 +24043,9 @@ def update_credit_account():
                 if acc.get('id') == account_id:
                     acc['name'] = name
                     acc['interest_rate'] = float(interest_rate)
+                    # Both or neither, as on create.
+                    acc['statement_day'] = statement_day if (statement_day and payment_due_day) else None
+                    acc['payment_due_day'] = payment_due_day if (statement_day and payment_due_day) else None
                     acc['is_card'] = is_card
                     acc['is_line'] = is_line
                     break
@@ -24034,7 +24077,11 @@ def update_credit_account():
         # Determine if recurring state changed
         was_recurring = existing_recurring is not None
         
-        if recurring_payment and not was_recurring:
+        if recurring_payment is None:
+            # The caller did not mention the recurring payment, so it is not
+            # theirs to change. Both branches below are skipped.
+            pass
+        elif recurring_payment and not was_recurring:
             # TURNING ON recurring payment
             # Create payment category if it doesn't exist
             if not payment_category:
