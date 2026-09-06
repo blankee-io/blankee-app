@@ -9289,17 +9289,61 @@ def api_credit_interest_entries():
         category_id = int(entry.get('category_id') or 0)
         if category_id not in interest:
             continue
-        out.append({
+        amount = float(entry.get('amount') or 0)
+        is_bucket = int(entry.get('is_bucket') or 0)
+        processed = int(entry.get('processed') or 0)
+        original_amount = (float(entry['original_amount'])
+                           if entry.get('original_amount') is not None else None)
+
+        days_late = 0
+        original_date = entry.get('original_date')
+        if is_bucket and original_date:
+            if isinstance(original_date, str):
+                original_date = datetime.strptime(original_date[:10], '%Y-%m-%d').date()
+            elif isinstance(original_date, datetime):
+                original_date = original_date.date()
+            days_late = _bucket_days_pushed(entry, original_date)
+
+        # Two spellings of the same charge, because the pages that read this
+        # hold two different shapes. The daily dashboard keeps raw entries and
+        # renders `amount`; the weekly and three-month ones keep rows already
+        # aggregated per period and render `total_amount`, with the bucket
+        # state under `has_bucket`/`bucket_amount`. Sending only the raw
+        # spelling blanked those cells - the row was found and every field it
+        # wanted was undefined.
+        #
+        # One row can carry both honestly here: a statement closes once a
+        # month, so a category never has two charges inside the same week or
+        # month and the aggregate is always the single entry.
+        row = {
             'id': entry.get('id'),
             'category_id': category_id,
             'account_id': interest[category_id],
             'date': str(entry.get('date'))[:10],
-            'amount': float(entry.get('amount') or 0),
-            'original_amount': (float(entry['original_amount'])
-                                if entry.get('original_amount') is not None else None),
-            'is_bucket': int(entry.get('is_bucket') or 0),
-            'processed': int(entry.get('processed') or 0),
-        })
+            'amount': amount,
+            'original_amount': original_amount,
+            'is_bucket': is_bucket,
+            'processed': processed,
+            'pending': int(entry.get('pending') or 0),
+            'auto_confirmed': int(entry.get('auto_confirmed') or 0),
+            'original_date': (original_date.isoformat()
+                              if hasattr(original_date, 'isoformat') else original_date),
+            # The aggregate spelling.
+            'total_amount': amount,
+            'partially_processed': 0,
+            'pending_count': 1 if int(entry.get('pending') or 0) else 0,
+            'total_count': 1,
+        }
+        if is_bucket:
+            row['has_bucket'] = True
+            row['bucket_amount'] = amount
+            # The aggregate rows fall back to the amount when a bucket has no
+            # original recorded, and the progress bar divides by this.
+            if original_amount is None:
+                row['original_amount'] = amount
+            if days_late > 0:
+                row['max_days_late'] = days_late
+        out.append(row)
 
     return jsonify({'status': 'success',
                     'category_ids': sorted(interest.keys()),
