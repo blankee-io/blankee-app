@@ -2089,6 +2089,45 @@ function _bucketSpinner(show) {
     showDashboardSpinner(!!show);
 }
 
+/* ── Keeping a page's interest rows current ──────────────────────────────────
+ *
+ * Interest charges are written by the server, not by the user: recalculating a
+ * card rewrites every projected charge on it for the rest of the forecast. A
+ * page holds its own copy of c_expense_entries and has no way to hear about
+ * that, so the rows sat stale until a reload.
+ *
+ * The array is patched in place - spliced and pushed, never reassigned -
+ * because the daily dashboard declares it with const, and because the page's
+ * render functions close over the array they were given rather than reading a
+ * variable each time.
+ *
+ * Resolves to true when something was replaced, so a caller can skip a redraw
+ * it does not need.
+ */
+window.refreshInterestEntries = function (entries) {
+    if (!Array.isArray(entries)) { return Promise.resolve(false); }
+    return fetch("/api/credit-interest-entries", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+            if (!d || d.status !== "success") { return false; }
+            var owned = {};
+            (d.category_ids || []).forEach(function (id) { owned[String(id)] = true; });
+            if (!Object.keys(owned).length) { return false; }
+
+            var before = entries.length;
+            for (var i = entries.length - 1; i >= 0; i--) {
+                if (owned[String(entries[i].category_id)]) { entries.splice(i, 1); }
+            }
+            (d.entries || []).forEach(function (e) { entries.push(e); });
+            return before !== entries.length || (d.entries || []).length > 0;
+        })
+        .catch(function () {
+            // A stale row is better than a broken page: the next reload fixes
+            // it, and nothing here is the user's own data.
+            return false;
+        });
+};
+
 function refreshAfterBucketAnswers(changes) {
     // Answering moves entries between days, changes amounts and removes rows,
     // so both the entry cells and the stored totals behind the prompt are now

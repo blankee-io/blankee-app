@@ -1300,7 +1300,16 @@
                         if (typeof refreshNotificationBadge === 'function') {
                             refreshNotificationBadge();
                         }
-                        updateDashboardDView()
+                        // This page never posts to /save_ca_daily_balance, but
+                        // the routes it does post to recalculate the cards
+                        // server-side - so a card's projected interest charges
+                        // move without anything here hearing about it. Redraw
+                        // once now, and again if the charges came back changed.
+                        updateDashboardDView();
+                        window.refreshInterestEntries(c_expense_entries)
+                            .then(function (changed) {
+                                if (changed) { updateDashboardDView(); }
+                            });
                     } else {
                     }
                 },

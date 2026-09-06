@@ -3407,6 +3407,15 @@
                         // Invalidate CA balances cache so fresh data is fetched
                         batchCaBalancesCache = {};
                         
+                        // The recalculation just rewrote this card's projected
+                        // interest charges. They are entries, not balances, so
+                        // nothing in the response above carries them - without
+                        // this the rows stay as they were until a reload.
+                        window.refreshInterestEntries(c_expense_entries)
+                            .then(function (changed) {
+                                if (changed) { updateView(["all"]); }
+                            });
+
                         // Optionally update the UI if needed
                         updateCaBalance();
                         showDashboardSpinner(false);
