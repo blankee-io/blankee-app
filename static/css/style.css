@@ -591,6 +591,134 @@ body {
     margin-left: auto;
 }
 
+/* The Blankee menu -----------------------------------------------------------
+
+   Everything that navigates lives in this panel; the profile dropdown keeps
+   only who you are and how to leave.
+
+   It slides over the page rather than pushing it. Every dashboard sizes its
+   columns from the width it is given, so moving that width would reflow the
+   whole grid behind the panel for as long as it was open - a lot of work, and
+   visible, to show a menu.
+
+   The rows inside are .dropdown-link and its siblings, shared with the profile
+   dropdown. The two menus are meant to look identical, and a second copy of
+   those rules is a second thing to keep in step. */
+
+.nav-menu-toggle {
+    /* box model */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 40px;
+    height: 40px;
+    margin-right: 4px;
+    padding: 0;
+
+    /* visual */
+    background-color: transparent;
+    border: none;
+    border-radius: 50%;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.nav-menu-toggle:hover {
+    background-color: var(--primary-hover);
+}
+
+.side-menu {
+    /* positioning - above the nav bar, which is 100 */
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 200;
+
+    /* box model */
+    display: flex;
+    flex-direction: column;
+    width: 300px;
+    max-width: 85vw;
+    height: 100%;
+    padding-bottom: 10px;
+    overflow-y: auto;
+
+    /* visual */
+    background-color: var(--primary);
+    box-shadow: 0 10px 40px var(--shadow-lg);
+    font-size: 13px;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    backdrop-filter: blur(20px);
+}
+
+.side-menu.open {
+    transform: translateX(0);
+}
+
+.side-menu-header {
+    display: flex;
+    flex-shrink: 0;
+    justify-content: space-between;
+    align-items: center;
+
+    /* Matches the nav bar, so the title sits on the logo's line. */
+    height: 50px;
+    padding-right: 10px;
+    padding-left: 20px;
+}
+
+.side-menu-title {
+    color: white;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.side-menu-close {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    background-color: transparent;
+    border: none;
+    border-radius: 50%;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.side-menu-close:hover {
+    background-color: var(--primary-hover);
+}
+
+.side-menu-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 199;
+    width: 100%;
+    height: 100%;
+    background-color: var(--overlay-dim);
+    opacity: 0;
+
+    /* Not display:none. The panel takes a quarter of a second to leave, and a
+       backdrop that disappears on the first frame hands the page back to the
+       pointer while a menu is still sliding over it. This stops catching
+       clicks instead, and fades out alongside. */
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+.side-menu-backdrop.open {
+    opacity: 1;
+    pointer-events: auto;
+}
+
 /* Custom bell shake animation */
 @keyframes bell-shake {
     0%, 100% { transform: rotate(0deg); }
