@@ -679,10 +679,24 @@ body {
     flex-shrink: 0;
     align-items: center;
 
+    gap: 8px;
+
     /* The nav bar's height, so opening the menu leaves the logo where it
        already was rather than sliding a second one past it. */
     height: 50px;
     padding-left: 20px;
+}
+
+/* Quieter than the mark it sits beside, and the same size as the rest of the
+   small print - it states a fact about the deployment rather than being
+   somewhere to go. Baseline-nudged because the wordmark carries no descenders
+   and sits high in its own box. */
+.side-menu-version {
+    align-self: center;
+    margin-top: 4px;
+    color: var(--secondary-hover);
+    font-size: 12px;
+    letter-spacing: 0.2px;
 }
 
 /* The nav bar's logo, at the nav bar's size. There is no close button beside
@@ -17207,9 +17221,10 @@ tr[data-collapsed] {
     border-top-color: var(--secondary-hover);
 }
 
-/* The wordmark is already at the top of the panel, and the separator only ever
-   made sense in a row wide enough not to wrap. */
+/* The wordmark and the version are both at the top of the panel already, and
+   the separator only ever made sense in a row wide enough not to wrap. */
 .side-menu .app-footer-brand,
+.side-menu .app-footer-version,
 .side-menu .app-footer-sep {
     display: none;
 }

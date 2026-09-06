@@ -92,6 +92,10 @@
 <nav class="side-menu" id="sideMenu" aria-label="Blankee menu" aria-hidden="true">
     <div class="side-menu-header">
         <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Blankee" class="side-menu-logo">
+        {# Beside the mark rather than down in the footer, where it is the one
+           piece of small print anyone actually looks for. The footer's own copy
+           is hidden inside the panel - see .side-menu .app-footer-version. #}
+        {% if app_version %}<span class="side-menu-version">v{{ app_version }}</span>{% endif %}
     </div>
 
     <div class="side-menu-divider"></div>
