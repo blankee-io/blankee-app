@@ -8208,6 +8208,69 @@ class _InterestCycle:
         return charge
 
 
+def _reconcile_interest_entries(user_id, account_id, category_id, projected):
+    """Make the card's Interest Charge entries match what the walk projected.
+
+    The balance already includes these charges - this is what puts them on the
+    screen: an entry on the statement date, in the card's Interest Charge
+    category, as a bucket, so it reaches the evening prompt and can be answered
+    with the real figure when the statement arrives.
+
+    Create, restate, remove. Restate rather than delete-and-recreate, because
+    recreating mints a fresh negative temp id in Redis against a positive row
+    in MySQL, and the orphan sweep then deletes and re-inserts that pairing
+    every fifteen seconds for as long as the row exists.
+
+    A confirmed charge is never touched. The user has told us what actually
+    came off the card, and a projection does not get to overwrite that.
+    """
+    if not category_id:
+        return
+
+    from recurring_bucket_manager import create_bucket_record, set_bucket_record_amount
+
+    entries = _get_entries_from_redis('c_expense_entries', user_id) or []
+    projected_buckets = {}
+    confirmed = set()
+    for entry in entries:
+        if int(entry.get('category_id') or 0) != int(category_id):
+            continue
+        when = entry.get('date')
+        if isinstance(when, str):
+            when = datetime.strptime(when[:10], '%Y-%m-%d').date()
+        if int(entry.get('is_bucket') or 0) == 1:
+            projected_buckets[when] = entry
+        else:
+            confirmed.add(when)
+
+    for when, amount in sorted(projected.items()):
+        if when in confirmed:
+            continue
+        existing = projected_buckets.pop(when, None)
+        if existing is None:
+            _create_bucket_entry_and_record('c_expense_entries', user_id, category_id,
+                                            when, amount, None, account_id=account_id)
+            continue
+        # Keep whatever has been depleted against it: what is left of the new
+        # figure after the same spending, not the new figure outright.
+        spent = (float(existing.get('original_amount') or 0)
+                 - float(existing.get('amount') or 0))
+        _update_entry_in_redis('c_expense_entries', user_id, category_id, when,
+                               round(amount - spent, 2), processed=0,
+                               entry_id=existing.get('id'), is_bucket=True,
+                               original_amount=amount,
+                               match_entry_id=existing.get('id'))
+        set_bucket_record_amount('recurring_c_expense_buckets', category_id,
+                                 when, amount, user_id)
+
+    # Whatever is left was projected once and is not any more - the rate
+    # changed, the balance was paid off, the cycle moved. It is a forecast that
+    # no longer holds, so it goes.
+    for when, stale in projected_buckets.items():
+        _delete_entry_in_redis('c_expense_entries', user_id, category_id,
+                               when, when, specific_entry_id=stale.get('id'))
+
+
 def update_daily_ca_totals(user_id, start_date):
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -8246,6 +8309,7 @@ def update_daily_ca_totals(user_id, start_date):
 
         # Collect all updates for aggregation
         all_redis_updates = []
+        interest_to_write = []
 
         # Process each account with optimized queries
         for account_id in account_ids:
@@ -8422,16 +8486,36 @@ def update_daily_ca_totals(user_id, start_date):
                          f"Account {account_id}: projected {len(projected_interest)} "
                          f"interest charge(s), totalling "
                          f"{round(sum(projected_interest.values()), 2)}")
+
+            # Reconciled after the cursor closes, not here: writing entries
+            # while this cursor is mid-walk would nest queries inside the loop
+            # that is still reading from it.
+            interest_to_write.append(
+                (account_id, interest_category_id, projected_interest))
             
             # Store for later aggregation
             if redis_updates:
                 all_redis_updates.extend(redis_updates)
 
         cursor.close()
-        
+
         # Update Redis cache only - flush workers will persist to MySQL
         if all_redis_updates:
             _set_ca_balances_to_redis('c_a_balances_d', user_id, all_redis_updates)
+
+    # The balances are written; now make the entries say the same thing. Outside
+    # the connection block so the reconciler gets its own, rather than reusing a
+    # cursor that has just finished walking.
+    for account_id, category_id, projected in interest_to_write:
+        try:
+            _reconcile_interest_entries(user_id, account_id, category_id, projected)
+        except Exception as e:
+            # The balance is already right, which is the part a wrong number
+            # would show up in. A missing entry is visible and self-correcting
+            # on the next recalculation.
+            log_exception(app.logger, 'CA_INTEREST',
+                          f"Could not write interest entries for account "
+                          f"{account_id}: {e}")
 
 def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
     with get_db_pool().get_connection() as conn:
