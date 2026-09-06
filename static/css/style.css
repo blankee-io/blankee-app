@@ -611,15 +611,13 @@ body {
 .nav-menu-toggle {
     /* box model */
     display: flex;
-    justify-content: center;
     align-items: center;
+    /* Flush left rather than centred, so the glyph starts at the box's own
+       left edge - which is the container's, and so #table-container's. The
+       box keeps its 40px for the sake of the tap target. */
+    justify-content: flex-start;
     width: 40px;
     height: 40px;
-
-    /* The glyph is centred in this 40px box, so it sat 10px inside the row.
-       Pulling the box out by that much puts the glyph itself on the container's
-       left edge - and so on #table-container's, which the row is aligned to. */
-    margin-left: -10px;
     padding: 0;
 
     /* visual */
@@ -636,6 +634,13 @@ body {
    grows instead of lighting a circle behind itself. Those buttons also shift
    to --primary-hover, which this one skips - it is already white, and white
    is the brighter of the two against this bar. */
+/* Font Awesome centres every glyph in a 1.25em box, so even a button with no
+   padding holds its icon an eighth of an em short. 1em is the glyph itself -
+   the same trim the calendar bar's end icons get. */
+.nav-menu-toggle i {
+    --fa-width: 1em;
+}
+
 .nav-menu-toggle:hover {
     transform: scale(1.2);
 }
@@ -858,10 +863,6 @@ body {
     align-items: center; 
     height: 40px;
     width: 40px;
-
-    /* The picture is 30px inset 5px inside this 40px box, so it stopped 5px
-       short of the row's right edge. Same idea as .nav-menu-toggle opposite. */
-    margin-right: -5px;
     background-color: transparent;
     border-radius: 50%;
     cursor: pointer;
@@ -883,8 +884,10 @@ body {
     width: 30px;
     height: 30px;
 
-    /* Space between picture and username */
-    margin-left: 5px;
+    /* Pushed to the right of its 40px box rather than sat 5px inside it, so
+       the picture's edge is the row's edge - the mirror of what
+       .nav-menu-toggle does on the left. */
+    margin-left: auto;
     border-radius: 50%;
 
     /* Ensures the image covers the container without squashing */
@@ -1532,19 +1535,37 @@ transform: scale(1.2);
     min-height: 32px;
 }
 
-/* The outermost icon in each row carries .nav-button's own 3px margin and 10px
-   padding, which held its glyph 13px inside the row. Cancelling the margin and
-   absorbing the padding lands the glyph on the container's edge, matching the
-   nav bar above it. Written against whatever wrapper happens to be first or
-   last, because the pages disagree about how deeply these are nested. */
+/* The outermost icon in each row sits on the container's edge, matching the
+   nav bar above it.
+
+   By zeroing the inset rather than subtracting it. .nav-button's padding is
+   10px here and 1vw under the 600px breakpoint, so any fixed pull would be
+   wrong at one size or the other; taking the outer margin and padding to zero
+   is right at both, and stays right if either value is ever changed.
+
+   --fa-width is the last of it: Font Awesome gives every glyph a 1.25em box
+   and centres it, so even a button with no padding holds its icon an eighth of
+   an em short of the edge. 1em is the glyph's own width.
+
+   Written against whatever wrapper happens to be first or last, because the
+   pages disagree about how deeply these are nested. */
 .calendarnavbuttonscontainer > :first-child .nav-button:first-child,
 .calendarnavbuttonscontainer > .nav-button:first-child {
-    margin-left: -10px;
+    margin-left: 0;
+    padding-left: 0;
 }
 
 .calendarnavbuttonscontainer > :last-child .nav-button:last-child,
 .calendarnavbuttonscontainer > .nav-button:last-child {
-    margin-right: -10px;
+    margin-right: 0;
+    padding-right: 0;
+}
+
+.calendarnavbuttonscontainer > :first-child .nav-button:first-child > i,
+.calendarnavbuttonscontainer > .nav-button:first-child > i,
+.calendarnavbuttonscontainer > :last-child .nav-button:last-child > i,
+.calendarnavbuttonscontainer > .nav-button:last-child > i {
+    --fa-width: 1em;
 }
 
 .nav-button-placeholder {
