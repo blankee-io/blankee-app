@@ -8,6 +8,36 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.23.0 — 2026-09-06
+
+### Changed
+- **Everything you manage now opens from a menu button on the left.** Manage
+  Categories, Manage Recurring, Credit Accounts, Bundles, Settings and Bank
+  Accounts have moved out of the profile dropdown and into a panel that slides
+  in from the left of the screen. The dropdown keeps what it was always for:
+  your profile, the admin console, and Log out.
+
+  The panel also carries a **Dashboards** list — every view in one place, so
+  they are reachable from the pages that do not show the view switcher.
+
+- **The Recurring Summary is now the Summary View**, and sits at the top of the
+  Dashboards list rather than the bottom. The name is the only thing that
+  changed; it is the same page.
+
+- **The version moved up beside the wordmark**, and the footer moved down into
+  the bottom of the menu with it. Sign-in and password pages have no menu, so
+  they keep their footer at the foot of the page as before.
+
+- **The top bar and the calendar bar now line up with the tables below them.**
+  The icons at each end sit on the same edge as the table rather than a few
+  pixels inside it, which was noticeable once there was a menu button at the
+  left end of the row to compare against.
+
+### Fixed
+- **The logo on the sign-in, register and password pages is properly centred.**
+  It had been sitting five pixels right of centre, from a padding the top bar
+  applied to one side only.
+
 ## 1.22.1 — 2026-09-06
 
 ### Fixed

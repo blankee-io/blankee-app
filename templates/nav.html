@@ -2,6 +2,14 @@
 <div class="nav-bar">
     <div class="nav-bar-container">
         <div class="nav-left-content">
+            <!-- Opens the Blankee menu. Left of the logo, so the control that
+                 navigates sits where a reader looks first. -->
+            <button type="button" class="nav-menu-toggle" id="navMenuToggle"
+                    title="Menu" aria-label="Open the Blankee menu"
+                    aria-controls="sideMenu" aria-expanded="false">
+                <i class="fa-solid fa-bars"></i>
+            </button>
+
             {# The signed-in user's own landing page; the marketing site for anyone else. #}
             <a href="{{ landing_url() }}">
                 <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Logo" class="nav-logo">
@@ -33,15 +41,16 @@
                 {% endif %}
             </a>
 
-            <!-- Profile dropdown container -->
+            <!-- Profile dropdown container. Who you are, and how to leave -
+                 everything that navigates is in the Blankee menu instead. -->
             <div class="sidenav-profile"> <!-- Use JavaScript to toggle the dropdown -->
-            <img src="{{ url_for('static', filename='uploads/' + profile_picture if profile_picture else 'uploads/DefaultProfilePicture.svg') }}" 
+            <img src="{{ url_for('static', filename='uploads/' + profile_picture if profile_picture else 'uploads/DefaultProfilePicture.svg') }}"
                 alt="Profile Picture" class="sidenav-profile-pic">
             <!-- Dropdown Menu moved inside sidenav-profile for pure CSS width matching -->
             <div id="profileDropdown" class="dropdown-content" style="display: none;">
                 <div class="dropdown-profile-label"><span>Profile</span></div>
                 <div class="dropdown-profile-section" id="dropdownProfileSection">
-                    <img src="{{ url_for('static', filename='uploads/' + profile_picture if profile_picture else 'uploads/DefaultProfilePicture.svg') }}" 
+                    <img src="{{ url_for('static', filename='uploads/' + profile_picture if profile_picture else 'uploads/DefaultProfilePicture.svg') }}"
                         alt="Profile Picture" class="dropdown-profile-pic">
                     <div style="display: flex; flex-direction: column; width: 100%;">
                         {% if nav_first_name or nav_last_name %}
@@ -53,59 +62,6 @@
                 <div class="dropdown-menu-section">
                     <div class="dropdown-link"><a href="{{ url_for('profile') }}">Profile</a><i class="fa-regular fa-user"></i></div>
                 </div>
-                <div class="dropdown-divider"></div>
-                <div class="dropdown-menu-section">
-                    <div class="dropdown-profile-label"><span>Blankee</span></div>
-                    <div class="dropdown-link"><a href="{{ url_for('manage_categories') }}">Manage Categories</a><i class="fa-solid fa-folder-tree"></i></div>
-                    <div class="dropdown-link">
-                        <a href="javascript:void(0);" id="toggle-recurring-btn">Manage Recurring</a>
-                        <i class="fa-solid fa-arrows-repeat"></i>
-                    </div>
-                    <div id="recurring-sections" class="collapsed">
-                        <div class="dropdown-link dropdown-sublink">
-                            <a href="{{ url_for('recurring_income') }}">Income</a>
-                            <i class="fa-solid fa-plus-large"></i>
-                        </div>
-                        <div class="dropdown-link dropdown-sublink">
-                            <a href="{{ url_for('recurring_expense') }}">Expenses</a>
-                            <i class="fa-solid fa-minus"></i>
-                        </div>
-                        <div class="dropdown-link dropdown-sublink">
-                            <a href="{{ url_for('recurring_ca_expense') }}">Credit Expenses</a>
-                            <i class="fa-kit fa-light-credit-card-circle-minus"></i>
-                        </div>
-                    </div>
-                    <div class="dropdown-link"><a href="{{ url_for('credit_accounts') }}">Manage Credit Accounts</a><i class="fa-solid fa-credit-card"></i></div>
-                    <div class="dropdown-link"><a href="{{ url_for('bundles') }}">Manage Bundles</a><i class="fa-solid fa-boxes-stacked"></i></div>
-                    <div class="dropdown-link"><a href="{{ url_for('settings') }}">Settings</a><i class="fa-regular fa-sliders"></i></div>
-                    {# Only means anything inside the iOS app, which injects window.nativeApp
-                       before this page runs. Rendered hidden and revealed by script.js
-                       rather than gated server-side: the server cannot tell which client
-                       is asking, and sniffing the user agent would charge every page
-                       render for a check only the app needs. #}
-                    <div class="dropdown-link mobile-options-hidden" id="mobile-options-link">
-                        <a href="javascript:void(0);" id="mobile-options-btn">Mobile Options</a>
-                        <i class="fa-solid fa-mobile-screen-button"></i>
-                    </div>
-                </div>
-                {# Bank Accounts is hidden until there is a provider behind it.
-                   BANK_PROVIDER defaults to 'null', so on a stock install this
-                   section offered a page that could not connect anything.
-
-                   Still shown to anyone who already has a connection or an account,
-                   so an installation that does have a provider configured does not
-                   lose its way in. Hidden rather than removed: the page, its routes
-                   and the pending-transactions flow all still work. #}
-                {% if has_bank_connections or has_bank_accounts %}
-                <div class="dropdown-divider"></div>
-                <div class="dropdown-menu-section">
-                    <div class="dropdown-profile-label"><span>Bank Accounts</span></div>
-                    <div class="dropdown-link"><a href="{{ url_for('bank_accounts') }}">{% if has_bank_connections %}Manage Connections{% else %}Connect Accounts{% endif %}</a><i class="fa-solid fa-building-columns"></i></div>
-                    {% if has_bank_accounts %}
-                    <div class="dropdown-link"><a href="{{ url_for('pending_transactions') }}">Pending Transactions{% if pending_transactions_count > 0 %}<span class="pending-txn-badge">{{ pending_transactions_count }}</span>{% endif %}</a><i class="fa-kit fa-light-money-bill-circle-question"></i></div>
-                    {% endif %}
-                </div>
-                {% endif %}
                 {% if current_user.is_authenticated and current_user.is_admin %}
                 <div class="dropdown-divider"></div>
                 <div class="dropdown-menu-section">
@@ -125,6 +81,115 @@
         </div>
     </div>
 </div>
+
+<!-- The Blankee menu. Everything that navigates lives here; the profile
+     dropdown keeps only who you are and how to leave.
+
+     The rows reuse .dropdown-link and its siblings rather than restating them.
+     The two menus are meant to look identical, and a second copy of those
+     rules would be a second thing to keep in step. -->
+<div class="side-menu-backdrop" id="sideMenuBackdrop"></div>
+<nav class="side-menu" id="sideMenu" aria-label="Blankee menu" aria-hidden="true">
+    <div class="side-menu-header">
+        <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Blankee" class="side-menu-logo">
+        {# Beside the mark rather than down in the footer, where it is the one
+           piece of small print anyone actually looks for. The footer's own copy
+           is hidden inside the panel - see .side-menu .app-footer-version. #}
+        {% if app_version %}<span class="side-menu-version">v{{ app_version }}</span>{% endif %}
+    </div>
+
+    <div class="side-menu-divider"></div>
+
+    <div class="dropdown-menu-section">
+        {# The same views the calendar bar switches between, for the pages that
+           do not carry that bar. Collapsed like Manage Recurring below it. #}
+        <div class="dropdown-link">
+            <a href="javascript:void(0);" id="toggle-dashboards-btn" data-menu-collapse="dashboards-sections">Dashboards</a>
+            <i class="fa-light fa-gauge"></i>
+        </div>
+        <div id="dashboards-sections" class="menu-collapse">
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_summary') }}">Summary View</a>
+                <i class="fa-light fa-bars-progress"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_d') }}">Day View</a>
+                <i class="fa-light fa-calendar-day"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard') }}">Week View</a>
+                <i class="fa-light fa-calendar-week"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_3m') }}">Month View</a>
+                <i class="fa-light fa-calendar-days"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_m') }}">Month Overview</a>
+                <i class="fa-light fa-calendar-exclamation"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_y') }}">Year Overview</a>
+                <i class="fa-light fa-calendars"></i>
+            </div>
+        </div>
+        <div class="dropdown-link"><a href="{{ url_for('manage_categories') }}">Manage Categories</a><i class="fa-light fa-folder-tree"></i></div>
+        <div class="dropdown-link">
+            <a href="javascript:void(0);" id="toggle-recurring-btn" data-menu-collapse="recurring-sections">Manage Recurring</a>
+            <i class="fa-light fa-arrows-repeat"></i>
+        </div>
+        <div id="recurring-sections" class="menu-collapse">
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('recurring_income') }}">Income</a>
+                <i class="fa-light fa-plus-large"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('recurring_expense') }}">Expenses</a>
+                <i class="fa-light fa-minus"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('recurring_ca_expense') }}">Credit Expenses</a>
+                <i class="fa-kit fa-light-credit-card-circle-minus"></i>
+            </div>
+        </div>
+        <div class="dropdown-link"><a href="{{ url_for('credit_accounts') }}">Manage Credit Accounts</a><i class="fa-light fa-credit-card"></i></div>
+        <div class="dropdown-link"><a href="{{ url_for('bundles') }}">Manage Bundles</a><i class="fa-light fa-boxes-stacked"></i></div>
+        <div class="dropdown-link"><a href="{{ url_for('settings') }}">Settings</a><i class="fa-light fa-sliders"></i></div>
+        {# Only means anything inside the iOS app, which injects window.nativeApp
+           before this page runs. Rendered hidden and revealed by script.js
+           rather than gated server-side: the server cannot tell which client
+           is asking, and sniffing the user agent would charge every page
+           render for a check only the app needs. #}
+        <div class="dropdown-link mobile-options-hidden" id="mobile-options-link">
+            <a href="javascript:void(0);" id="mobile-options-btn">Mobile Options</a>
+            <i class="fa-light fa-mobile-screen-button"></i>
+        </div>
+    </div>
+
+    {# Bank Accounts is hidden until there is a provider behind it.
+       BANK_PROVIDER defaults to 'null', so on a stock install this
+       section offered a page that could not connect anything.
+
+       Still shown to anyone who already has a connection or an account,
+       so an installation that does have a provider configured does not
+       lose its way in. Hidden rather than removed: the page, its routes
+       and the pending-transactions flow all still work. #}
+    {% if has_bank_connections or has_bank_accounts %}
+    <div class="dropdown-divider"></div>
+    <div class="dropdown-menu-section">
+        <div class="dropdown-profile-label"><span>Bank Accounts</span></div>
+        <div class="dropdown-link"><a href="{{ url_for('bank_accounts') }}">{% if has_bank_connections %}Manage Connections{% else %}Connect Accounts{% endif %}</a><i class="fa-light fa-building-columns"></i></div>
+        {% if has_bank_accounts %}
+        <div class="dropdown-link"><a href="{{ url_for('pending_transactions') }}">Pending Transactions{% if pending_transactions_count > 0 %}<span class="pending-txn-badge">{{ pending_transactions_count }}</span>{% endif %}</a><i class="fa-kit fa-light-money-bill-circle-question"></i></div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# The page footer, at the bottom of the menu instead of the bottom of the
+       page. Its scripts stay in footer.html, which every page still includes
+       last - see the note there. #}
+    {% include '_footer_content.html' %}
+</nav>
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
@@ -156,15 +221,48 @@
         } else {
         }
 
-        // Toggle Recurring Income/Expense sections with animation
-        const toggleRecurringBtn = document.getElementById('toggle-recurring-btn');
-        const recurringSections = document.getElementById('recurring-sections');
-        if (toggleRecurringBtn && recurringSections) {
-            toggleRecurringBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                recurringSections.classList.toggle('expanded');
+        // ── The Blankee menu ─────────────────────────────────────────────
+        // Opened by the hamburger, closed by the backdrop or Escape.
+        // Exposed as window.blankeeSideMenu so the page tutorials can drive
+        // it the way they already drive the profile dropdown.
+        const sideMenu = document.getElementById('sideMenu');
+        const sideMenuBackdrop = document.getElementById('sideMenuBackdrop');
+        const sideMenuToggle = document.getElementById('navMenuToggle');
+
+        if (sideMenu && sideMenuBackdrop && sideMenuToggle) {
+            const setMenu = function (open) {
+                sideMenu.classList.toggle('open', open);
+                sideMenuBackdrop.classList.toggle('open', open);
+                sideMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+                sideMenuToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            };
+            window.blankeeSideMenu = {
+                open: function () { setMenu(true); },
+                close: function () { setMenu(false); }
+            };
+
+            sideMenuToggle.addEventListener('click', function (event) {
+                event.stopPropagation();
+                setMenu(!sideMenu.classList.contains('open'));
+            });
+            sideMenuBackdrop.addEventListener('click', function () { setMenu(false); });
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape' && sideMenu.classList.contains('open')) {
+                    setMenu(false);
+                }
             });
         }
+
+        // The collapsing rows - Dashboards, Manage Recurring - all behave the
+        // same way, so they say what they open with data-menu-collapse rather
+        // than each needing a handler of its own here.
+        document.querySelectorAll('[data-menu-collapse]').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                var target = document.getElementById(btn.getAttribute('data-menu-collapse'));
+                if (target) { target.classList.toggle('expanded'); }
+            });
+        });
     });
 </script>
 

@@ -538,6 +538,10 @@ body {
     justify-content: center; 
     align-items: center; 
     height: 50px; 
+
+    /* The same 10px .main-container keeps, so this row's 875px column lands on
+       #table-container's - the menu button's box against the table's left
+       edge, the profile picture against its right. */
     padding: 0 10px;
 
     /* visual */
@@ -558,7 +562,6 @@ body {
 
     /* visual */
     background-color: transparent;
-    padding-left: 10px;
 }
 
 .nav-bar-container-login {
@@ -589,6 +592,182 @@ body {
     align-items: center;
     gap: 10px;
     margin-left: auto;
+}
+
+/* The Blankee menu -----------------------------------------------------------
+
+   Everything that navigates lives in this panel; the profile dropdown keeps
+   only who you are and how to leave.
+
+   It slides over the page rather than pushing it. Every dashboard sizes its
+   columns from the width it is given, so moving that width would reflow the
+   whole grid behind the panel for as long as it was open - a lot of work, and
+   visible, to show a menu.
+
+   The rows inside are .dropdown-link and its siblings, shared with the profile
+   dropdown. The two menus are meant to look identical, and a second copy of
+   those rules is a second thing to keep in step. */
+
+.nav-menu-toggle {
+    /* box model */
+    display: flex;
+    align-items: center;
+    /* Flush left rather than centred, so the glyph starts at the box's own
+       left edge - which is the container's, and so #table-container's. The
+       box keeps its 40px for the sake of the tap target. */
+    justify-content: flex-start;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+
+    /* visual */
+    background-color: transparent;
+    border: none;
+    border-radius: 50%;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+/* Hovers like the calendar nav buttons rather than the icons beside it: it
+   grows instead of lighting a circle behind itself. Those buttons also shift
+   to --primary-hover, which this one skips - it is already white, and white
+   is the brighter of the two against this bar. */
+/* Font Awesome centres every glyph in a 1.25em box, so even a button with no
+   padding holds its icon an eighth of an em short. 1em is the glyph itself -
+   the same trim the calendar bar's end icons get. */
+.nav-menu-toggle i {
+    --fa-width: 1em;
+}
+
+.nav-menu-toggle:hover {
+    transform: scale(1.2);
+}
+
+.side-menu {
+    /* positioning - above the nav bar, which is 100 */
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 200;
+
+    /* box model */
+    display: flex;
+    flex-direction: column;
+    width: 300px;
+    max-width: 85vw;
+    height: 100%;
+    padding-bottom: 10px;
+    overflow-y: auto;
+
+    /* visual */
+    background-color: var(--primary);
+    box-shadow: 0 10px 40px var(--shadow-lg);
+    font-size: 13px;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    backdrop-filter: blur(20px);
+}
+
+.side-menu.open {
+    transform: translateX(0);
+}
+
+.side-menu-header {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+
+    gap: 8px;
+
+    /* The nav bar's height, so opening the menu leaves the logo where it
+       already was rather than sliding a second one past it. */
+    height: 50px;
+    padding-left: 20px;
+}
+
+/* Quieter than the mark it sits beside, and the same size as the rest of the
+   small print - it states a fact about the deployment rather than being
+   somewhere to go. Baseline-nudged because the wordmark carries no descenders
+   and sits high in its own box. */
+.side-menu-version {
+    align-self: center;
+    margin-top: 4px;
+    color: var(--secondary-hover);
+    font-size: 12px;
+    letter-spacing: 0.2px;
+}
+
+/* The nav bar's logo, at the nav bar's size. There is no close button beside
+   it: the backdrop and Escape both close the menu, which is how a drawer is
+   expected to behave, and a header with one thing in it reads as a heading
+   rather than a toolbar. */
+.side-menu-logo {
+    width: auto;
+    height: 38px;
+    vertical-align: middle;
+}
+
+/* Runs edge to edge directly under the 50px header, which is the nav bar's
+   height - so the line lands exactly where the nav bar's own bottom edge is
+   and the two read as one rule across the screen. The separation the menu
+   needs is below it rather than around it. */
+.side-menu-divider {
+    width: 100%;
+    height: 1px;
+    margin: 0 0 10px;
+    background: var(--secondary-hover);
+    opacity: 0.7;
+}
+
+/* A row that opens a sub-list - Dashboards, Manage Recurring. The expanded
+   height is set per list rather than shared: max-height animates from a real
+   number, so one generous value would leave the shorter list finishing its
+   collapse early and then sitting still for the rest of the transition. */
+.menu-collapse {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.menu-collapse.expanded {
+    opacity: 1;
+}
+
+#dashboards-sections.expanded {
+    max-height: 240px;
+}
+
+.side-menu-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 199;
+    width: 100%;
+    height: 100%;
+    background-color: var(--overlay-dim);
+
+    /* The same 8px the modals use, so an open menu dims and softens the page
+       behind it exactly as a dialog does. It rides the opacity transition
+       below: at opacity 0 the filtered backdrop is not composited either, so
+       the blur arrives and leaves with the panel. */
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    opacity: 0;
+
+    /* Not display:none. The panel takes a quarter of a second to leave, and a
+       backdrop that disappears on the first frame hands the page back to the
+       pointer while a menu is still sliding over it. This stops catching
+       clicks instead, and fades out alongside. */
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+.side-menu-backdrop.open {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 /* Custom bell shake animation */
@@ -706,11 +885,12 @@ body {
     box-sizing: border-box; 
 }
 
-.sidenav-profile:hover {
-    background-color: var(--primary-hover);
-}
+/* Grows on hover, like the menu button at the other end of the row.
 
+   The picture rather than the container: #profileDropdown is a child of
+   .sidenav-profile, so scaling that would take the open dropdown with it. */
 .sidenav-profile:hover .sidenav-profile-pic {
+    transform: scale(1.2);
 }
 
 .sidenav-profile-pic {
@@ -719,9 +899,14 @@ body {
     width: 30px;
     height: 30px;
 
-    /* Space between picture and username */
-    margin-left: 5px;
+    /* Pushed to the right of its 40px box rather than sat 5px inside it, so
+       the picture's edge is the row's edge - the mirror of what
+       .nav-menu-toggle does on the left. */
+    margin-left: auto;
     border-radius: 50%;
+
+    /* The same easing the menu button and the calendar buttons hover on. */
+    transition: all 0.2s ease;
 
     /* Ensures the image covers the container without squashing */
     object-fit: cover; 
@@ -925,25 +1110,31 @@ body {
     text-decoration: none;
 }
 
-/* boxes-stacked has no Light face to fall back to, so the rule below coerced
-   it into a weight where the glyph does not exist and it rendered as nothing.
-   Deferring to the icon's own style gives it the solid face it asks for, in Pro
-   and in Free alike - which is also the icon the Bundles page's own button uses.
-
-   Scoped to this one icon rather than lifting the rule for all of them: every
-   other icon in the menu does have a Light face, and they are meant to match. */
-.dropdown-link i.fa-boxes-stacked {
-    font-weight: var(--fa-style, 900);
-}
-
 .dropdown-link i{
     display: flex;
     align-items: center;
     color: white;
     /* 300 is Font Awesome Light, which is Pro-only. install/build_fa_fallback.py
        rewrites this to var(--fa-style, 900) for installs without Pro, so the
-       menu is not blank there. See the icon exception below. */
+       menu is not blank there.
+
+       This forces Light on every icon whatever face it asked for, which is
+       why the Blankee menu opts out - see .side-menu .dropdown-link i. The
+       icons here all have a Light face, so it holds for them. */
     font-weight: 300;
+}
+
+/* The menu's icons name their own face - fa-light - so the weight comes from
+   Font Awesome rather than from here: Light where Pro is installed, and
+   whatever fa-pro-fallback.css maps .fa-light onto where it is not, which is
+   this same expression against Free's own --fa-style.
+
+   The dropdown above forces 300 on every icon whatever class it carries, which
+   is what left fa-boxes-stacked rendering as nothing - there is no Light face
+   for it in Free, and the icon was never asking for one. This hands the
+   decision back to the icon. */
+.side-menu .dropdown-link i {
+    font-weight: var(--fa-style, 900);
 }
 
 .dropdown-sublink {
@@ -951,17 +1142,10 @@ body {
     background-color: var(--primary);  
 }
 
-#recurring-sections {
-    max-height: 0;
-    overflow: hidden;
-    opacity: 0;
-    transition: max-height 0.3s ease, opacity 0.3s ease;
-}
-
+/* The collapse itself is .menu-collapse now, shared with Dashboards; only the
+   height this one opens to is its own. */
 #recurring-sections.expanded {
-    /* Adjust as needed for content */
-    max-height: 120px; 
-    opacity: 1;
+    max-height: 120px;
 }
 
 /* Mobile Options - the dropdown row, shown only in the iOS app. It ships
@@ -1369,6 +1553,47 @@ transform: scale(1.2);
     min-height: 32px;
 }
 
+/* The outermost icon in each row sits on the container's edge, matching the
+   nav bar above it.
+
+   By zeroing the inset rather than subtracting it. .nav-button's padding is
+   10px here and 1vw under the 600px breakpoint, so any fixed pull would be
+   wrong at one size or the other; taking the outer margin and padding to zero
+   is right at both, and stays right if either value is ever changed.
+
+   --fa-width is the last of it: Font Awesome gives every glyph a 1.25em box
+   and centres it, so even a button with no padding holds its icon an eighth of
+   an em short of the edge. 1em is the glyph's own width.
+
+   Every one of these selectors steps down by child, not descendant. As a
+   descendant it also caught the first button inside #nav-inline-buttons - Day
+   View, which is the first child of its own parent but sits in the middle of
+   the row - and stripped the padding off its left side alone. Each page wraps
+   its outermost button exactly one level deep, so one step is all it needs.
+
+   The left one asks for "a button with no button before it" rather than for
+   the first child, because a page is free to put something else first; the
+   right keeps :last-child, which is only wrong on the summary page, where a
+   stray indicator follows the buttons and the whole group is hidden anyway. */
+.calendarnavbuttonscontainer > :first-child > .nav-button:not(.nav-button ~ .nav-button),
+.calendarnavbuttonscontainer > .nav-button:not(.nav-button ~ .nav-button) {
+    margin-left: 0;
+    padding-left: 0;
+}
+
+.calendarnavbuttonscontainer > :last-child > .nav-button:last-child,
+.calendarnavbuttonscontainer > .nav-button:last-child {
+    margin-right: 0;
+    padding-right: 0;
+}
+
+.calendarnavbuttonscontainer > :first-child > .nav-button:not(.nav-button ~ .nav-button) > i,
+.calendarnavbuttonscontainer > .nav-button:not(.nav-button ~ .nav-button) > i,
+.calendarnavbuttonscontainer > :last-child > .nav-button:last-child > i,
+.calendarnavbuttonscontainer > .nav-button:last-child > i {
+    --fa-width: 1em;
+}
+
 .nav-button-placeholder {
     min-width: 250px !important;
     min-height: 32px !important;
@@ -1376,11 +1601,16 @@ transform: scale(1.2);
 
 @media (width <=600px) {
     .calendarnav {
-        padding: 6px 0px;     
+        /* Tighter than the desktop 10px vertically, but the same 10px across,
+           so the outermost icons sit against #table-container's edges the way
+           the nav bar's do. */
+        padding: 6px 10px;
     }
 
     .calendarnavbuttonscontainer {
-        justify-content: space-around;
+        /* space-between, not space-around: around holds the end icons off the
+           edge by half a gap, which is the whole thing this is lining up to. */
+        justify-content: space-between;
     }
 
     #recurring-i-body .calendarnavbuttonscontainer,
@@ -16966,6 +17196,58 @@ tr[data-collapsed] {
     height: 22px;
     width: auto;
     display: block;
+}
+
+/* The footer, inside the Blankee menu ---------------------------------------
+
+   Signed-in pages render it at the bottom of the panel rather than the bottom
+   of the page; the signed-out ones, which have no panel, keep it where it was.
+   margin-top: auto in the panel's flex column pushes it to the floor when the
+   menu is shorter than the screen, and lets it simply follow the last item
+   when it is not.
+
+   The ground under it is teal now instead of the page background, so the small
+   print has to change colour with it. */
+.side-menu .app-footer {
+    margin-top: auto;
+    padding: 14px 20px 18px;
+}
+
+.side-menu .app-footer-inner {
+    max-width: none;
+    gap: 4px 8px;
+    margin: 0;
+    padding-top: 12px;
+    border-top-color: var(--secondary-hover);
+}
+
+/* The wordmark and the version are both at the top of the panel already, and
+   the separator only ever made sense in a row wide enough not to wrap. */
+.side-menu .app-footer-brand,
+.side-menu .app-footer-version,
+.side-menu .app-footer-sep {
+    display: none;
+}
+
+.side-menu .app-footer-version,
+.side-menu .app-footer-copyright,
+.side-menu .app-footer-link {
+    color: var(--secondary-hover);
+}
+
+.side-menu .app-footer-link:hover,
+.side-menu .app-footer-link:focus-visible {
+    background-color: var(--primary-hover);
+    color: white;
+}
+
+.side-menu .app-footer-support {
+    margin-top: 8px;
+}
+
+.side-menu .app-footer-bmc:hover,
+.side-menu .app-footer-bmc:focus-visible {
+    background-color: var(--primary-hover);
 }
 
 /* The widget ships its own floating button. Hidden so there is one way in,
