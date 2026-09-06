@@ -9741,6 +9741,104 @@ transform: scale(1.2);
     }
 }
 
+/* Opening ---------------------------------------------------------------------
+
+   A dialog grows out of whatever was last clicked, which is the control that
+   opened it, while its sheet fades the page behind it.
+
+   Driven by @keyframes on the dialog rather than by script, because a CSS
+   animation plays whenever an element goes from display:none to shown - and
+   every overlay in this app is opened exactly that way, by an inline style
+   rather than a class. So nothing at those call sites had to change, and an
+   overlay added later gets this for free by carrying one of these classes.
+
+   The origin comes from two custom properties that script.js sets on :root
+   from the last pointer or keyboard activation. The 50% terms resolve against
+   the dialog's own box and the viewport terms against the screen, so
+   `click - 50vw + 50%` is the click's distance from the dialog's left edge -
+   exact for a dialog centred horizontally, which margin:auto makes all of
+   them. Vertically it is approximate, since a tall dialog starts at the top
+   rather than centring; close enough for a 160ms scale, and it falls back to
+   the middle of the screen when nothing has been clicked.
+
+   Closing is not here. An element set to display:none is gone on the same
+   frame, so animating it out means holding the element open past the moment
+   the code that closed it thinks it is shut - which is a change at every one
+   of those call sites, not a stylesheet. */
+@keyframes modal-grow-in {
+    from { opacity: 0; transform: scale(0.94); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes modal-sheet-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.modal,
+.footer-modal,
+.dashboard-d-modal,
+.modal-setup-profile,
+.category-edit-modal,
+.center-modal-overlay,
+.test-purchase-modal,
+.bundle-input-overlay,
+.category-input-overlay {
+    animation: modal-sheet-in 0.16s ease-out;
+}
+
+.modal-content,
+.modal-content-center,
+.alert-modal-content,
+.center-modal-content,
+.modal-content-setup-profile,
+.modal-content-category-recommendations,
+.footer-modal-content,
+.dashboard-d-modal-content,
+.category-edit-modal-content,
+.add-credit-account-modal-content,
+.change-password-modal-content,
+.test-purchase-modal-content {
+    transform-origin:
+        calc(var(--open-x, 50vw) - 50vw + 50%)
+        calc(var(--open-y, 50vh) - 50vh + 50%);
+    animation: modal-grow-in 0.16s ease-out;
+}
+
+/* The profile dropdown hangs directly under the picture that opens it, so it
+   needs no measuring - the corner it grows from is its own top right. */
+.dropdown-content {
+    transform-origin: top right;
+    animation: modal-grow-in 0.14s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .modal,
+    .footer-modal,
+    .dashboard-d-modal,
+    .modal-setup-profile,
+    .category-edit-modal,
+    .center-modal-overlay,
+    .test-purchase-modal,
+    .bundle-input-overlay,
+    .category-input-overlay,
+    .modal-content,
+    .modal-content-center,
+    .alert-modal-content,
+    .center-modal-content,
+    .modal-content-setup-profile,
+    .modal-content-category-recommendations,
+    .footer-modal-content,
+    .dashboard-d-modal-content,
+    .category-edit-modal-content,
+    .add-credit-account-modal-content,
+    .change-password-modal-content,
+    .test-purchase-modal-content,
+    .dropdown-content {
+        animation: none;
+    }
+}
+
 /* General Reset */
 * {
     box-sizing: border-box;
@@ -14127,18 +14225,6 @@ transform: scale(1.2);
     flex-direction: column;
     max-height: 100%;
     box-shadow: 0 20px 60px var(--shadow-xl);
-    animation: modalSlideIn 0.25s ease-out;
-}
-
-@keyframes modalSlideIn {
-    from {
-        opacity: 0;
-        transform: translateY(-20px) scale(0.95);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
 }
 
 .test-purchase-modal-header {

@@ -95,6 +95,41 @@ function setupCategoryDuplicateCheck(inputEl, getCats, opts) {
  * @param {string} [type='error'] - Toast type: 'error' | 'warning' | 'info' | 'success'
  * @param {number} [duration=4000] - Auto-dismiss time in ms (0 to disable)
  */
+/* ── Where a dialog grows from ───────────────────────────────────────────────
+ *
+ * Records the last activation point so the opening animation can start there
+ * rather than in the middle of the screen - see "Opening" in style.css, which
+ * reads these two properties off :root.
+ *
+ * Capture phase, so it runs before the handler that opens the dialog. Pointer
+ * and keyboard both, because a control reached by Tab and pressed with Enter
+ * never fires a pointer event, and using a stale pointer position for it would
+ * grow the dialog out of wherever the mouse happened to be left.
+ *
+ * Nothing here knows which dialog is about to open, or whether one is. It only
+ * keeps the answer ready for the stylesheet.
+ */
+(function () {
+    function remember(x, y) {
+        var root = document.documentElement;
+        root.style.setProperty("--open-x", Math.round(x) + "px");
+        root.style.setProperty("--open-y", Math.round(y) + "px");
+    }
+
+    document.addEventListener("pointerdown", function (event) {
+        remember(event.clientX, event.clientY);
+    }, true);
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" && event.key !== " ") { return; }
+        var el = document.activeElement;
+        if (!el || !el.getBoundingClientRect) { return; }
+        var r = el.getBoundingClientRect();
+        if (!r.width && !r.height) { return; }
+        remember(r.left + r.width / 2, r.top + r.height / 2);
+    }, true);
+})();
+
 function showToast(message, type, duration) {
     if (type === undefined || type === null) type = 'error';
     if (duration === undefined || duration === null) duration = 4000;
