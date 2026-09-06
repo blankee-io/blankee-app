@@ -22,8 +22,9 @@ ADDING AN APP
        not each route.
     3. Give it a nav and a menu - see templates/nav.html, which switches on
        current_app_id.
-    4. Add its wordmark and mark to static/, matching Blankee's set: one
-       wordmark for its own bar, one for a light background, one outline mark.
+    4. Add its wordmark, mark and favicon to static/, matching Blankee's set:
+       one wordmark for its own bar, one for a light background, one outline
+       mark, one favicon. Include _head_icons.html in each page's head.
     An administrator turns it on from the admin console. Nothing else is needed:
     no migration, no template edit anywhere else, no change to this module's
     callers.
@@ -36,9 +37,10 @@ import time
 # name    - what a user reads, and the alt text on its wordmark
 # wordmark      - the app's name drawn, for its own bar: light on the teal
 # wordmark_light- the same for a light background, where the light one vanishes
-# mark          - the outline mark, for a menu row or a list. Monochrome: the
-#                 menus paint it white against the teal and leave it dark on
-#                 white, so one file serves both
+# mark          - the outline mark, for a menu row or a list. Shown as drawn
+# favicon       - the browser tab icon, so a tab says which app it is
+# mobile_icon   - the home-screen icon, or None to use Blankee's. A PNG at a
+#                 fixed size, so an app without one borrows rather than breaks
 # start   - the endpoint a menu entry points at
 # blueprint - the app's blueprint name, which is also its endpoint namespace.
 #             A request is attributed by the part of its endpoint before the
@@ -52,6 +54,8 @@ APPS = (
         'wordmark': 'logotext.svg',
         'wordmark_light': 'teallogotext.svg',
         'mark': 'logooutline.svg',
+        'favicon': 'favicon.svg',
+        'mobile_icon': 'mobileicon.png',
         'start': None,            # the user's chosen landing page, not a fixed one
         'blueprint': None,        # Blankee is the bare app; it has no prefix
         'host': True,
@@ -62,6 +66,8 @@ APPS = (
         'wordmark': 'loaflogotext.svg',
         'wordmark_light': 'orangeloaflogotext.svg',
         'mark': 'loaflogooutline.svg',
+        'favicon': 'loaffavicon.svg',
+        'mobile_icon': None,      # borrows Blankee's until Loaf ships a PNG
         'start': 'loaf.dashboard',
         'blueprint': 'loaf',      # so /loaf/... and loaf.* are both its own
         'host': False,
