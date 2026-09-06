@@ -3597,7 +3597,15 @@ def dashboard_d_add_entry():
     else:
         pass
 
-    if entry_type == 'ca' or ca_triggered:
+    # A payment recorded against a card moves that card's balance from
+    # this date to the end of the forecast, not only on the day it was
+    # entered. The weekly views cache credit balances a week at a time and
+    # drop just the week they edited, so every later week kept serving the
+    # balance from before the payment until the page was reloaded. Saying
+    # so here lets them drop the whole cache, which is what they already
+    # do when the edit was on the card itself.
+    ca_recalculated = bool(entry_type == 'ca' or ca_triggered)
+    if ca_recalculated:
         save_ca_daily_balance()
     
     # Update totals and savings if this is a savings category
@@ -3612,7 +3620,8 @@ def dashboard_d_add_entry():
     # a forecast or as money already spent, and guessing would be a second copy of
     # _bucket_cutoff_date's rule waiting to disagree with it.
     return jsonify({"status": "success", "updated_buckets": updated_buckets,
-                    "processed": entry_processed})
+                    "processed": entry_processed,
+                    "ca_recalculated": ca_recalculated})
 
 
 @app.route('/dashboard-d/get_categories', methods=['GET'])
@@ -9942,14 +9951,23 @@ def move_entry_d():
                         is_savings_category = True
                     cursor.close()
             
-            if entry_type == 'ca' or ca_triggered:
+            # A payment recorded against a card moves that card's balance from
+            # this date to the end of the forecast, not only on the day it was
+            # entered. The weekly views cache credit balances a week at a time and
+            # drop just the week they edited, so every later week kept serving the
+            # balance from before the payment until the page was reloaded. Saying
+            # so here lets them drop the whole cache, which is what they already
+            # do when the edit was on the card itself.
+            ca_recalculated = bool(entry_type == 'ca' or ca_triggered)
+            if ca_recalculated:
                 save_ca_daily_balance()
             
             # Update totals and savings for income/expense moves
             if is_savings_category or entry_type in ['income', 'expense']:
                 save_totals_remainders_d()
                 
-            return jsonify({'status': 'success'})
+            return jsonify({'status': 'success',
+                            'ca_recalculated': ca_recalculated})
         except Exception as e:
             cursor.close()
             return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -12872,13 +12890,22 @@ def update_entry():
     else:
         pass
 
-    if entry_type == 'ca' or ca_triggered:
+    # A payment recorded against a card moves that card's balance from
+    # this date to the end of the forecast, not only on the day it was
+    # entered. The weekly views cache credit balances a week at a time and
+    # drop just the week they edited, so every later week kept serving the
+    # balance from before the payment until the page was reloaded. Saying
+    # so here lets them drop the whole cache, which is what they already
+    # do when the edit was on the card itself.
+    ca_recalculated = bool(entry_type == 'ca' or ca_triggered)
+    if ca_recalculated:
         save_ca_daily_balance()
     
     # Get updated bucket information to return to frontend
     updated_buckets = _get_updated_buckets_from_redis(table_name, current_user.id, category_id, 'day', date)
 
-    return jsonify({"status": "success", "updated_buckets": updated_buckets})
+    return jsonify({"status": "success", "updated_buckets": updated_buckets,
+                    "ca_recalculated": ca_recalculated})
 
 @app.route('/delete-entry', methods=['POST'])
 @login_required
@@ -12966,7 +12993,15 @@ def delete_entry():
             # Delete payment entries for this account and date range
             _delete_payment_entry_in_redis(current_user.id, account_id, start_date, end_date)
 
-    if entry_type == 'ca' or ca_triggered:
+    # A payment recorded against a card moves that card's balance from
+    # this date to the end of the forecast, not only on the day it was
+    # entered. The weekly views cache credit balances a week at a time and
+    # drop just the week they edited, so every later week kept serving the
+    # balance from before the payment until the page was reloaded. Saying
+    # so here lets them drop the whole cache, which is what they already
+    # do when the edit was on the card itself.
+    ca_recalculated = bool(entry_type == 'ca' or ca_triggered)
+    if ca_recalculated:
         save_ca_daily_balance()
     
     # Update totals and savings if this is a savings category or regular income/expense
@@ -12976,7 +13011,8 @@ def delete_entry():
     # Get updated bucket information to return to frontend
     updated_buckets = _get_updated_buckets_from_redis(table_name, current_user.id, category_id, 'day', end_date)
 
-    return jsonify({'status': 'success', 'updated_buckets': updated_buckets})
+    return jsonify({'status': 'success', 'updated_buckets': updated_buckets,
+                    'ca_recalculated': ca_recalculated})
 
 @app.route('/check_and_initialize_totals', methods=['POST'])
 @login_required
@@ -13123,8 +13159,15 @@ def delete_week_entry():
             # Delete payment entries for this account and date range
             _delete_payment_entry_in_redis(current_user.id, account_id, start_date, end_date)
 
-    # If a CA payment was updated, trigger CA balance recalculation
-    if ca_triggered or entry_type == 'ca':
+    # A payment recorded against a card moves that card's balance from
+    # this date to the end of the forecast, not only on the day it was
+    # entered. The weekly views cache credit balances a week at a time and
+    # drop just the week they edited, so every later week kept serving the
+    # balance from before the payment until the page was reloaded. Saying
+    # so here lets them drop the whole cache, which is what they already
+    # do when the edit was on the card itself.
+    ca_recalculated = bool(entry_type == 'ca' or ca_triggered)
+    if ca_recalculated:
         save_ca_daily_balance()
     
     # Get updated bucket information to return to frontend
@@ -13133,7 +13176,8 @@ def delete_week_entry():
     # Don't filter by specific_date - return all buckets since the depleted bucket might be in a different period
     updated_buckets = _get_updated_buckets_from_redis(table_name, current_user.id, category_id, aggregation, None)
 
-    response_data = {'status': 'success', 'updated_buckets': updated_buckets}
+    response_data = {'status': 'success', 'updated_buckets': updated_buckets,
+                     'ca_recalculated': ca_recalculated}
     if bank_partial:
         response_data['past_sum'] = round(past_sum, 2)
     return jsonify(response_data)
@@ -13447,7 +13491,15 @@ def update_week_entry():
                 pass
                 _update_payment_entry_in_redis(current_user.id, account_id, entry_date, float(amount))
 
-    if entry_type == 'ca' or ca_triggered:
+    # A payment recorded against a card moves that card's balance from
+    # this date to the end of the forecast, not only on the day it was
+    # entered. The weekly views cache credit balances a week at a time and
+    # drop just the week they edited, so every later week kept serving the
+    # balance from before the payment until the page was reloaded. Saying
+    # so here lets them drop the whole cache, which is what they already
+    # do when the edit was on the card itself.
+    ca_recalculated = bool(entry_type == 'ca' or ca_triggered)
+    if ca_recalculated:
         save_ca_daily_balance()
 
     # Get updated bucket information to return to frontend
@@ -13456,7 +13508,8 @@ def update_week_entry():
     # Don't filter by specific_date - return all buckets since the depleted bucket might be in a different period
     updated_buckets = _get_updated_buckets_from_redis(table_name, current_user.id, category_id, aggregation, None)
 
-    response_data = {"status": "success", "updated_buckets": updated_buckets}
+    response_data = {"status": "success", "updated_buckets": updated_buckets,
+                     "ca_recalculated": ca_recalculated}
     if bank_partial:
         response_data['past_sum'] = round(past_sum, 2)
     return jsonify(response_data)
