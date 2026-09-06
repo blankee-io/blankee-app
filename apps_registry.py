@@ -20,6 +20,8 @@ ADDING AN APP
     2. Give it routes, and add each of their endpoints to `endpoints`.
     3. Give it a nav and a menu - see templates/nav.html, which switches on
        current_app_id.
+    4. Add its wordmark and mark to static/, matching Blankee's set: one
+       wordmark for its own bar, one for a light background, one outline mark.
     An administrator turns it on from the admin console. Nothing else is needed:
     no migration, no template edit anywhere else, no change to this module's
     callers.
@@ -29,11 +31,12 @@ import time
 
 
 # id      - stable, stored in instance_apps.app_id, never renamed
-# name    - what a user reads
-# icon    - a Font Awesome class. Name the face you want - fa-light and the
-#           rest - rather than forcing a weight: the menus let the icon
-#           decide, so Pro gets the line art and Free gets its own
-#           equivalent. Must survive install/build_fa_fallback.py --check.
+# name    - what a user reads, and the alt text on its wordmark
+# wordmark      - the app's name drawn, for its own bar: light on the teal
+# wordmark_light- the same for a light background, where the light one vanishes
+# mark          - the outline mark, for a menu row or a list. Monochrome: the
+#                 menus paint it white against the teal and leave it dark on
+#                 white, so one file serves both
 # start   - the endpoint a menu entry points at
 # endpoints - every endpoint that belongs to this app, so a request can be
 #             attributed to it; the host app claims everything unclaimed
@@ -42,7 +45,9 @@ APPS = (
     {
         'id': 'blankee',
         'name': 'Blankee',
-        'icon': 'fa-regular fa-wallet',
+        'wordmark': 'logotext.svg',
+        'wordmark_light': 'teallogotext.svg',
+        'mark': 'logooutline.svg',
         'start': None,            # the user's chosen landing page, not a fixed one
         'endpoints': (),          # everything not claimed below
         'host': True,
@@ -50,7 +55,9 @@ APPS = (
     {
         'id': 'loaf',
         'name': 'Loaf',
-        'icon': 'fa-light fa-bread-slice',
+        'wordmark': 'loaflogotext.svg',
+        'wordmark_light': 'orangeloaflogotext.svg',
+        'mark': 'loaflogooutline.svg',
         'start': 'loaf_page',
         'endpoints': ('loaf_page',),
         'host': False,

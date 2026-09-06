@@ -19,7 +19,9 @@
             {# A sibling app puts its own name here, with Blankee's mark under it
                as a maker's credit rather than as the brand. #}
             <a href="{{ url_for(current_app.start) }}" class="app-lockup app-lockup-nav">
-                <span class="app-wordmark">{{ current_app.name }}</span>
+                <img class="app-wordmark-img"
+                     src="{{ url_for('static', filename=current_app.wordmark) }}"
+                     alt="{{ current_app.name }}">
                 <span class="app-by">by
                     <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Blankee">
                 </span>
@@ -91,7 +93,8 @@
                     {% for other in other_apps %}
                     <div class="dropdown-link dropdown-app-link">
                         <a href="{{ url_for(other.start) if other.start else landing_url() }}">{{ other.name }}</a>
-                        <i class="{{ other.icon }}"></i>
+                        <img class="dropdown-app-mark"
+                             src="{{ url_for('static', filename=other.mark) }}" alt="">
                     </div>
                     {% endfor %}
                 </div>
@@ -134,7 +137,9 @@
         <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Blankee" class="side-menu-logo">
         {% else %}
         <span class="app-lockup app-lockup-nav">
-            <span class="app-wordmark">{{ current_app.name }}</span>
+            <img class="app-wordmark-img"
+                 src="{{ url_for('static', filename=current_app.wordmark) }}"
+                 alt="{{ current_app.name }}">
             <span class="app-by">by
                 <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Blankee">
             </span>

@@ -1186,12 +1186,26 @@ body {
 /* A shade up from the panel behind it, so an open sub-list reads as one block
    sitting inside the menu rather than as loose rows. The panel itself is
    --primary; these were set to the same value, which made them invisible. */
-/* The Other Apps rows carry whatever icon their app named, so they opt out of
-   the blanket 300 above the same way the Blankee menu does. An app is free to
-   pick an icon with no Light face in Free; forcing the weight would render it
-   as nothing there. */
-.dropdown-app-link i {
-    font-weight: var(--fa-style, 900);
+/* An app is named by its own outline mark in these rows rather than by a
+   stock icon, so the entry and the app read as the same thing.
+
+   The marks are monochrome and drawn dark, for a light background. This one is
+   teal with white icons beside it, so the filter takes the mark to white -
+   brightness(0) flattens it to black whatever it was drawn in, and invert
+   turns that white. A recolour rather than a second file, because the same
+   file also has to serve the admin console, where dark is right. */
+.dropdown-app-mark {
+    width: 17px;
+    height: 17px;
+    object-fit: contain;
+    filter: brightness(0) invert(1);
+}
+
+/* Same mark, dark, on the console's white. */
+.other-app-mark {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
 }
 
 .dropdown-sublink {
@@ -17561,11 +17575,25 @@ tr[data-collapsed] {
 .app-lockup {
     display: inline-flex;
     flex-direction: row;
-    align-items: center;
+    /* Sat on the same line as the wordmark rather than centred against it, so
+       the credit reads as a footnote to the name instead of a second title
+       floating beside it. */
+    align-items: flex-end;
     gap: 7px;
     line-height: 1;
 }
 
+/* The app's name is drawn, not set: each app ships a wordmark the way Blankee
+   does, so the two sit together as marks rather than one being type beside a
+   logo. Height alone sizes it - a width would squash whatever proportions the
+   file was drawn at. */
+.app-wordmark-img {
+    display: block;
+    width: auto;
+    height: 26px;
+}
+
+/* Kept for anything that still sets the name as text. */
 .app-wordmark {
     color: var(--primary);
     font-size: 26px;
@@ -17591,6 +17619,10 @@ tr[data-collapsed] {
     height: 11px;
 }
 
+.app-lockup-large .app-wordmark-img {
+    height: 54px;
+}
+
 .app-lockup-large .app-wordmark {
     font-size: 54px;
 }
@@ -17611,13 +17643,21 @@ tr[data-collapsed] {
     text-decoration: none;
 }
 
+.app-lockup-nav .app-wordmark-img {
+    /* A touch under .nav-logo's 38px: the credit sits beside it now, and the
+       two together have to fit the same 50px bar. */
+    height: 32px;
+}
+
 .app-lockup-nav .app-wordmark {
     color: white;
     font-size: 22px;
 }
 
 .app-lockup-nav .app-by {
-    color: var(--secondary-hover);
+    /* White, like the wordmark beside it. The grey it was reads as disabled
+       against the teal rather than as quiet. */
+    color: white;
     font-size: 11px;
 }
 

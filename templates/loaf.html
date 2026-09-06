@@ -36,7 +36,12 @@
                where Blankee puts its mark, and the mark itself underneath at a
                size that reads as a maker's credit rather than a second brand. #}
             <div class="app-lockup app-lockup-large">
-                <span class="app-wordmark">Loaf</span>
+                {# The light-background pair: the app's own wordmark in its darker
+                   colours, and Blankee's teal one, because the versions drawn for
+                   the nav bar are white and would vanish here. #}
+                <img class="app-wordmark-img"
+                     src="{{ url_for('static', filename=current_app.wordmark_light) }}"
+                     alt="{{ current_app.name }}">
                 <span class="app-by">by
                     <img src="{{ url_for('static', filename='teallogotext.svg') }}" alt="Blankee">
                 </span>

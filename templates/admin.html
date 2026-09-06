@@ -73,7 +73,12 @@
                                 {% for other in switchable_apps %}
                                 <div class="input-group">
                                     <span class="other-app-name">
-                                        <i class="{{ other.icon }}"></i> {{ other.name }}
+                                        {# The same outline mark the menus use. Dark on
+                                           white here, so it needs no help; the menus
+                                           paint it white against the teal. #}
+                                        <img class="other-app-mark"
+                                             src="{{ url_for('static', filename=other.mark) }}" alt="">
+                                        {{ other.name }}
                                     </span>
                                     <input type="text" disabled class="hidden-spacer">
                                     <button type="button" class="toggle-switch other-app-toggle"
