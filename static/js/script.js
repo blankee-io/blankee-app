@@ -3174,6 +3174,35 @@ window.rowReveal = (function () {
         row.style.transition = value;
     }
 
+    /* Keep telling the page the layout is moving, every frame, until the
+       rows have stopped.
+
+       The dashboards' current-week outline is a set of absolutely positioned
+       boxes measured from the cells they sit over, redrawn on resize. Told
+       only at the start and the end, it stayed at its old size for the whole
+       animation and then jumped - so it has to be redrawn as the rows move, or
+       it does not move with them.
+
+       One loop however many rows are animating: a group collapse calls in
+       twice, once for each of the two tables, and both should not be driving
+       their own. Later calls push the finishing line back instead. */
+    var followUntil = 0;
+    var following = false;
+
+    function followAlong(ms) {
+        followUntil = Math.max(followUntil, Date.now() + ms);
+        if (following) { return; }
+        following = true;
+        (function tick() {
+            window.dispatchEvent(new Event('resize'));
+            if (Date.now() < followUntil) {
+                window.requestAnimationFrame(tick);
+            } else {
+                following = false;
+            }
+        })();
+    }
+
     function finish(row) {
         // Silenced again before the classes come off, because by now they are
         // very much on - the animation needed them. .row-opening holds the
@@ -3287,6 +3316,8 @@ window.rowReveal = (function () {
             });
             item.row.classList.toggle('row-collapsing', !opening);
         });
+
+        followAlong((opening ? OPEN_DURATION : DURATION) + 30);
 
         window.setTimeout(function () {
             var settled = false;
