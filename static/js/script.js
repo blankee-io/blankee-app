@@ -3106,11 +3106,11 @@ window.rowReveal = (function () {
 
     // The profile dropdown's timing, which this is meant to match.
     var DURATION = 160;
-    // Opening runs longer, deliberately: a row coming back is the direction
-    // that had no animation at all until recently, and at 160ms it is hard to
-    // tell a working one from none. The stylesheet carries the same two
-    // numbers - see tr.row-opening.
-    var OPEN_DURATION = 400;
+    // Opening is kept separate from closing so the two can differ, and is
+    // currently the same. It was run at 400ms for a while to tell a working
+    // animation from none while this was being fixed; the stylesheet carries
+    // the same number - see tr.row-animating.row-opening.
+    var OPEN_DURATION = 160;
     var seq = 0;
 
     function reduced() {
@@ -3331,9 +3331,9 @@ window.rowReveal = (function () {
             // Tell the page the rows have stopped moving. The dashboards draw
             // their current-week outline from element positions and redraw it
             // on resize, and the toggles ask for that immediately and again
-            // 50ms later - both of which now land in the middle of a 400ms
-            // open, so the outline was measured against half-collapsed tables
-            // and never corrected. One more, once everything has arrived.
+            // 50ms later - neither of which is when the rows finish, so the
+            // outline was measured against half-collapsed tables and left
+            // there. One more, once everything has arrived.
             if (settled) { window.dispatchEvent(new Event('resize')); }
         }, (opening ? OPEN_DURATION : DURATION) + 30);
     }

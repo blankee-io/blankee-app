@@ -15754,11 +15754,11 @@ tr.row-opening > td {
    .row-animating is what names the properties, so the duration only applies
    once it is there. */
 tr.row-animating.row-opening > td {
-    transition-duration: 400ms;
+    transition-duration: 160ms;
 }
 
 tr.row-opening > td > .row-reveal-wrap {
-    transition-duration: 400ms;
+    transition-duration: 160ms;
 }
 
 /* Height, padding and borders all three, or the row keeps that much of itself
