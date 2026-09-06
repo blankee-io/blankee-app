@@ -401,6 +401,15 @@ CREATE TABLE `income_entries` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `instance_apps` (
+  `app_id` varchar(32) NOT NULL COMMENT 'apps_registry.py id; no row means off',
+  `enabled` tinyint(1) NOT NULL DEFAULT '0',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`app_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `instance_settings` (
   `id` tinyint NOT NULL DEFAULT '1',
   `smtp_server` varchar(255) DEFAULT NULL,

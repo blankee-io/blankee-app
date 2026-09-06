@@ -49,6 +49,7 @@ EXPECTED_TABLES = (
     'bucket_prompts',
     'autobalance_settings',
     'widget_tokens',
+    'instance_apps',
     'bundles', 'bundle_items',
 )
 EXPECTED_COLUMNS = (
@@ -57,6 +58,7 @@ EXPECTED_COLUMNS = (
     ('users', 'setup_step'),
     ('income_categories', 'is_savings'),
     ('expense_categories', 'is_savings'),
+    ('instance_apps', 'enabled'),
     ('instance_settings', 'smtp_password_encrypted'),
     ('instance_settings', 'verified_at'),
     ('instance_settings', 'verification_secret'),

@@ -17595,6 +17595,50 @@ tr[data-collapsed] {
     height: 17px;
 }
 
+/* On the nav bar and in the menu header, where the ground is teal. The name
+   goes white like the logo it replaces, and the credit stays quieter without
+   going so quiet it disappears against the bar. */
+.app-lockup-nav {
+    text-decoration: none;
+}
+
+.app-lockup-nav .app-wordmark {
+    color: white;
+    font-size: 22px;
+}
+
+.app-lockup-nav .app-by {
+    color: var(--secondary-hover);
+    font-size: 8px;
+}
+
+.app-lockup-nav .app-by img {
+    height: 10px;
+}
+
+/* One row per sibling app in the admin console, named the way the menus name
+   it so the switch and the entry are recognisably the same thing. */
+.other-app-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-dark);
+    font-weight: 600;
+}
+
+.other-app-name i {
+    color: var(--primary);
+}
+
+/* A menu that has nothing in it yet says so, rather than being empty or full
+   of rows that go nowhere. */
+.side-menu-note {
+    padding: 4px 20px 12px;
+    color: var(--secondary-hover);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
 /* The placeholder page, until there is an application behind the name. */
 .loaf-placeholder {
     max-width: 520px;
