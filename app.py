@@ -8492,6 +8492,9 @@ def update_daily_ca_totals(user_id, start_date):
             # The projected charges already on record, for replaying the run-up
             # to a partial walk rather than recomputing it. See charge_for.
             stored_interest = {}
+            # The first day Blankee knows anything at all about this card,
+            # which is not the day the card was opened. See the backfill below.
+            account_first_seen = None
             for entry in c_expense_entries:
                 entry_date = entry.get('date')
                 if isinstance(entry_date, str):
@@ -8501,6 +8504,10 @@ def update_daily_ca_totals(user_id, start_date):
                 entry_category_id = entry.get('category_id')
                 cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (entry_category_id,))
                 cat_row = cursor.fetchone()
+
+                if cat_row and cat_row['account_id'] == account_id:
+                    if account_first_seen is None or entry_date < account_first_seen:
+                        account_first_seen = entry_date
 
                 if cat_row and cat_row['account_id'] == account_id and min_date <= entry_date <= max_date:
                     # A projected interest charge is derived, so the projection
@@ -8548,6 +8555,37 @@ def update_daily_ca_totals(user_id, start_date):
                     if entry_account_id == account_id and min_date <= entry_date <= max_date:
                         payments_by_date[entry_date] = payments_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
 
+            # A card added to Blankee partway through a billing cycle did not
+            # come into existence then. It was already open and already owed
+            # something - which is what starting_balance records. The days
+            # before it was added read as a zero balance here only because
+            # nothing had been entered yet, and that drags the first
+            # statement's average daily balance down towards nothing: a card
+            # added on the 19th of a cycle closing on the 20th would be billed
+            # on one day's debt instead of a month's.
+            #
+            # So those days carry the opening balance instead. The stored
+            # balance is left alone - the card really did have no history in
+            # Blankee then, and showing a phantom debt across the dashboard
+            # would be a lie about a different thing. Only the cycle's average
+            # is affected.
+            #
+            # Only the cycle the card joined in. Statements before it keep an
+            # empty balance sum and so charge nothing, which is right: there is
+            # no cycle there to bill for.
+            backfill_start = backfill_end = None
+            backfill_balance = 0.0
+            if cycle.active and account_first_seen is not None:
+                opening = float(account_row.get('starting_balance') or 0)
+                joined_cycle_opened = _previous_cycle_date_before(
+                    account_row.get('statement_day'), account_first_seen)
+                if opening > 0 and joined_cycle_opened is not None:
+                    backfill_start = joined_cycle_opened + timedelta(days=1)
+                    backfill_end = account_first_seen - timedelta(days=1)
+                    backfill_balance = opening
+                    if backfill_end < backfill_start:
+                        backfill_start = backfill_end = None
+
             # Prepare data for Redis
             redis_updates = []
 
@@ -8565,7 +8603,13 @@ def update_daily_ca_totals(user_id, start_date):
 
                 # The statement balance includes the day's activity, and the
                 # charge is posted on top of it - so observe first, then close.
-                cycle.observe(current_date, balance, total_payments)
+                # What the cycle averages, which is not always what the day
+                # is recorded as holding - see the backfill above.
+                observed = balance
+                if (backfill_start is not None
+                        and backfill_start <= current_date <= backfill_end):
+                    observed = backfill_balance
+                cycle.observe(current_date, observed, total_payments)
                 # Before the date this pass was actually asked about, replay
                 # what is already on record. A confirmed charge is in the
                 # expenses above and so replays as nothing extra.
