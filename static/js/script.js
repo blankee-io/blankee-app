@@ -3104,7 +3104,8 @@ window.sortableAutoScroll = (function () {
  */
 window.rowReveal = (function () {
 
-    var DURATION = 220;
+    // The profile dropdown's timing, which this is meant to match.
+    var DURATION = 160;
     var seq = 0;
 
     function reduced() {

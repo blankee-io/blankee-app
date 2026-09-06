@@ -15636,28 +15636,27 @@ transform: scale(1.2);
    something is animating. */
 .row-reveal-wrap {
     overflow: hidden;
-    /* The fade is what keeps the content attached to the row. Height alone
-       clips the text where the closing edge crosses it, which reads as the row
-       being cut through rather than going away. Fading as it shrinks means the
-       text leaves with the edge instead of being sliced by it.
+    /* Height alone, at the profile dropdown's timing, because a row should
+       close the way that menu does: the content keeps its own size and is
+       clipped as the edge crosses it.
 
-       ease-in-out rather than ease: the row should start and finish gently, so
-       a group of them settles rather than snapping to a stop. */
-    transition: height 220ms ease-in-out, opacity 180ms ease-in-out;
-}
-
-tr.row-collapsing > td > .row-reveal-wrap {
-    opacity: 0;
+       It used to fade as well, on the reasoning that a fade keeps the text
+       attached to the row rather than letting the edge slice through it. Seen
+       next to the dropdown that reads as the text doing something of its own
+       while the row does something else, which is worse than the slicing it
+       was avoiding. */
+    transition: height 160ms ease;
 }
 
 /* The padding is on the cell, not the wrapper, so it has to be animated
-   separately or the row keeps that much height after the content has gone. */
-/* The same curve and duration as the wrapper, or the padding finishes at a
-   different moment from the content and the row lands in two steps. */
+   separately or the row keeps that much height after the content has gone -
+   the same reason the profile dropdown collapses its own padding alongside its
+   height. The same curve and duration as the wrapper, or the padding finishes
+   at a different moment from the content and the row lands in two steps. */
 tr.row-animating > td {
-    transition: padding-top 220ms ease-in-out, padding-bottom 220ms ease-in-out,
-                border-top-width 220ms ease-in-out,
-                border-bottom-width 220ms ease-in-out;
+    transition: padding-top 160ms ease, padding-bottom 160ms ease,
+                border-top-width 160ms ease,
+                border-bottom-width 160ms ease;
 }
 
 /* Padding and borders both, or the row keeps that much height after its
