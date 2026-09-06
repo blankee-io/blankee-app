@@ -233,6 +233,15 @@
                 // off by display:none rather than closing.
                 if (backdrop) { backdrop.classList.toggle('open', open); }
 
+                // The dashboards draw the current week and month outlines from
+                // element positions and redraw them on resize. Covering the
+                // page with a backdrop does not fire one, so they were left
+                // where they had been. Twice: once now, and once after the
+                // panel has finished moving and the positions are final.
+                var nudge = function () { window.dispatchEvent(new Event('resize')); };
+                window.requestAnimationFrame(nudge);
+                setTimeout(nudge, DROPDOWN_MS + 30);
+
                 if (open) {
                     dropdown.style.display = 'block';
                     // Its full height including padding, measured before it is

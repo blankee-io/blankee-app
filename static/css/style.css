@@ -1551,7 +1551,11 @@ transform: scale(1.2);
     /* positioning */
     position: sticky;
     top: 50px;
-    z-index: 99;
+    /* One below .profile-backdrop, so the profile menu blurs this bar along
+       with the rest of the page. They were both 99 and this one is later in
+       the document, so it painted over the backdrop and stayed sharp. Still
+       above the page it sticks over, and still below the nav bar at 100. */
+    z-index: 98;
 
     /* box model */
     padding: 10px;
@@ -15729,6 +15733,15 @@ tr.row-animating > td {
    height the content needs, so releasing it changes nothing. */
 tr.row-opening > td {
     height: 0 !important;
+    /* Padding and borders held down for the whole opening as well, so the
+       row's height is exactly its wrapper's height and the animation lands on
+       the number it was aimed at. .row-collapsing comes off as the open
+       starts, and letting these come back with it put the row above its
+       final height for the last part of the way. */
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    border-top-width: 0 !important;
+    border-bottom-width: 0 !important;
 }
 
 /* The duration override needs .row-animating beside it, and that is not

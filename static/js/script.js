@@ -3203,15 +3203,22 @@ window.rowReveal = (function () {
 
         // 1. Wrap every row (writes).
         var plan = rows.map(function (row) {
-            return { row: row, wraps: wrap(row), heights: [] };
+            return { row: row, wraps: wrap(row), height: 0 };
         });
 
         // 2. Measure every row (reads). Separated from the writes above and
         //    below so the browser lays out once, not once per row.
+        //
+        //    The row's own height, not each wrapper's content height. They are
+        //    not the same number: a cell holding an input measures shorter than
+        //    the row it sits in, and one holding a long name measures taller.
+        //    Animating each wrapper to its own content left the two tables at
+        //    different heights all the way through - the names side above where
+        //    it would end and the amounts side below - until finish() unwrapped
+        //    them and both snapped to the truth. Aiming at the height the row
+        //    actually settles at makes the last frame the right one.
         plan.forEach(function (item) {
-            item.heights = item.wraps.map(function (box) {
-                return box.scrollHeight;
-            });
+            item.height = item.row.getBoundingClientRect().height;
         });
 
         // 3. Start state for every row (writes) - but not the transitions yet.
@@ -3236,8 +3243,8 @@ window.rowReveal = (function () {
             // 20 at the end. That was the bounce, and no amount of reordering
             // helps while the transition is declared on the bare element.
             silence(item.row, item.wraps, true);
-            item.wraps.forEach(function (box, i) {
-                box.style.height = (opening ? 0 : item.heights[i]) + 'px';
+            item.wraps.forEach(function (box) {
+                box.style.height = (opening ? 0 : item.height) + 'px';
             });
             item.row.classList.toggle('row-opening', opening);
             // Opening starts collapsed and ends open; closing the other way.
@@ -3265,8 +3272,8 @@ window.rowReveal = (function () {
         //    rather than assumed: a probe on a real row reports the wrapper's
         //    height transition running in both directions.
         plan.forEach(function (item) {
-            item.wraps.forEach(function (box, i) {
-                box.style.height = (opening ? item.heights[i] : 0) + 'px';
+            item.wraps.forEach(function (box) {
+                box.style.height = (opening ? item.height : 0) + 'px';
             });
             item.row.classList.toggle('row-collapsing', !opening);
         });
