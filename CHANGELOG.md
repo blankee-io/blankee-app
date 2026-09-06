@@ -8,6 +8,42 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.22.0 — 2026-09-05
+
+### Added
+- **A card added part-way through its billing cycle is billed on the debt it
+  already had.** A credit card does not start existing when you add it to
+  Blankee — it was already open, and already owed whatever you entered as its
+  starting balance. Until now the days before you added it counted as a zero
+  balance when the first month's interest was worked out, which pulled that
+  charge down towards nothing: a card added on the 19th of a cycle closing on
+  the 20th was billed on one day of debt instead of a month of it. Those days
+  now carry the starting balance.
+
+  Your dashboard still shows no history before the day you added the card,
+  because there wasn't any. Only the interest calculation assumes the card was
+  already there, and only for the cycle you joined in — no charges appear in
+  the months before it.
+
+- **Interest charges update on screen as soon as something changes them.**
+  Adding or removing an entry on a card moves every projected charge after it.
+  Those figures are worked out by Blankee rather than typed by you, so the page
+  had no way to hear about it and the old numbers sat there until a reload.
+
+### Fixed
+- **Recalculating a card no longer deletes interest charges it never looked
+  at.** Adding an entry to a credit account and removing it again emptied that
+  card's interest charges for the period and every period before it. A
+  recalculation usually starts from a recent date, and everything earlier was
+  being treated as no longer applying.
+- **A recalculation that starts part-way through no longer runs low.** The
+  first statement it reached had no complete cycle behind it, so that charge
+  came out as nothing and every balance after it was short by that amount,
+  compounding. It now looks back far enough to bill that statement properly.
+- **A restated interest charge keeps its place in the evening prompt.** If its
+  underlying record had gone missing the charge stayed on the card but could
+  never be confirmed.
+
 ## 1.21.0 — 2026-09-05
 
 ### Added
