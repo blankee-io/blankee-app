@@ -91,11 +91,7 @@
 <div class="side-menu-backdrop" id="sideMenuBackdrop"></div>
 <nav class="side-menu" id="sideMenu" aria-label="Blankee menu" aria-hidden="true">
     <div class="side-menu-header">
-        <span class="side-menu-title">Blankee</span>
-        <button type="button" class="side-menu-close" id="sideMenuClose"
-                title="Close" aria-label="Close the Blankee menu">
-            <i class="fa-solid fa-xmark"></i>
-        </button>
+        <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Blankee" class="side-menu-logo">
     </div>
 
     <div class="dropdown-menu-section">
@@ -183,13 +179,12 @@
         }
 
         // ── The Blankee menu ─────────────────────────────────────────────
-        // Opened by the hamburger, closed by the backdrop, the X, or Escape.
+        // Opened by the hamburger, closed by the backdrop or Escape.
         // Exposed as window.blankeeSideMenu so the page tutorials can drive
         // it the way they already drive the profile dropdown.
         const sideMenu = document.getElementById('sideMenu');
         const sideMenuBackdrop = document.getElementById('sideMenuBackdrop');
         const sideMenuToggle = document.getElementById('navMenuToggle');
-        const sideMenuClose = document.getElementById('sideMenuClose');
 
         if (sideMenu && sideMenuBackdrop && sideMenuToggle) {
             const setMenu = function (open) {
@@ -208,9 +203,6 @@
                 setMenu(!sideMenu.classList.contains('open'));
             });
             sideMenuBackdrop.addEventListener('click', function () { setMenu(false); });
-            if (sideMenuClose) {
-                sideMenuClose.addEventListener('click', function () { setMenu(false); });
-            }
             document.addEventListener('keydown', function (event) {
                 if (event.key === 'Escape' && sideMenu.classList.contains('open')) {
                     setMenu(false);

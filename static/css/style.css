@@ -538,7 +538,11 @@ body {
     justify-content: center; 
     align-items: center; 
     height: 50px; 
-    padding: 0 10px;
+
+    /* No gutter on the left. The menu button is the first thing in the row and
+       its box sits against the edge; the right keeps its 10px, because the
+       profile picture fills its box and would otherwise touch the edge. */
+    padding: 0 10px 0 0;
 
     /* visual */
     background-color: var(--primary);
@@ -611,17 +615,6 @@ body {
     align-items: center;
     width: 40px;
     height: 40px;
-
-    /* Cancels the nav bar's 10px gutter so the button sits against the edge.
-       Done here rather than by dropping that padding: the bar centres a
-       875px column, and taking the padding off one side alone would carry
-       the whole row 5px off the centre the page below is aligned to.
-
-       It also lands the glyph well. The icon is inset 10px inside this
-       40px button, so on a narrow screen it ends up the same 10px from the
-       edge as the profile picture opposite, and on a wide one it falls on
-       the content column's left edge. */
-    margin-left: -10px;
     padding: 0;
 
     /* visual */
@@ -674,39 +667,22 @@ body {
 .side-menu-header {
     display: flex;
     flex-shrink: 0;
-    justify-content: space-between;
     align-items: center;
 
-    /* Matches the nav bar, so the title sits on the logo's line. */
+    /* The nav bar's height, so opening the menu leaves the logo where it
+       already was rather than sliding a second one past it. */
     height: 50px;
-    padding-right: 10px;
     padding-left: 20px;
 }
 
-.side-menu-title {
-    color: white;
-    font-size: 15px;
-    font-weight: 700;
-}
-
-.side-menu-close {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 40px;
-    height: 40px;
-    padding: 0;
-    background-color: transparent;
-    border: none;
-    border-radius: 50%;
-    color: white;
-    font-size: 20px;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-}
-
-.side-menu-close:hover {
-    background-color: var(--primary-hover);
+/* The nav bar's logo, at the nav bar's size. There is no close button beside
+   it: the backdrop and Escape both close the menu, which is how a drawer is
+   expected to behave, and a header with one thing in it reads as a heading
+   rather than a toolbar. */
+.side-menu-logo {
+    width: auto;
+    height: 38px;
+    vertical-align: middle;
 }
 
 .side-menu-backdrop {
