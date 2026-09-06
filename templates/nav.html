@@ -89,7 +89,7 @@
                 <div class="dropdown-menu-section">
                     <div class="dropdown-profile-label"><span>Other Apps</span></div>
                     {% for other in other_apps %}
-                    <div class="dropdown-link">
+                    <div class="dropdown-link dropdown-app-link">
                         <a href="{{ url_for(other.start) if other.start else landing_url() }}">{{ other.name }}</a>
                         <i class="{{ other.icon }}"></i>
                     </div>

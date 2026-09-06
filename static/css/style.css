@@ -1186,6 +1186,14 @@ body {
 /* A shade up from the panel behind it, so an open sub-list reads as one block
    sitting inside the menu rather than as loose rows. The panel itself is
    --primary; these were set to the same value, which made them invisible. */
+/* The Other Apps rows carry whatever icon their app named, so they opt out of
+   the blanket 300 above the same way the Blankee menu does. An app is free to
+   pick an icon with no Light face in Free; forcing the weight would render it
+   as nothing there. */
+.dropdown-app-link i {
+    font-weight: var(--fa-style, 900);
+}
+
 .dropdown-sublink {
     padding-left: 30px;
     background-color: var(--primary-mid);
@@ -17552,9 +17560,9 @@ tr[data-collapsed] {
    the two lines, so the credit stays a credit at either size. */
 .app-lockup {
     display: inline-flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1px;
+    flex-direction: row;
+    align-items: center;
+    gap: 7px;
     line-height: 1;
 }
 
@@ -17565,8 +17573,9 @@ tr[data-collapsed] {
     letter-spacing: -0.5px;
 }
 
-/* Roughly a third of the name, which is what keeps it reading as "by" rather
-   than as a second title. The image is sized off the text beside it. */
+/* Smaller than the name but not small enough to squint at - it sits beside it
+   on the same line rather than under it, so it has to hold its own. The image
+   is sized off the text next to it. */
 .app-by {
     display: inline-flex;
     align-items: center;
@@ -17587,12 +17596,12 @@ tr[data-collapsed] {
 }
 
 .app-lockup-large .app-by {
-    font-size: 14px;
-    gap: 6px;
+    font-size: 20px;
+    gap: 7px;
 }
 
 .app-lockup-large .app-by img {
-    height: 17px;
+    height: 25px;
 }
 
 /* On the nav bar and in the menu header, where the ground is teal. The name
@@ -17609,11 +17618,11 @@ tr[data-collapsed] {
 
 .app-lockup-nav .app-by {
     color: var(--secondary-hover);
-    font-size: 8px;
+    font-size: 11px;
 }
 
 .app-lockup-nav .app-by img {
-    height: 10px;
+    height: 14px;
 }
 
 /* One row per sibling app in the admin console, named the way the menus name

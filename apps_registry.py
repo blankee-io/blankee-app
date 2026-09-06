@@ -30,7 +30,10 @@ import time
 
 # id      - stable, stored in instance_apps.app_id, never renamed
 # name    - what a user reads
-# icon    - a Font Awesome class; must survive install/build_fa_fallback.py
+# icon    - a Font Awesome class. Name the face you want - fa-light and the
+#           rest - rather than forcing a weight: the menus let the icon
+#           decide, so Pro gets the line art and Free gets its own
+#           equivalent. Must survive install/build_fa_fallback.py --check.
 # start   - the endpoint a menu entry points at
 # endpoints - every endpoint that belongs to this app, so a request can be
 #             attributed to it; the host app claims everything unclaimed
@@ -47,7 +50,7 @@ APPS = (
     {
         'id': 'loaf',
         'name': 'Loaf',
-        'icon': 'fa-regular fa-mug-saucer',
+        'icon': 'fa-light fa-bread-slice',
         'start': 'loaf_page',
         'endpoints': ('loaf_page',),
         'host': False,
