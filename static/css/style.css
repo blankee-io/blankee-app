@@ -15687,6 +15687,19 @@ transform: scale(1.2);
    The wrapper is added and removed by the script, so it exists only while
    something is animating. */
 .row-reveal-wrap {
+    /* The content sits in the middle of the wrapper, because that is where the
+       cell puts it once the wrapper is gone - these cells are vertical-align:
+       middle. As a plain block the content stayed at the top all the way
+       through and then dropped to the centre at the end, which is a jump at
+       exactly the moment the row is meant to have finished moving.
+
+       A column flex rather than align-items on a row flex: children stay
+       stacked and stretched to the full width, the way blocks are, so a
+       right-aligned amount stays against the right edge. Only the group of
+       them is centred. */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
     overflow: hidden;
     /* Height alone, at the profile dropdown's timing, because a row should
        close the way that menu does: the content keeps its own size and is
