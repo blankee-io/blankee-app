@@ -17541,6 +17541,93 @@ tr[data-collapsed] {
     background-color: var(--primary-hover);
 }
 
+/* A sibling app's lockup -------------------------------------------------------
+
+   Its own name where Blankee puts its wordmark, and Blankee's wordmark
+   underneath as a maker's credit - deliberately much smaller, so the two are
+   not competing to be the brand. The app is the name; Blankee is who made it.
+
+   .app-lockup is the nav-bar size; .app-lockup-large is for a page that is
+   introducing the app rather than carrying it. Both use the same ratio between
+   the two lines, so the credit stays a credit at either size. */
+.app-lockup {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    line-height: 1;
+}
+
+.app-wordmark {
+    color: var(--primary);
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+}
+
+/* Roughly a third of the name, which is what keeps it reading as "by" rather
+   than as a second title. The image is sized off the text beside it. */
+.app-by {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--secondary-dark);
+    font-size: 9px;
+    letter-spacing: 0.2px;
+}
+
+.app-by img {
+    display: block;
+    width: auto;
+    height: 11px;
+}
+
+.app-lockup-large .app-wordmark {
+    font-size: 54px;
+}
+
+.app-lockup-large .app-by {
+    font-size: 14px;
+    gap: 6px;
+}
+
+.app-lockup-large .app-by img {
+    height: 17px;
+}
+
+/* The placeholder page, until there is an application behind the name. */
+.loaf-placeholder {
+    max-width: 520px;
+    margin: 60px auto;
+    padding: 0 20px;
+    text-align: left;
+}
+
+.loaf-tagline {
+    margin: 26px 0 10px;
+    color: var(--text-dark);
+    font-size: 19px;
+    font-weight: 700;
+}
+
+.loaf-note {
+    margin: 0 0 22px;
+    color: var(--secondary-dark);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.loaf-soon {
+    display: inline-block;
+    margin: 0;
+    padding: 5px 12px;
+    background-color: var(--primary-lighter);
+    border-radius: 20px;
+    color: var(--primary);
+    font-size: 12px;
+    font-weight: 700;
+}
+
 /* The widget ships its own floating button. Hidden so there is one way in,
    rather than two controls for the same overlay, one of them covering the page.
    !important because the widget sets its own inline styles. */

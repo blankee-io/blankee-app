@@ -28371,6 +28371,19 @@ def faq_page():
     return redirect(url_for('support_page'))
 
 
+@app.route('/loaf')
+@login_required
+def loaf_page():
+    """Loaf - the time off planner, not built yet.
+
+    A placeholder so the Other Apps entry in the profile menu has somewhere to
+    go, and so the wordmark it will carry can be looked at before anything is
+    built behind it. Repointing this at the real application later is one
+    route.
+    """
+    return render_template('loaf.html')
+
+
 @app.route('/support')
 @login_required
 def support_page():

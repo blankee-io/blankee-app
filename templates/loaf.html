@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Loaf</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
+</head>
+<body id="loaf-page">
+    {% include 'nav.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">
+            <div class="nav-buttons">
+                {# landing_url() rather than url_for(landing_page): the variable is
+                   passed in by each route that wants it, and the global already
+                   falls back when a user's chosen landing page no longer exists. #}
+                <a href="{{ landing_url() }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="loaf-placeholder">
+            {# The lockup Loaf will carry in its own nav bar and menu: its name
+               where Blankee puts its mark, and the mark itself underneath at a
+               size that reads as a maker's credit rather than a second brand. #}
+            <div class="app-lockup app-lockup-large">
+                <span class="app-wordmark">Loaf</span>
+                <span class="app-by">by
+                    <img src="{{ url_for('static', filename='teallogotext.svg') }}" alt="Blankee">
+                </span>
+            </div>
+
+            <p class="loaf-tagline">Time off, planned.</p>
+            <p class="loaf-note">
+                Paid and unpaid leave in one place - what you have left, what
+                you have booked, and who is away when you want to be.
+            </p>
+            <p class="loaf-soon">Not built yet.</p>
+        </div>
+    </div>
+
+{# The visible footer comes from nav.html, at the bottom of the Blankee menu.
+   Only the scripts belong here - see the note in footer.html. #}
+{% include 'footer.html' %}
+</body>
+</html>
