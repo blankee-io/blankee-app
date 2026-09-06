@@ -8,6 +8,17 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.22.1 — 2026-09-06
+
+### Fixed
+- **Recording a card payment now updates that card's interest charges on
+  screen.** Entering, editing or removing an entry in a card's payment
+  category moves the balance for the rest of the forecast, and every projected
+  interest charge with it — but on the monthly and three-month views those
+  charges kept showing their old figures until the page was reloaded. Doing the
+  same thing on the card itself always updated, which made the payment side
+  look broken rather than merely slow. The daily view was never affected.
+
 ## 1.22.0 — 2026-09-05
 
 ### Added

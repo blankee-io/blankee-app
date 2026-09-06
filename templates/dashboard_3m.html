@@ -5342,6 +5342,22 @@
                             if (typeof refreshNotificationBadge === 'function') {
                                 refreshNotificationBadge();
                             }
+                            // A payment moves the card's balance for the rest
+                            // of the forecast, and every projected interest
+                            // charge with it. Those charges are written by the
+                            // server rather than typed here, so nothing in this
+                            // handler's own bookkeeping knows they changed and
+                            // the rows sat on their old figures until a reload.
+                            //
+                            // The balances themselves are fine without help -
+                            // updateCaBalance refetches them outright - so this
+                            // is only about the charges.
+                            if (response.ca_recalculated) {
+                                window.refreshInterestEntries(c_expense_entries)
+                                    .then(function (changed) {
+                                        if (changed) { updateView(["all"]); }
+                                    });
+                            }
                             // Invalidate batch cache for the affected date so fresh data is fetched
                             invalidateBatchCacheForDate(endDate);
                             // Also invalidate cache for any bucket dates that were affected (may be in different months)
@@ -5532,6 +5548,22 @@
                             // Refresh notification badge (bucket depletion may have created a notification)
                             if (typeof refreshNotificationBadge === 'function') {
                                 refreshNotificationBadge();
+                            }
+                            // A payment moves the card's balance for the rest
+                            // of the forecast, and every projected interest
+                            // charge with it. Those charges are written by the
+                            // server rather than typed here, so nothing in this
+                            // handler's own bookkeeping knows they changed and
+                            // the rows sat on their old figures until a reload.
+                            //
+                            // The balances themselves are fine without help -
+                            // updateCaBalance refetches them outright - so this
+                            // is only about the charges.
+                            if (response.ca_recalculated) {
+                                window.refreshInterestEntries(c_expense_entries)
+                                    .then(function (changed) {
+                                        if (changed) { updateView(["all"]); }
+                                    });
                             }
                             // Invalidate batch cache for the affected date so fresh data is fetched
                             invalidateBatchCacheForDate(endDate);
