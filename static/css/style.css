@@ -15708,6 +15708,18 @@ tr.row-animating > td {
                 border-bottom-width 160ms ease;
 }
 
+/* Opening runs longer than closing. A row coming back is the direction that
+   had no animation at all until recently, and at the closing speed it is hard
+   to tell a working one from none. Both numbers are also in script.js, which
+   has to know how long to wait before tidying up. */
+tr.row-opening > td {
+    transition-duration: 400ms;
+}
+
+tr.row-opening > td > .row-reveal-wrap {
+    transition-duration: 400ms;
+}
+
 /* Height, padding and borders all three, or the row keeps that much of itself
    after its content has gone.
 

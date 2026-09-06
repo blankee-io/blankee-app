@@ -3106,6 +3106,11 @@ window.rowReveal = (function () {
 
     // The profile dropdown's timing, which this is meant to match.
     var DURATION = 160;
+    // Opening runs longer, deliberately: a row coming back is the direction
+    // that had no animation at all until recently, and at 160ms it is hard to
+    // tell a working one from none. The stylesheet carries the same two
+    // numbers - see tr.row-opening.
+    var OPEN_DURATION = 400;
     var seq = 0;
 
     function reduced() {
@@ -3157,7 +3162,7 @@ window.rowReveal = (function () {
 
     function finish(row) {
         unwrap(row);
-        row.classList.remove('row-animating', 'row-collapsing');
+        row.classList.remove('row-animating', 'row-collapsing', 'row-opening');
     }
 
     function run(rows, opening) {
@@ -3200,6 +3205,7 @@ window.rowReveal = (function () {
                 box.style.height = (opening ? 0 : item.heights[i]) + 'px';
             });
             item.row.classList.add('row-animating');
+            item.row.classList.toggle('row-opening', opening);
             // Opening starts collapsed and ends open; closing the other way.
             item.row.classList.toggle('row-collapsing', opening);
         });
@@ -3246,7 +3252,7 @@ window.rowReveal = (function () {
                         if (!opening) { item.row.style.display = 'none'; }
                         finish(item.row);
                     });
-                }, DURATION + 30);
+                }, (opening ? OPEN_DURATION : DURATION) + 30);
             });
         });
     }
