@@ -130,6 +130,88 @@ function setupCategoryDuplicateCheck(inputEl, getCats, opts) {
     }, true);
 })();
 
+/* ── Closing an overlay ──────────────────────────────────────────────────────
+ *
+ * An element set to display:none is gone on the same frame, so there is no
+ * moment left in which to animate it out. This watches for an overlay being
+ * hidden, puts it straight back for the length of the animation, and hides it
+ * again when that finishes - see "Closing" in style.css for the animation.
+ *
+ * Centrally rather than at each call site because there are 99 of those across
+ * a dozen files, and they hide overlays every way there is: an inline display,
+ * a class coming off, a parent changing. Comparing the computed display before
+ * and after covers all three, and nothing that closes an overlay had to learn
+ * a new way to do it.
+ *
+ * Two things worth knowing:
+ *
+ * For the 140ms the animation runs, the element is still display:flex. Eight
+ * places in the app read that back, all of them asking "is this open?" before
+ * an Escape or an outside click closes it. The worst that happens is a second
+ * close arriving during the first, which the phase guard below ignores.
+ *
+ * Re-opening an overlay inside those same 140ms is not detected, and it will
+ * finish closing. It is a rare thing to do and the outcome is the one the code
+ * asked for; catching it would mean telling our own writes apart from everyone
+ * else's on the same attribute, for a case nobody hits.
+ */
+(function () {
+    var SHEETS = ".modal, .footer-modal, .dashboard-d-modal, .modal-setup-profile," +
+                 ".category-edit-modal, .center-modal-overlay, .test-purchase-modal," +
+                 ".bundle-input-overlay, .category-input-overlay";
+    var DURATION = 140;
+
+    function playOut(el) {
+        // Exactly what the closing code left inline, so it can be put back
+        // rather than guessed at: "none" when it hid the element itself, and
+        // "" when it took a class off instead.
+        var priorInline = el.style.display;
+        var shown = el.__modalShown;
+
+        el.__modalPhase = "closing";
+        el.style.display = shown;
+        el.classList.add("modal-closing");
+
+        var timer = null;
+        function finish(event) {
+            // The dialog inside runs its own animation, and that bubbles here.
+            if (event && event.target !== el) { return; }
+            clearTimeout(timer);
+            el.removeEventListener("animationend", finish);
+            el.__modalPhase = "finishing";
+            el.classList.remove("modal-closing");
+            el.style.display = priorInline;
+            el.__modalShown = null;
+            // Both writes above land as mutations; clear the guard after them.
+            setTimeout(function () { el.__modalPhase = null; }, 0);
+        }
+        // Never leave an overlay stuck open because an animation did not fire -
+        // reduced motion removes it entirely, and then nothing ever ends.
+        timer = setTimeout(finish, DURATION + 260);
+        el.addEventListener("animationend", finish);
+    }
+
+    function inspect(el) {
+        if (!el || el.__modalPhase) { return; }
+        var display = getComputedStyle(el).display;
+        if (display !== "none") { el.__modalShown = display; return; }
+        if (!el.__modalShown) { return; }   // never seen open; nothing to play
+        playOut(el);
+    }
+
+    if (!window.MutationObserver) { return; }
+    new MutationObserver(function (records) {
+        for (var i = 0; i < records.length; i++) {
+            var el = records[i].target;
+            if (el.nodeType === 1 && el.matches && el.matches(SHEETS)) { inspect(el); }
+        }
+    }).observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["style", "class"],
+        subtree: true
+    });
+})();
+
 function showToast(message, type, duration) {
     if (type === undefined || type === null) type = 'error';
     if (duration === undefined || duration === null) duration = 4000;

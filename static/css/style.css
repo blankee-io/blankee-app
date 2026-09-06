@@ -9805,6 +9805,47 @@ transform: scale(1.2);
     animation: modal-grow-in 0.16s ease-out;
 }
 
+/* Closing ---------------------------------------------------------------------
+
+   The mirror of the above, played while script.js holds the overlay open past
+   the moment it was told to hide - see "Closing an overlay" there.
+
+   .modal-closing sits on the sheet, so one list of dialog classes covers every
+   sheet rather than needing a rule per pairing. Both selectors are a class
+   deeper than the opening ones they replace, so the out animation wins while
+   it runs without either being marked important.
+
+   forwards, so the last frame holds until the element is actually hidden
+   rather than snapping back to full opacity for one frame first. */
+@keyframes modal-grow-out {
+    from { opacity: 1; transform: scale(1); }
+    to   { opacity: 0; transform: scale(0.94); }
+}
+
+@keyframes modal-sheet-out {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+}
+
+.modal-closing {
+    animation: modal-sheet-out 0.14s ease-in forwards;
+}
+
+.modal-closing .modal-content,
+.modal-closing .modal-content-center,
+.modal-closing .alert-modal-content,
+.modal-closing .center-modal-content,
+.modal-closing .modal-content-setup-profile,
+.modal-closing .modal-content-category-recommendations,
+.modal-closing .footer-modal-content,
+.modal-closing .dashboard-d-modal-content,
+.modal-closing .category-edit-modal-content,
+.modal-closing .add-credit-account-modal-content,
+.modal-closing .change-password-modal-content,
+.modal-closing .test-purchase-modal-content {
+    animation: modal-grow-out 0.14s ease-in forwards;
+}
+
 /* The profile dropdown hangs directly under the picture that opens it, so it
    needs no measuring - the corner it grows from is its own top right. */
 .dropdown-content {
@@ -9834,7 +9875,8 @@ transform: scale(1.2);
     .add-credit-account-modal-content,
     .change-password-modal-content,
     .test-purchase-modal-content,
-    .dropdown-content {
+    .dropdown-content,
+    .modal-closing {
         animation: none;
     }
 }
