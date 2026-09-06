@@ -24614,6 +24614,13 @@ def update_credit_account():
                 _redis_client.setex(exp_redis_key, PERSISTENT_CACHE_TTL, json.dumps(expense_categories, cls=DecimalEncoder))
                 _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
         
+        # Recalculate the card. Editing an account can now change the billing
+        # cycle or the rate, which move every projected balance on it - and
+        # unlike add_credit_account this route has never recalculated, so the
+        # change would have sat invisible until something unrelated happened to
+        # touch the card.
+        save_ca_daily_balance()
+
         return jsonify({'status': 'success', 'message': 'Credit account updated successfully'})
         
     except Exception as e:
