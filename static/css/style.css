@@ -1547,23 +1547,31 @@ transform: scale(1.2);
    and centres it, so even a button with no padding holds its icon an eighth of
    an em short of the edge. 1em is the glyph's own width.
 
-   Written against whatever wrapper happens to be first or last, because the
-   pages disagree about how deeply these are nested. */
-.calendarnavbuttonscontainer > :first-child .nav-button:first-child,
-.calendarnavbuttonscontainer > .nav-button:first-child {
+   Every one of these selectors steps down by child, not descendant. As a
+   descendant it also caught the first button inside #nav-inline-buttons - Day
+   View, which is the first child of its own parent but sits in the middle of
+   the row - and stripped the padding off its left side alone. Each page wraps
+   its outermost button exactly one level deep, so one step is all it needs.
+
+   The left one asks for "a button with no button before it" rather than for
+   the first child, because a page is free to put something else first; the
+   right keeps :last-child, which is only wrong on the summary page, where a
+   stray indicator follows the buttons and the whole group is hidden anyway. */
+.calendarnavbuttonscontainer > :first-child > .nav-button:not(.nav-button ~ .nav-button),
+.calendarnavbuttonscontainer > .nav-button:not(.nav-button ~ .nav-button) {
     margin-left: 0;
     padding-left: 0;
 }
 
-.calendarnavbuttonscontainer > :last-child .nav-button:last-child,
+.calendarnavbuttonscontainer > :last-child > .nav-button:last-child,
 .calendarnavbuttonscontainer > .nav-button:last-child {
     margin-right: 0;
     padding-right: 0;
 }
 
-.calendarnavbuttonscontainer > :first-child .nav-button:first-child > i,
-.calendarnavbuttonscontainer > .nav-button:first-child > i,
-.calendarnavbuttonscontainer > :last-child .nav-button:last-child > i,
+.calendarnavbuttonscontainer > :first-child > .nav-button:not(.nav-button ~ .nav-button) > i,
+.calendarnavbuttonscontainer > .nav-button:not(.nav-button ~ .nav-button) > i,
+.calendarnavbuttonscontainer > :last-child > .nav-button:last-child > i,
 .calendarnavbuttonscontainer > .nav-button:last-child > i {
     --fa-width: 1em;
 }
