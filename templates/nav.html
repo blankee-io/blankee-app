@@ -89,6 +89,11 @@
      The two menus are meant to look identical, and a second copy of those
      rules would be a second thing to keep in step. -->
 <div class="side-menu-backdrop" id="sideMenuBackdrop"></div>
+<!-- Dims and blurs the page while the profile menu is open, the way a dialog
+     does. Below the nav bar rather than over it: the menu hangs off the
+     picture up there, and blurring the thing it is attached to would read as
+     the menu having come loose. -->
+<div class="profile-backdrop" id="profileBackdrop"></div>
 <nav class="side-menu" id="sideMenu" aria-label="Blankee menu" aria-hidden="true">
     <div class="side-menu-header">
         <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Blankee" class="side-menu-logo">
@@ -197,14 +202,76 @@
         const dropdown = document.getElementById('profileDropdown');
 
         if (profile && dropdown) {
+            // The dropdown grows taller to open and shortens to close. height
+            // cannot animate to auto, so each direction sets a pixel height to
+            // transition to and releases it afterwards: to nothing on open, so
+            // the menu can still change size while it is up, and to
+            // display:none on close.
+            //
+            // Its own state rather than reading style.display back, because
+            // through the closing transition the element is still displayed -
+            // the same reason the overlay observer in script.js keeps a phase.
+            var backdrop = document.getElementById('profileBackdrop');
+            var dropdownOpen = false;
+            var dropdownTimer = null;
+            var DROPDOWN_MS = 160;
+
+            function collapse() {
+                dropdown.style.height = '0px';
+                dropdown.style.paddingTop = '0px';
+                dropdown.style.paddingBottom = '0px';
+            }
+
+            function setDropdown(open) {
+                if (open === dropdownOpen) { return; }
+                dropdownOpen = open;
+                clearTimeout(dropdownTimer);
+
+                // Padding as well as height. Everything here is border-box,
+                // so height:0 on its own still leaves the 20px and 10px above
+                // and below - the menu would shrink to 30px and then be cut
+                // off by display:none rather than closing.
+                if (backdrop) { backdrop.classList.toggle('open', open); }
+
+                // The dashboards draw the current week and month outlines from
+                // element positions and redraw them on resize. Covering the
+                // page with a backdrop does not fire one, so they were left
+                // where they had been. Twice: once now, and once after the
+                // panel has finished moving and the positions are final.
+                var nudge = function () { window.dispatchEvent(new Event('resize')); };
+                window.requestAnimationFrame(nudge);
+                setTimeout(nudge, DROPDOWN_MS + 30);
+
+                if (open) {
+                    dropdown.style.display = 'block';
+                    // Its full height including padding, measured before it is
+                    // collapsed and while nothing has been painted yet.
+                    var target = dropdown.offsetHeight;
+                    collapse();
+                    void dropdown.offsetHeight;   // start from 0, not from auto
+                    dropdown.style.height = target + 'px';
+                    dropdown.style.paddingTop = '';
+                    dropdown.style.paddingBottom = '';
+                    dropdownTimer = setTimeout(function () {
+                        dropdown.style.height = '';
+                    }, DROPDOWN_MS + 20);
+                } else {
+                    dropdown.style.height = dropdown.offsetHeight + 'px';
+                    void dropdown.offsetHeight;
+                    collapse();
+                    dropdownTimer = setTimeout(function () {
+                        dropdown.style.display = 'none';
+                        dropdown.style.height = '';
+                        dropdown.style.paddingTop = '';
+                        dropdown.style.paddingBottom = '';
+                    }, DROPDOWN_MS + 20);
+                }
+            }
+
             // Toggle the dropdown menu on profile click
             profile.addEventListener('click', function(event) {
                 event.stopPropagation();
-                if (dropdown.style.display === "block") {
-                    dropdown.style.display = "none";
-                } else {
-                    dropdown.style.display = "block";
-                }
+                setDropdown(!dropdownOpen);
             });
 
             // Prevent dropdown from closing when clicking inside it
@@ -214,8 +281,8 @@
 
             // Close dropdown only if clicking outside the dropdown-content
             window.addEventListener('click', function(event) {
-                if (!event.target.closest('.dropdown-content') && dropdown.style.display === "block") {
-                    dropdown.style.display = "none";
+                if (!event.target.closest('.dropdown-content') && dropdownOpen) {
+                    setDropdown(false);
                 }
             });
         } else {
@@ -256,13 +323,36 @@
         // The collapsing rows - Dashboards, Manage Recurring - all behave the
         // same way, so they say what they open with data-menu-collapse rather
         // than each needing a handler of its own here.
+        //
+        // One at a time: opening a row closes whichever other one was open, so
+        // the menu never grows past what a short screen can show. Closing the
+        // row you are already on still just closes it.
         document.querySelectorAll('[data-menu-collapse]').forEach(function (btn) {
             btn.addEventListener('click', function (e) {
                 e.preventDefault();
                 var target = document.getElementById(btn.getAttribute('data-menu-collapse'));
-                if (target) { target.classList.toggle('expanded'); }
+                if (!target) { return; }
+                var opening = !target.classList.contains('expanded');
+                document.querySelectorAll('.menu-collapse.expanded').forEach(function (other) {
+                    if (other !== target) { other.classList.remove('expanded'); }
+                });
+                target.classList.toggle('expanded', opening);
             });
         });
+
+        // Clicking the panel's own background closes whatever is open. Only
+        // the background: a row, a link, the coffee button - anything that
+        // acts - handles its own click and is left alone, which is also what
+        // stops a toggle from closing the list it has just opened as the event
+        // bubbles up to here.
+        if (sideMenu) {
+            sideMenu.addEventListener('click', function (event) {
+                if (event.target.closest('.dropdown-link, a, button')) { return; }
+                document.querySelectorAll('.menu-collapse.expanded').forEach(function (el) {
+                    el.classList.remove('expanded');
+                });
+            });
+        }
     });
 </script>
 

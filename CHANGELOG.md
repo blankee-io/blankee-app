@@ -8,6 +8,36 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.24.0 — 2026-09-06
+
+### Added
+- **Dialogs open and close with an animation.** Every overlay in the app now
+  grows out of whatever you clicked to open it, and shrinks back the same way
+  instead of vanishing. The profile menu does the same, opening by growing
+  taller so its rows are simply revealed rather than stretched.
+
+- **Collapsing a category group or a credit account animates.** The table
+  shrinks and grows rather than the rows blinking in and out, and the
+  current-week outline moves along with it instead of jumping once the rows
+  have settled.
+
+- **Only one menu section stays open at a time.** Opening Dashboards closes
+  Manage Recurring and the other way round, so the menu never grows past what a
+  short screen can show. Clicking the panel's background closes whichever is
+  open.
+
+### Changed
+- **An open sub-list in the menu reads as a block**, a shade above the panel
+  behind it, rather than being the same colour as its background.
+- **The profile menu dims and blurs the page** while it is open, the way a
+  dialog does.
+
+### Fixed
+- **Expanding a credit account brings back only the rows it hid**, rather than
+  also revealing a group inside it that was collapsed, or rows that belong to
+  edit mode.
+- **Anyone who has asked their system for less motion gets none of the above.**
+
 ## 1.23.0 — 2026-09-06
 
 ### Changed
