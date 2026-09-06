@@ -611,7 +611,17 @@ body {
     align-items: center;
     width: 40px;
     height: 40px;
-    margin-right: 4px;
+
+    /* Cancels the nav bar's 10px gutter so the button sits against the edge.
+       Done here rather than by dropping that padding: the bar centres a
+       875px column, and taking the padding off one side alone would carry
+       the whole row 5px off the centre the page below is aligned to.
+
+       It also lands the glyph well. The icon is inset 10px inside this
+       40px button, so on a narrow screen it ends up the same 10px from the
+       edge as the profile picture opposite, and on a wide one it falls on
+       the content column's left edge. */
+    margin-left: -10px;
     padding: 0;
 
     /* visual */
@@ -621,11 +631,15 @@ body {
     color: white;
     font-size: 20px;
     cursor: pointer;
-    transition: background-color 0.2s ease;
+    transition: all 0.2s ease;
 }
 
+/* Hovers like the calendar nav buttons rather than the icons beside it: it
+   grows instead of lighting a circle behind itself. Those buttons also shift
+   to --primary-hover, which this one skips - it is already white, and white
+   is the brighter of the two against this bar. */
 .nav-menu-toggle:hover {
-    background-color: var(--primary-hover);
+    transform: scale(1.2);
 }
 
 .side-menu {
@@ -703,6 +717,13 @@ body {
     width: 100%;
     height: 100%;
     background-color: var(--overlay-dim);
+
+    /* The same 8px the modals use, so an open menu dims and softens the page
+       behind it exactly as a dialog does. It rides the opacity transition
+       below: at opacity 0 the filtered backdrop is not composited either, so
+       the blur arrives and leaves with the panel. */
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     opacity: 0;
 
     /* Not display:none. The panel takes a quarter of a second to leave, and a
