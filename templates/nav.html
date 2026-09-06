@@ -94,13 +94,47 @@
         <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Blankee" class="side-menu-logo">
     </div>
 
+    <div class="side-menu-divider"></div>
+
     <div class="dropdown-menu-section">
+        {# The same views the calendar bar switches between, for the pages that
+           do not carry that bar. Collapsed like Manage Recurring below it. #}
+        <div class="dropdown-link">
+            <a href="javascript:void(0);" id="toggle-dashboards-btn" data-menu-collapse="dashboards-sections">Dashboards</a>
+            <i class="fa-solid fa-gauge"></i>
+        </div>
+        <div id="dashboards-sections" class="menu-collapse">
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_d') }}">Day View</a>
+                <i class="fa-solid fa-calendar-day"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard') }}">Week View</a>
+                <i class="fa-solid fa-calendar-week"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_3m') }}">Month View</a>
+                <i class="fa-solid fa-calendar-days"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_m') }}">Month Overview</a>
+                <i class="fa-solid fa-calendar-exclamation"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_y') }}">Year Overview</a>
+                <i class="fa-solid fa-calendars"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_summary') }}">Recurring Summary</a>
+                <i class="fa-solid fa-bars-progress"></i>
+            </div>
+        </div>
         <div class="dropdown-link"><a href="{{ url_for('manage_categories') }}">Manage Categories</a><i class="fa-solid fa-folder-tree"></i></div>
         <div class="dropdown-link">
-            <a href="javascript:void(0);" id="toggle-recurring-btn">Manage Recurring</a>
+            <a href="javascript:void(0);" id="toggle-recurring-btn" data-menu-collapse="recurring-sections">Manage Recurring</a>
             <i class="fa-solid fa-arrows-repeat"></i>
         </div>
-        <div id="recurring-sections" class="collapsed">
+        <div id="recurring-sections" class="menu-collapse">
             <div class="dropdown-link dropdown-sublink">
                 <a href="{{ url_for('recurring_income') }}">Income</a>
                 <i class="fa-solid fa-plus-large"></i>
@@ -210,15 +244,16 @@
             });
         }
 
-        // Toggle Recurring Income/Expense sections with animation
-        const toggleRecurringBtn = document.getElementById('toggle-recurring-btn');
-        const recurringSections = document.getElementById('recurring-sections');
-        if (toggleRecurringBtn && recurringSections) {
-            toggleRecurringBtn.addEventListener('click', function(e) {
+        // The collapsing rows - Dashboards, Manage Recurring - all behave the
+        // same way, so they say what they open with data-menu-collapse rather
+        // than each needing a handler of its own here.
+        document.querySelectorAll('[data-menu-collapse]').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
                 e.preventDefault();
-                recurringSections.classList.toggle('expanded');
+                var target = document.getElementById(btn.getAttribute('data-menu-collapse'));
+                if (target) { target.classList.toggle('expanded'); }
             });
-        }
+        });
     });
 </script>
 

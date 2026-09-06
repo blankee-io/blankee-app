@@ -539,10 +539,10 @@ body {
     align-items: center; 
     height: 50px; 
 
-    /* No gutter on the left. The menu button is the first thing in the row and
-       its box sits against the edge; the right keeps its 10px, because the
-       profile picture fills its box and would otherwise touch the edge. */
-    padding: 0 10px 0 0;
+    /* The same 10px .main-container keeps, so this row's 875px column lands on
+       #table-container's - the menu button's box against the table's left
+       edge, the profile picture against its right. */
+    padding: 0 10px;
 
     /* visual */
     background-color: var(--primary);
@@ -683,6 +683,37 @@ body {
     width: auto;
     height: 38px;
     vertical-align: middle;
+}
+
+/* The dropdown's own divider, given room on either side. The one between
+   sections in there separates two lists; this one separates the mark from the
+   menu, which wants to read as a bigger break than that. */
+.side-menu-divider {
+    width: 90%;
+    height: 1px;
+    margin: 14px auto 10px;
+    background: var(--secondary-hover);
+    border-radius: 1px;
+    opacity: 0.7;
+}
+
+/* A row that opens a sub-list - Dashboards, Manage Recurring. The expanded
+   height is set per list rather than shared: max-height animates from a real
+   number, so one generous value would leave the shorter list finishing its
+   collapse early and then sitting still for the rest of the transition. */
+.menu-collapse {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.menu-collapse.expanded {
+    opacity: 1;
+}
+
+#dashboards-sections.expanded {
+    max-height: 240px;
 }
 
 .side-menu-backdrop {
@@ -1075,17 +1106,10 @@ body {
     background-color: var(--primary);  
 }
 
-#recurring-sections {
-    max-height: 0;
-    overflow: hidden;
-    opacity: 0;
-    transition: max-height 0.3s ease, opacity 0.3s ease;
-}
-
+/* The collapse itself is .menu-collapse now, shared with Dashboards; only the
+   height this one opens to is its own. */
 #recurring-sections.expanded {
-    /* Adjust as needed for content */
-    max-height: 120px; 
-    opacity: 1;
+    max-height: 120px;
 }
 
 /* Mobile Options - the dropdown row, shown only in the iOS app. It ships
@@ -1500,11 +1524,16 @@ transform: scale(1.2);
 
 @media (width <=600px) {
     .calendarnav {
-        padding: 6px 0px;     
+        /* Tighter than the desktop 10px vertically, but the same 10px across,
+           so the outermost icons sit against #table-container's edges the way
+           the nav bar's do. */
+        padding: 6px 10px;
     }
 
     .calendarnavbuttonscontainer {
-        justify-content: space-around;
+        /* space-between, not space-around: around holds the end icons off the
+           edge by half a gap, which is the whole thing this is lining up to. */
+        justify-content: space-between;
     }
 
     #recurring-i-body .calendarnavbuttonscontainer,
