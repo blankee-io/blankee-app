@@ -662,10 +662,7 @@ body {
     overflow-y: auto;
 
     /* visual */
-    /* A shade up from the nav bar and the profile dropdown, both of which are
-       --primary. The panel covers most of the screen when it is open, so it
-       reads better a step lighter - and it tells the two menus apart. */
-    background-color: var(--primary-mid);
+    background-color: var(--primary);
     box-shadow: 0 10px 40px var(--shadow-lg);
     font-size: 13px;
     transform: translateX(-100%);
@@ -1140,13 +1137,12 @@ body {
     font-weight: var(--fa-style, 900);
 }
 
-/* A shade down from the panel behind it, so an open sub-list reads as one
-   block sitting inside the menu rather than as loose rows. It is the panel
-   that moved to --primary-mid; these keep the --primary they always had, which
-   is now a step darker than their ground rather than identical to it. */
+/* A shade up from the panel behind it, so an open sub-list reads as one block
+   sitting inside the menu rather than as loose rows. The panel itself is
+   --primary; these were set to the same value, which made them invisible. */
 .dropdown-sublink {
     padding-left: 30px;
-    background-color: var(--primary);
+    background-color: var(--primary-mid);
 }
 
 /* The collapse itself is .menu-collapse now, shared with Dashboards; only the
