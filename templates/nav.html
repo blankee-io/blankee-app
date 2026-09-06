@@ -197,14 +197,47 @@
         const dropdown = document.getElementById('profileDropdown');
 
         if (profile && dropdown) {
+            // The dropdown grows taller to open and shortens to close. height
+            // cannot animate to auto, so each direction sets a pixel height to
+            // transition to and releases it afterwards: to nothing on open, so
+            // the menu can still change size while it is up, and to
+            // display:none on close.
+            //
+            // Its own state rather than reading style.display back, because
+            // through the closing transition the element is still displayed -
+            // the same reason the overlay observer in script.js keeps a phase.
+            var dropdownOpen = false;
+            var dropdownTimer = null;
+            var DROPDOWN_MS = 160;
+
+            function setDropdown(open) {
+                if (open === dropdownOpen) { return; }
+                dropdownOpen = open;
+                clearTimeout(dropdownTimer);
+
+                if (open) {
+                    dropdown.style.display = 'block';
+                    dropdown.style.height = '0px';
+                    void dropdown.offsetHeight;   // start from 0, not from auto
+                    dropdown.style.height = dropdown.scrollHeight + 'px';
+                    dropdownTimer = setTimeout(function () {
+                        dropdown.style.height = '';
+                    }, DROPDOWN_MS + 20);
+                } else {
+                    dropdown.style.height = dropdown.scrollHeight + 'px';
+                    void dropdown.offsetHeight;
+                    dropdown.style.height = '0px';
+                    dropdownTimer = setTimeout(function () {
+                        dropdown.style.display = 'none';
+                        dropdown.style.height = '';
+                    }, DROPDOWN_MS + 20);
+                }
+            }
+
             // Toggle the dropdown menu on profile click
             profile.addEventListener('click', function(event) {
                 event.stopPropagation();
-                if (dropdown.style.display === "block") {
-                    dropdown.style.display = "none";
-                } else {
-                    dropdown.style.display = "block";
-                }
+                setDropdown(!dropdownOpen);
             });
 
             // Prevent dropdown from closing when clicking inside it
@@ -214,8 +247,8 @@
 
             // Close dropdown only if clicking outside the dropdown-content
             window.addEventListener('click', function(event) {
-                if (!event.target.closest('.dropdown-content') && dropdown.style.display === "block") {
-                    dropdown.style.display = "none";
+                if (!event.target.closest('.dropdown-content') && dropdownOpen) {
+                    setDropdown(false);
                 }
             });
         } else {

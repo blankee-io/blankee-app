@@ -1079,6 +1079,16 @@ body {
     cursor: default;
     backdrop-filter: blur(20px);
     backdrop-filter: blur(20px);
+
+    /* Opens by growing taller rather than by scaling, so the rows stay their
+       own size the whole way and are simply revealed. height cannot animate to
+       auto, so nav.html measures the menu and transitions to that many pixels,
+       then releases it - the transition is here, the numbers are there.
+
+       overflow hidden is what makes that a reveal rather than an overflow, and
+       it can stay on: nothing in this menu is positioned outside it. */
+    overflow: hidden;
+    transition: height 0.16s ease;
 }
 
 .dropdown-link {
@@ -9846,12 +9856,9 @@ transform: scale(1.2);
     animation: modal-grow-out 0.14s ease-in forwards;
 }
 
-/* The profile dropdown hangs directly under the picture that opens it, so it
-   needs no measuring - the corner it grows from is its own top right. */
-.dropdown-content {
-    transform-origin: top right;
-    animation: modal-grow-in 0.14s ease-out;
-}
+/* The profile dropdown is the exception: it grows taller rather than scaling,
+   and its two declarations live with the rest of .dropdown-content rather than
+   here, so there is one rule for that selector instead of two. */
 
 @media (prefers-reduced-motion: reduce) {
     .modal,
@@ -9875,9 +9882,15 @@ transform: scale(1.2);
     .add-credit-account-modal-content,
     .change-password-modal-content,
     .test-purchase-modal-content,
-    .dropdown-content,
     .modal-closing {
         animation: none;
+    }
+
+    /* The dropdown's is a transition rather than an animation. nav.html still
+       sets the heights; with no transition to run they simply apply, which is
+       the instant open and close this asks for. */
+    .dropdown-content {
+        transition: none;
     }
 }
 
