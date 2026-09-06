@@ -3175,9 +3175,19 @@ window.rowReveal = (function () {
     }
 
     function finish(row) {
+        // Silenced again before the classes come off, because by now they are
+        // very much on - the animation needed them. .row-opening holds the
+        // cell's padding and borders at zero, so taking it off with
+        // transitions live animated them back in on the `transition: all 0.2s`
+        // the bare td carries: the row dropped to its content height and
+        // climbed out again over the next fifth of a second, just after it had
+        // already arrived. Off, remove, read so the settled state is computed,
+        // then on again.
         unwrap(row);
-        silence(row, null, false);
+        silence(row, null, true);
         row.classList.remove('row-animating', 'row-collapsing', 'row-opening');
+        void row.offsetHeight;
+        silence(row, null, false);
     }
 
     function run(rows, opening) {
@@ -3279,11 +3289,21 @@ window.rowReveal = (function () {
         });
 
         window.setTimeout(function () {
+            var settled = false;
             plan.forEach(function (item) {
                 if (item.row._revealSeq !== mine) { return; }
                 if (!opening) { item.row.style.display = 'none'; }
                 finish(item.row);
+                settled = true;
             });
+
+            // Tell the page the rows have stopped moving. The dashboards draw
+            // their current-week outline from element positions and redraw it
+            // on resize, and the toggles ask for that immediately and again
+            // 50ms later - both of which now land in the middle of a 400ms
+            // open, so the outline was measured against half-collapsed tables
+            // and never corrected. One more, once everything has arrived.
+            if (settled) { window.dispatchEvent(new Event('resize')); }
         }, (opening ? OPEN_DURATION : DURATION) + 30);
     }
 
