@@ -15729,6 +15729,18 @@ tr.row-animating > td {
    height the content needs, so releasing it changes nothing. */
 tr.row-opening > td {
     height: 0 !important;
+}
+
+/* The duration override needs .row-animating beside it, and that is not
+   tidiness. transition-duration on its own leaves transition-property at its
+   initial `all`, so this rule by itself declared a transition on every
+   property of the cell - and .row-opening is added while the cell is still at
+   its 20px minimum, so setting it to 0 became an animation running down while
+   the wrapper ran up. The row takes whichever is taller: 20 at the start, 10.3
+   where the two crossed, 20 at the end. That was the bounce.
+   .row-animating is what names the properties, so the duration only applies
+   once it is there. */
+tr.row-animating.row-opening > td {
     transition-duration: 400ms;
 }
 

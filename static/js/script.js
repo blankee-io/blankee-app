@@ -3160,8 +3160,23 @@ window.rowReveal = (function () {
         }
     }
 
+    /* Turn transitions off on a row's cells and wrappers, or hand them back.
+
+       Needed because `td` and `tr` carry `transition: all 0.2s ease` in the
+       stylesheet, so there is no moment when a cell is not transitioning and
+       no way to set a start value without animating to it. */
+    function silence(row, wraps, off) {
+        var value = off ? 'none' : '';
+        for (var i = 0; i < row.cells.length; i++) {
+            row.cells[i].style.transition = value;
+        }
+        (wraps || []).forEach(function (box) { box.style.transition = value; });
+        row.style.transition = value;
+    }
+
     function finish(row) {
         unwrap(row);
+        silence(row, null, false);
         row.classList.remove('row-animating', 'row-collapsing', 'row-opening');
     }
 
@@ -3199,12 +3214,31 @@ window.rowReveal = (function () {
             });
         });
 
-        // 3. Start state for every row (writes).
+        // 3. Start state for every row (writes) - but not the transitions yet.
+        //
+        //    row-animating is what declares them, and it goes on afterwards on
+        //    purpose. Opening puts row-opening's `height: 0` on a cell that is
+        //    sitting at its 20px minimum, and with transitions already live
+        //    that becomes an animation of its own, running down while the
+        //    wrapper runs up. The row takes whichever is taller, so it started
+        //    at full height, sank to where the two crossed, and climbed back:
+        //    measured at 20 -> 10.3 at 120ms -> 20, which is the bounce.
+        //
+        //    Setting the value first and enabling transitions after makes that
+        //    drop instant and unanimated, and leaves only the wrapper moving.
         plan.forEach(function (item) {
+            // Silence the cell first. The stylesheet gives every td and tr
+            // `transition: all 0.2s ease`, so a cell is always transitioning
+            // something - and row-opening's `height: 0` lands on a cell still
+            // sitting at its 20px minimum. That became an animation of its own
+            // running down while the wrapper ran up, and the row takes
+            // whichever is taller: 20 at the start, 10.3 where they crossed,
+            // 20 at the end. That was the bounce, and no amount of reordering
+            // helps while the transition is declared on the bare element.
+            silence(item.row, item.wraps, true);
             item.wraps.forEach(function (box, i) {
                 box.style.height = (opening ? 0 : item.heights[i]) + 'px';
             });
-            item.row.classList.add('row-animating');
             item.row.classList.toggle('row-opening', opening);
             // Opening starts collapsed and ends open; closing the other way.
             item.row.classList.toggle('row-collapsing', opening);
@@ -3212,6 +3246,14 @@ window.rowReveal = (function () {
 
         // 4. One forced layout read for the whole batch. Without it the browser
         //    folds the start and end states together and shows the end at once.
+        void document.body.offsetHeight;
+
+        // 4b. Hand the transitions back, now that the start state is settled
+        //     behind them, and read once more so they register against it.
+        plan.forEach(function (item) {
+            silence(item.row, item.wraps, false);
+            item.row.classList.add('row-animating');
+        });
         void document.body.offsetHeight;
 
         // 5. End state for every row (writes).
