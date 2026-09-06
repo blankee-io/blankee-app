@@ -165,6 +165,21 @@ def _bundle_map(table, user_id):
     }
 
 
+def _interest_categories(table, user_id):
+    """The interest-charge category ids behind an entry table.
+
+    A projected interest charge has no recurring template - it is generated
+    from the card's billing cycle - so _wage_bill_map below finds nothing for
+    it and answers 0, which the prompt reads as "Allowance". It is a bill: one
+    charge, for a stated amount, settled once.
+    """
+    if table != 'c_expense_entries':
+        return set()
+    rows = redis_manager.get_table_cache('c_expense_categories', user_id) or []
+    return {int(r['id']) for r in rows
+            if r.get('id') is not None and r.get('is_interest')}
+
+
 def _bundle_item_label(user_id, category_id, bucket_date, is_bundle):
     """Which item this bucket is for: "Sofa", or "Sofa + 2 more".
 
@@ -232,6 +247,7 @@ def pending_buckets(user_id, on_date=None):
         accounts = _account_names(table, user_id)
         wage_bill = _wage_bill_map(table, user_id)
         bundles = _bundle_map(table, user_id)
+        interest = _interest_categories(table, user_id)
 
         for e in entries:
             if e.get('is_bucket') != 1:
@@ -283,10 +299,12 @@ def pending_buckets(user_id, on_date=None):
                 'date': e_date.isoformat(),
                 'amount': amount,
                 'original_amount': float(e.get('original_amount') or amount),
-                # A bundle has no recurring template, so _wage_bill_map answers
-                # 0 for it and the prompt labelled it "Allowance". Bundles are
-                # all-or-nothing: one plan, one purchase, gone.
-                'wage_bill': 1 if cid in bundles else wage_bill.get(cid, 0),
+                # Neither a bundle nor an interest charge has a recurring
+                # template, so _wage_bill_map answers 0 for both and the prompt
+                # labelled them "Allowance". Both are all-or-nothing: one plan
+                # or one charge, settled once.
+                'wage_bill': 1 if (cid in bundles or cid in interest)
+                             else wage_bill.get(cid, 0),
                 'is_bundle': cid in bundles,
                 'bundle_item': _bundle_item_label(user_id, cid, e_date, cid in bundles),
                 'days_overdue': (on_date - e_date).days,

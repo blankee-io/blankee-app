@@ -8,6 +8,45 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.21.0 — 2026-09-05
+
+### Added
+- **Blankee can forecast the interest on a credit card.** Until now every card
+  was projected as though it were interest-free, which understates the balance
+  by a compounding amount over a year-long forecast — the interest rate was
+  collected when you added the card and then never used for anything.
+
+  Edit a card and give it two more things off your statement: the day the
+  statement closes and the day the payment is due. Blankee then works out each
+  month's charge from the balance it expects you to carry, posts it on the
+  statement date, and asks you to confirm it — so when the real statement
+  arrives you replace the forecast with the actual figure.
+
+  It uses the average daily balance, the way card issuers do, so a purchase
+  made late in the cycle costs less than the same purchase made early. And it
+  only charges interest when the previous statement went unpaid past its due
+  date, worked out from your recorded card payments.
+
+  **Nothing changes until you fill those two days in.** Every existing card
+  keeps exactly the projection it has today.
+
+  It uses your purchase rate only — not cash advances, balance transfers, or a
+  promotional 0% period. On a promotional rate, set the rate to 0 until it
+  ends.
+
+  One thing to watch: if you pay a card in full but have not recorded those
+  payments in Blankee, it will forecast interest every month. Recording the
+  payments is what tells it otherwise.
+
+### Fixed
+- **Editing a credit account no longer cancels its recurring payment.** Any
+  edit — even just renaming the card — was being read as "switch the recurring
+  payment off", which deleted its future entries.
+- **Editing a credit account now recalculates that card**, rather than leaving
+  the change invisible until something unrelated touched it.
+- **Interest rates keep all three decimals.** The form has always accepted them
+  while the database kept two, so 19.995 was stored as 20.00.
+
 ## 1.20.1 — 2026-09-05
 
 ### Fixed

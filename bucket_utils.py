@@ -1162,8 +1162,32 @@ def _is_bundle_category(entry_table, category_id, user_id):
     return False
 
 
+def _is_interest_category(entry_table, category_id, user_id):
+    """Is this a credit card's Interest Charge category?"""
+    if entry_table != 'c_expense_entries':
+        return False
+    try:
+        cached = (redis_manager._redis_client.get(f"c_expense_categories:v1:{user_id}")
+                  if redis_manager._redis_client else None)
+        if not cached:
+            return False
+        for cat in json.loads(cached):
+            if int(cat.get('id', 0) or 0) == int(category_id):
+                return bool(cat.get('is_interest'))
+    except Exception:
+        pass
+    return False
+
+
 def _get_wage_bill_for_category(entry_table, category_id, user_id):
     """Get wage_bill flag for a category's recurring record from Redis."""
+    # An interest charge has no recurring record either - it is generated from
+    # the card's billing cycle - so the lookup below would answer 0 and treat
+    # it as an allowance to be depleted gradually. It is a bill: one charge,
+    # settled once, for a stated amount.
+    if _is_interest_category(entry_table, category_id, user_id):
+        return 1
+
     # A bundle has no recurring record, so the lookup below would return 0 -
     # and wage_bill=0 makes find_next_bucket_for_category search only
     # [today, today+45d]. A bundle item planned for last week would then be

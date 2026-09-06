@@ -1166,6 +1166,17 @@ body {
 }
 
 /* Form labels */
+/* The note under the billing-cycle pickers on the credit account modals. It
+   says what the two days switch on and what the forecast deliberately does not
+   model, so nobody has to infer either from a blank field. Sized below the
+   labels: it is an explanation, not another field. */
+.cycle-note {
+    margin: 4px 0 12px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
 .footer-form-group label {
     display: block;
     margin-bottom: 8px;

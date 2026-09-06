@@ -4234,14 +4234,16 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     if is_temp:
                         # INSERT with NULL id to get auto-generated ID
                         cursor.execute("""
-                            INSERT INTO credit_accounts (id, user_id, name, mask, linked_account_id, interest_rate, starting_balance, is_card, is_line, is_linked, display_order)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO credit_accounts (id, user_id, name, mask, linked_account_id, interest_rate, statement_day, payment_due_day, starting_balance, is_card, is_line, is_linked, display_order)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             user_id,
                             row.get('name'),
                             row.get('mask'),
                             row.get('linked_account_id'),
                             float(row.get('interest_rate', 0)) if row.get('interest_rate') else None,
+                            row.get('statement_day') or None,
+                            row.get('payment_due_day') or None,
                             float(row.get('starting_balance', 0)),
                             int(row.get('is_card', 0)),
                             int(row.get('is_line', 0)),
@@ -4254,13 +4256,20 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     else:
                         # Regular UPSERT for existing IDs
                         cursor.execute("""
-                            INSERT INTO credit_accounts (id, user_id, name, mask, linked_account_id, interest_rate, starting_balance, is_card, is_line, is_linked, display_order)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO credit_accounts (id, user_id, name, mask, linked_account_id, interest_rate, statement_day, payment_due_day, starting_balance, is_card, is_line, is_linked, display_order)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 name = VALUES(name),
                                 mask = VALUES(mask),
                                 linked_account_id = VALUES(linked_account_id),
                                 interest_rate = VALUES(interest_rate),
+                                -- COALESCE: a blob cached before the migration
+                                -- carries neither key, and a plain VALUES()
+                                -- would NULL the billing cycle out on the first
+                                -- flush after reload - switching the feature
+                                -- off with no error anywhere.
+                                statement_day = COALESCE(VALUES(statement_day), statement_day),
+                                payment_due_day = COALESCE(VALUES(payment_due_day), payment_due_day),
                                 starting_balance = VALUES(starting_balance),
                                 is_card = VALUES(is_card),
                                 is_line = VALUES(is_line),
@@ -4273,6 +4282,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             row.get('mask'),
                             row.get('linked_account_id'),
                             float(row.get('interest_rate', 0)) if row.get('interest_rate') else None,
+                            row.get('statement_day') or None,
+                            row.get('payment_due_day') or None,
                             float(row.get('starting_balance', 0)),
                             int(row.get('is_card', 0)),
                             int(row.get('is_line', 0)),
