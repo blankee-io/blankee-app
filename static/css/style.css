@@ -871,11 +871,12 @@ body {
     box-sizing: border-box; 
 }
 
-.sidenav-profile:hover {
-    background-color: var(--primary-hover);
-}
+/* Grows on hover, like the menu button at the other end of the row.
 
+   The picture rather than the container: #profileDropdown is a child of
+   .sidenav-profile, so scaling that would take the open dropdown with it. */
 .sidenav-profile:hover .sidenav-profile-pic {
+    transform: scale(1.2);
 }
 
 .sidenav-profile-pic {
@@ -889,6 +890,9 @@ body {
        .nav-menu-toggle does on the left. */
     margin-left: auto;
     border-radius: 50%;
+
+    /* The same easing the menu button and the calendar buttons hover on. */
+    transition: all 0.2s ease;
 
     /* Ensures the image covers the container without squashing */
     object-fit: cover; 
@@ -17178,6 +17182,65 @@ tr[data-collapsed] {
     height: 22px;
     width: auto;
     display: block;
+}
+
+/* The footer, inside the Blankee menu ---------------------------------------
+
+   Signed-in pages render it at the bottom of the panel rather than the bottom
+   of the page; the signed-out ones, which have no panel, keep it where it was.
+   margin-top: auto in the panel's flex column pushes it to the floor when the
+   menu is shorter than the screen, and lets it simply follow the last item
+   when it is not.
+
+   The ground under it is teal now instead of the page background, so the small
+   print has to change colour with it. */
+.side-menu .app-footer {
+    margin-top: auto;
+    padding: 14px 20px 18px;
+}
+
+.side-menu .app-footer-inner {
+    justify-content: flex-start;
+    max-width: none;
+    gap: 4px 8px;
+    margin: 0;
+    padding-top: 12px;
+    border-top-color: var(--secondary-hover);
+}
+
+/* The wordmark is already at the top of the panel, and the separator only ever
+   made sense in a row wide enough not to wrap. */
+.side-menu .app-footer-brand,
+.side-menu .app-footer-sep {
+    display: none;
+}
+
+.side-menu .app-footer-version,
+.side-menu .app-footer-copyright,
+.side-menu .app-footer-link {
+    color: var(--secondary-hover);
+}
+
+.side-menu .app-footer-link:hover,
+.side-menu .app-footer-link:focus-visible {
+    background-color: var(--primary-hover);
+    color: white;
+}
+
+/* Left with the rest of the small print rather than centred under it: the
+   panel is narrow enough that a centred row reads as a stray item. */
+.side-menu .app-footer-support {
+    justify-content: flex-start;
+    margin-top: 8px;
+}
+
+.side-menu .app-footer-bmc {
+    padding-left: 0;
+}
+
+.side-menu .app-footer-bmc:hover,
+.side-menu .app-footer-bmc:focus-visible {
+    background-color: var(--primary-hover);
 }
 
 /* The widget ships its own floating button. Hidden so there is one way in,

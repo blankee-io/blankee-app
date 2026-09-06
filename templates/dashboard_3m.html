@@ -32,10 +32,10 @@
         <div class="calendarnavbuttonscontainer">   
             <!-- Single button with repeat icon -->
             <div class="nav-dash-container">
-                <!-- Link to Recurring Summary -->
+                <!-- Link to the Summary View -->
                 <a href="{{ url_for('dashboard_summary') }}" class="nav-button">
                     <i class="fa-solid fa-bars-progress"></i>
-                    <span class="nav-tooltip">Recurring Summary</span>
+                    <span class="nav-tooltip">Summary View</span>
                 </a>
                 <!-- Inline nav buttons (icons only) -->
                 <div id="nav-inline-buttons">
@@ -6699,7 +6699,7 @@
                         startTutorial('tutorial_dashboard_3m', [
                             { selector: '#nav-inline-buttons > :nth-child(1), #nav-inline-buttons > :nth-child(2), #nav-inline-buttons > :nth-child(3)', text: 'These icons switch between your main views: <b>Day</b>, <b>Week</b>, and <b>Month</b>. Each shows the same data at a different level of detail.' },
                             { selector: '#nav-inline-buttons > :nth-child(4), #nav-inline-buttons > :nth-child(5)', text: 'The <b>Month Overview</b> and <b>Year Overview</b> show high-level summaries of your income, expenses, and remainder across longer time periods.' },
-                            { selector: '.nav-dash-container > a.nav-button:first-child', text: 'The <b>Dashboard Summary</b> shows all your recurring entries and their projected totals at a glance.' },
+                            { selector: '.nav-dash-container > a.nav-button:first-child', text: 'The <b>Summary View</b> shows all your recurring entries and their projected totals at a glance.' },
                             { selector: '#calendarnavbuttons', text: 'Navigate between time periods. The arrows move forward and back, and the calendar icon returns you to the current period.' },
                             { selector: '#income-categories-table tbody tr:not(#income-total-row), #expense-categories-table tbody tr:not(#expense-total-row):not([data-is-credit-account=\"1\"])', text: 'These are the categories you created during setup. Income categories are on top, expense categories below.' },
                             { selector: '#toggle-all-hidden-btn', text: 'Toggle visibility of hidden categories.' },

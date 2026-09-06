@@ -105,6 +105,10 @@
         </div>
         <div id="dashboards-sections" class="menu-collapse">
             <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_summary') }}">Summary View</a>
+                <i class="fa-light fa-bars-progress"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
                 <a href="{{ url_for('dashboard_d') }}">Day View</a>
                 <i class="fa-light fa-calendar-day"></i>
             </div>
@@ -123,10 +127,6 @@
             <div class="dropdown-link dropdown-sublink">
                 <a href="{{ url_for('dashboard_y') }}">Year Overview</a>
                 <i class="fa-light fa-calendars"></i>
-            </div>
-            <div class="dropdown-link dropdown-sublink">
-                <a href="{{ url_for('dashboard_summary') }}">Recurring Summary</a>
-                <i class="fa-light fa-bars-progress"></i>
             </div>
         </div>
         <div class="dropdown-link"><a href="{{ url_for('manage_categories') }}">Manage Categories</a><i class="fa-light fa-folder-tree"></i></div>
@@ -180,6 +180,11 @@
         {% endif %}
     </div>
     {% endif %}
+
+    {# The page footer, at the bottom of the menu instead of the bottom of the
+       page. Its scripts stay in footer.html, which every page still includes
+       last - see the note there. #}
+    {% include '_footer_content.html' %}
 </nav>
 
 <script>
