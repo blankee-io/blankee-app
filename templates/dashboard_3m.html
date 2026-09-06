@@ -8419,6 +8419,45 @@
                     const searchContainer = document.getElementById(`ca-search-btn-container-${accountId}`);
 
                     const isCollapsed = caTable.classList.contains('ca-collapsed');
+
+                    // Every row this account could show or hide, in both
+                    // tables, so the names and the amounts move together the
+                    // way a category group's do.
+                    const caCandidates = document.querySelectorAll(
+                        `#ca-categories-body-${accountId} tr,` +
+                        `#ca-categories-table-${accountId} tbody tr[data-category-id]:not(.ca-bottom-row),` +
+                        `#ca-categories-table-${accountId} tbody tr.sidebar-group-header`);
+
+                    // ...but only the ones actually on screen. Plenty of these
+                    // are hidden for reasons that have nothing to do with this
+                    // account being collapsed - a category group inside it that
+                    // is itself collapsed, rows that only appear in edit mode,
+                    // hidden categories. Showing every candidate on expand
+                    // brought all of those back with it.
+                    const caVisible = () => Array.prototype.filter.call(
+                        caCandidates, r => getComputedStyle(r).display !== 'none');
+
+                    // Collapsing decides while they are still up; the list is
+                    // kept so expanding restores exactly what it took away
+                    // rather than guessing again from a table that is by then
+                    // full of rows this hid itself.
+                    let caRows;
+                    if (!isCollapsed) {
+                        caRows = caVisible();
+                        caTable._caCollapsedRows = caRows;
+                    }
+
+                    // .ca-animating suspends the display:none the collapsed
+                    // state normally applies, so there is a height to animate
+                    // away. It comes off once rowReveal has hidden the rows
+                    // itself and the two agree again.
+                    const caAnimating = [caTable, casTable].filter(Boolean);
+                    caAnimating.forEach(t => t.classList.add('ca-animating'));
+                    clearTimeout(caTable._caAnimTimer);
+                    caTable._caAnimTimer = setTimeout(() => {
+                        caAnimating.forEach(t => t.classList.remove('ca-animating'));
+                    }, 190);
+
                     if (isCollapsed) {
                         caTable.classList.remove('ca-collapsed');
                         caTable.classList.add('ca-expanded');
@@ -8438,6 +8477,16 @@
                         if (searchContainer) searchContainer.style.display = 'none';
                         localStorage.setItem(`caCollapsed_${accountId}`, 'true');
                     }
+
+                    if (isCollapsed) {
+                        // The stash, or - for an account that was already
+                        // collapsed when the page loaded and so has none - what
+                        // the stylesheet has just chosen to show now that
+                        // .ca-collapsed is off it.
+                        caRows = caTable._caCollapsedRows || caVisible();
+                        caTable._caCollapsedRows = null;
+                    }
+                    window.rowReveal.set(caRows, isCollapsed);
 
                     // Force a reflow and update highlight after DOM/layout is updated
                     setTimeout(() => {

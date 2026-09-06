@@ -95,6 +95,123 @@ function setupCategoryDuplicateCheck(inputEl, getCats, opts) {
  * @param {string} [type='error'] - Toast type: 'error' | 'warning' | 'info' | 'success'
  * @param {number} [duration=4000] - Auto-dismiss time in ms (0 to disable)
  */
+/* ── Where a dialog grows from ───────────────────────────────────────────────
+ *
+ * Records the last activation point so the opening animation can start there
+ * rather than in the middle of the screen - see "Opening" in style.css, which
+ * reads these two properties off :root.
+ *
+ * Capture phase, so it runs before the handler that opens the dialog. Pointer
+ * and keyboard both, because a control reached by Tab and pressed with Enter
+ * never fires a pointer event, and using a stale pointer position for it would
+ * grow the dialog out of wherever the mouse happened to be left.
+ *
+ * Nothing here knows which dialog is about to open, or whether one is. It only
+ * keeps the answer ready for the stylesheet.
+ */
+(function () {
+    function remember(x, y) {
+        var root = document.documentElement;
+        root.style.setProperty("--open-x", Math.round(x) + "px");
+        root.style.setProperty("--open-y", Math.round(y) + "px");
+    }
+
+    document.addEventListener("pointerdown", function (event) {
+        remember(event.clientX, event.clientY);
+    }, true);
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" && event.key !== " ") { return; }
+        var el = document.activeElement;
+        if (!el || !el.getBoundingClientRect) { return; }
+        var r = el.getBoundingClientRect();
+        if (!r.width && !r.height) { return; }
+        remember(r.left + r.width / 2, r.top + r.height / 2);
+    }, true);
+})();
+
+/* ── Closing an overlay ──────────────────────────────────────────────────────
+ *
+ * An element set to display:none is gone on the same frame, so there is no
+ * moment left in which to animate it out. This watches for an overlay being
+ * hidden, puts it straight back for the length of the animation, and hides it
+ * again when that finishes - see "Closing" in style.css for the animation.
+ *
+ * Centrally rather than at each call site because there are 99 of those across
+ * a dozen files, and they hide overlays every way there is: an inline display,
+ * a class coming off, a parent changing. Comparing the computed display before
+ * and after covers all three, and nothing that closes an overlay had to learn
+ * a new way to do it.
+ *
+ * Two things worth knowing:
+ *
+ * For the 140ms the animation runs, the element is still display:flex. Eight
+ * places in the app read that back, all of them asking "is this open?" before
+ * an Escape or an outside click closes it. The worst that happens is a second
+ * close arriving during the first, which the phase guard below ignores.
+ *
+ * Re-opening an overlay inside those same 140ms is not detected, and it will
+ * finish closing. It is a rare thing to do and the outcome is the one the code
+ * asked for; catching it would mean telling our own writes apart from everyone
+ * else's on the same attribute, for a case nobody hits.
+ */
+(function () {
+    var SHEETS = ".modal, .footer-modal, .dashboard-d-modal, .modal-setup-profile," +
+                 ".category-edit-modal, .center-modal-overlay, .test-purchase-modal," +
+                 ".bundle-input-overlay, .category-input-overlay";
+    var DURATION = 140;
+
+    function playOut(el) {
+        // Exactly what the closing code left inline, so it can be put back
+        // rather than guessed at: "none" when it hid the element itself, and
+        // "" when it took a class off instead.
+        var priorInline = el.style.display;
+        var shown = el.__modalShown;
+
+        el.__modalPhase = "closing";
+        el.style.display = shown;
+        el.classList.add("modal-closing");
+
+        var timer = null;
+        function finish(event) {
+            // The dialog inside runs its own animation, and that bubbles here.
+            if (event && event.target !== el) { return; }
+            clearTimeout(timer);
+            el.removeEventListener("animationend", finish);
+            el.__modalPhase = "finishing";
+            el.classList.remove("modal-closing");
+            el.style.display = priorInline;
+            el.__modalShown = null;
+            // Both writes above land as mutations; clear the guard after them.
+            setTimeout(function () { el.__modalPhase = null; }, 0);
+        }
+        // Never leave an overlay stuck open because an animation did not fire -
+        // reduced motion removes it entirely, and then nothing ever ends.
+        timer = setTimeout(finish, DURATION + 260);
+        el.addEventListener("animationend", finish);
+    }
+
+    function inspect(el) {
+        if (!el || el.__modalPhase) { return; }
+        var display = getComputedStyle(el).display;
+        if (display !== "none") { el.__modalShown = display; return; }
+        if (!el.__modalShown) { return; }   // never seen open; nothing to play
+        playOut(el);
+    }
+
+    if (!window.MutationObserver) { return; }
+    new MutationObserver(function (records) {
+        for (var i = 0; i < records.length; i++) {
+            var el = records[i].target;
+            if (el.nodeType === 1 && el.matches && el.matches(SHEETS)) { inspect(el); }
+        }
+    }).observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["style", "class"],
+        subtree: true
+    });
+})();
+
 function showToast(message, type, duration) {
     if (type === undefined || type === null) type = 'error';
     if (duration === undefined || duration === null) duration = 4000;
@@ -2987,7 +3104,13 @@ window.sortableAutoScroll = (function () {
  */
 window.rowReveal = (function () {
 
-    var DURATION = 220;
+    // The profile dropdown's timing, which this is meant to match.
+    var DURATION = 160;
+    // Opening is kept separate from closing so the two can differ, and is
+    // currently the same. It was run at 400ms for a while to tell a working
+    // animation from none while this was being fixed; the stylesheet carries
+    // the same number - see tr.row-animating.row-opening.
+    var OPEN_DURATION = 160;
     var seq = 0;
 
     function reduced() {
@@ -3037,9 +3160,63 @@ window.rowReveal = (function () {
         }
     }
 
+    /* Turn transitions off on a row's cells and wrappers, or hand them back.
+
+       Needed because `td` and `tr` carry `transition: all 0.2s ease` in the
+       stylesheet, so there is no moment when a cell is not transitioning and
+       no way to set a start value without animating to it. */
+    function silence(row, wraps, off) {
+        var value = off ? 'none' : '';
+        for (var i = 0; i < row.cells.length; i++) {
+            row.cells[i].style.transition = value;
+        }
+        (wraps || []).forEach(function (box) { box.style.transition = value; });
+        row.style.transition = value;
+    }
+
+    /* Keep telling the page the layout is moving, every frame, until the
+       rows have stopped.
+
+       The dashboards' current-week outline is a set of absolutely positioned
+       boxes measured from the cells they sit over, redrawn on resize. Told
+       only at the start and the end, it stayed at its old size for the whole
+       animation and then jumped - so it has to be redrawn as the rows move, or
+       it does not move with them.
+
+       One loop however many rows are animating: a group collapse calls in
+       twice, once for each of the two tables, and both should not be driving
+       their own. Later calls push the finishing line back instead. */
+    var followUntil = 0;
+    var following = false;
+
+    function followAlong(ms) {
+        followUntil = Math.max(followUntil, Date.now() + ms);
+        if (following) { return; }
+        following = true;
+        (function tick() {
+            window.dispatchEvent(new Event('resize'));
+            if (Date.now() < followUntil) {
+                window.requestAnimationFrame(tick);
+            } else {
+                following = false;
+            }
+        })();
+    }
+
     function finish(row) {
+        // Silenced again before the classes come off, because by now they are
+        // very much on - the animation needed them. .row-opening holds the
+        // cell's padding and borders at zero, so taking it off with
+        // transitions live animated them back in on the `transition: all 0.2s`
+        // the bare td carries: the row dropped to its content height and
+        // climbed out again over the next fifth of a second, just after it had
+        // already arrived. Off, remove, read so the settled state is computed,
+        // then on again.
         unwrap(row);
-        row.classList.remove('row-animating', 'row-collapsing');
+        silence(row, null, true);
+        row.classList.remove('row-animating', 'row-collapsing', 'row-opening');
+        void row.offsetHeight;
+        silence(row, null, false);
     }
 
     function run(rows, opening) {
@@ -3065,23 +3242,50 @@ window.rowReveal = (function () {
 
         // 1. Wrap every row (writes).
         var plan = rows.map(function (row) {
-            return { row: row, wraps: wrap(row), heights: [] };
+            return { row: row, wraps: wrap(row), height: 0 };
         });
 
         // 2. Measure every row (reads). Separated from the writes above and
         //    below so the browser lays out once, not once per row.
+        //
+        //    The row's own height, not each wrapper's content height. They are
+        //    not the same number: a cell holding an input measures shorter than
+        //    the row it sits in, and one holding a long name measures taller.
+        //    Animating each wrapper to its own content left the two tables at
+        //    different heights all the way through - the names side above where
+        //    it would end and the amounts side below - until finish() unwrapped
+        //    them and both snapped to the truth. Aiming at the height the row
+        //    actually settles at makes the last frame the right one.
         plan.forEach(function (item) {
-            item.heights = item.wraps.map(function (box) {
-                return box.scrollHeight;
-            });
+            item.height = item.row.getBoundingClientRect().height;
         });
 
-        // 3. Start state for every row (writes).
+        // 3. Start state for every row (writes) - but not the transitions yet.
+        //
+        //    row-animating is what declares them, and it goes on afterwards on
+        //    purpose. Opening puts row-opening's `height: 0` on a cell that is
+        //    sitting at its 20px minimum, and with transitions already live
+        //    that becomes an animation of its own, running down while the
+        //    wrapper runs up. The row takes whichever is taller, so it started
+        //    at full height, sank to where the two crossed, and climbed back:
+        //    measured at 20 -> 10.3 at 120ms -> 20, which is the bounce.
+        //
+        //    Setting the value first and enabling transitions after makes that
+        //    drop instant and unanimated, and leaves only the wrapper moving.
         plan.forEach(function (item) {
-            item.wraps.forEach(function (box, i) {
-                box.style.height = (opening ? 0 : item.heights[i]) + 'px';
+            // Silence the cell first. The stylesheet gives every td and tr
+            // `transition: all 0.2s ease`, so a cell is always transitioning
+            // something - and row-opening's `height: 0` lands on a cell still
+            // sitting at its 20px minimum. That became an animation of its own
+            // running down while the wrapper ran up, and the row takes
+            // whichever is taller: 20 at the start, 10.3 where they crossed,
+            // 20 at the end. That was the bounce, and no amount of reordering
+            // helps while the transition is declared on the bare element.
+            silence(item.row, item.wraps, true);
+            item.wraps.forEach(function (box) {
+                box.style.height = (opening ? 0 : item.height) + 'px';
             });
-            item.row.classList.add('row-animating');
+            item.row.classList.toggle('row-opening', opening);
             // Opening starts collapsed and ends open; closing the other way.
             item.row.classList.toggle('row-collapsing', opening);
         });
@@ -3090,21 +3294,48 @@ window.rowReveal = (function () {
         //    folds the start and end states together and shows the end at once.
         void document.body.offsetHeight;
 
-        // 5. End state for every row (writes).
+        // 4b. Hand the transitions back, now that the start state is settled
+        //     behind them, and read once more so they register against it.
         plan.forEach(function (item) {
-            item.wraps.forEach(function (box, i) {
-                box.style.height = (opening ? item.heights[i] : 0) + 'px';
+            silence(item.row, item.wraps, false);
+            item.row.classList.add('row-animating');
+        });
+        void document.body.offsetHeight;
+
+        // 5. End state for every row (writes).
+        //
+        //    Straight after the read above rather than deferred to a later
+        //    frame. A transition does start on an element that has only just
+        //    come back from display:none, provided something forces the start
+        //    state to be computed first - which step 4 does. Checked directly
+        //    rather than assumed: a probe on a real row reports the wrapper's
+        //    height transition running in both directions.
+        plan.forEach(function (item) {
+            item.wraps.forEach(function (box) {
+                box.style.height = (opening ? item.height : 0) + 'px';
             });
             item.row.classList.toggle('row-collapsing', !opening);
         });
 
+        followAlong((opening ? OPEN_DURATION : DURATION) + 30);
+
         window.setTimeout(function () {
+            var settled = false;
             plan.forEach(function (item) {
                 if (item.row._revealSeq !== mine) { return; }
                 if (!opening) { item.row.style.display = 'none'; }
                 finish(item.row);
+                settled = true;
             });
-        }, DURATION + 30);
+
+            // Tell the page the rows have stopped moving. The dashboards draw
+            // their current-week outline from element positions and redraw it
+            // on resize, and the toggles ask for that immediately and again
+            // 50ms later - neither of which is when the rows finish, so the
+            // outline was measured against half-collapsed tables and left
+            // there. One more, once everything has arrived.
+            if (settled) { window.dispatchEvent(new Event('resize')); }
+        }, (opening ? OPEN_DURATION : DURATION) + 30);
     }
 
     function show(rows) { run(rows, true); }
