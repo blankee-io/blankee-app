@@ -9121,6 +9121,78 @@ def save_totals_remainders_d():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
     
+@app.route('/api/credit-interest-entries')
+@login_required
+def api_credit_interest_entries():
+    """Every projected and confirmed interest charge on the user's cards.
+
+    Interest entries are written by the balance walk rather than by the user,
+    so a page holding its own copy of c_expense_entries has no way to learn
+    that they changed - adding an expense moves the projected charges for the
+    rest of the year, and the rows sat stale until a reload.
+
+    The whole set rather than a diff. It is a handful of rows per card, the
+    caller replaces its interest rows wholesale, and a diff would need the
+    client to have been watching from the same starting point - which after a
+    recalculation that rewrote a year of charges it has not.
+
+    Read-only.
+    """
+    categories = _get_categories_from_redis('c_expense_categories', current_user.id)
+    if categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                """
+                SELECT c.* FROM c_expense_categories c
+                INNER JOIN credit_accounts a ON c.account_id = a.id
+                WHERE a.user_id = %s
+                """, (current_user.id,))
+            categories = list(cursor.fetchall())
+            cursor.close()
+
+    interest = {int(c['id']): int(c.get('account_id') or 0)
+                for c in (categories or [])
+                if c.get('id') is not None and c.get('is_interest')}
+    if not interest:
+        return jsonify({'status': 'success', 'category_ids': [], 'entries': []})
+
+    entries = _get_entries_from_redis('c_expense_entries', current_user.id)
+    if entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                """
+                SELECT e.* FROM c_expense_entries e
+                INNER JOIN c_expense_categories c ON e.category_id = c.id
+                INNER JOIN credit_accounts a ON c.account_id = a.id
+                WHERE a.user_id = %s AND c.is_interest = 1
+                """, (current_user.id,))
+            entries = list(cursor.fetchall())
+            cursor.close()
+
+    out = []
+    for entry in (entries or []):
+        category_id = int(entry.get('category_id') or 0)
+        if category_id not in interest:
+            continue
+        out.append({
+            'id': entry.get('id'),
+            'category_id': category_id,
+            'account_id': interest[category_id],
+            'date': str(entry.get('date'))[:10],
+            'amount': float(entry.get('amount') or 0),
+            'original_amount': (float(entry['original_amount'])
+                                if entry.get('original_amount') is not None else None),
+            'is_bucket': int(entry.get('is_bucket') or 0),
+            'processed': int(entry.get('processed') or 0),
+        })
+
+    return jsonify({'status': 'success',
+                    'category_ids': sorted(interest.keys()),
+                    'entries': out})
+
+
 @app.route('/save_ca_daily_balance', methods=['POST'])
 @login_required
 def save_ca_daily_balance():
