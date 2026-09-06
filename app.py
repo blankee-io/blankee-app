@@ -8065,19 +8065,251 @@ def update_daily_savings_for_savings_category(user_id, start_date):
             # For savings, we need to update the full cache
             _set_savings_entries_to_redis(user_id, redis_updates)
 
+def _cycle_day_of(day_setting, year, month):
+    """Which day of `month` this setting lands on, or None.
+
+    A cycle set to the 31st closes on the 30th in April and the 28th in
+    February: the last day of the month stands in for any day the month does
+    not have, which is what card issuers do.
+    """
+    if not day_setting:
+        return None
+    last = calendar.monthrange(year, month)[1]
+    if str(day_setting).strip().upper() == 'LAST_DAY':
+        return last
+    try:
+        wanted = int(day_setting)
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= wanted <= 31:
+        return None
+    return min(wanted, last)
+
+
+def _falls_on_cycle_day(day_setting, when):
+    """Is `when` the day this cycle lands on in its own month?"""
+    return _cycle_day_of(day_setting, when.year, when.month) == when.day
+
+
+def _next_cycle_date_after(day_setting, after):
+    """The first date strictly after `after` on this day of the month.
+
+    Used to find a statement's payment due date, which is normally in the month
+    following the statement - so this walks forward rather than assuming +1
+    month, and handles a due day earlier in the month than the closing day.
+    """
+    if not day_setting:
+        return None
+    year, month = after.year, after.month
+    for _ in range(3):
+        day = _cycle_day_of(day_setting, year, month)
+        if day is not None:
+            candidate = date(year, month, day)
+            if candidate > after:
+                return candidate
+        month += 1
+        if month > 12:
+            month, year = 1, year + 1
+    return None
+
+
+def _daily_interest_rate(interest_rate):
+    """APR as a daily periodic rate, the way a card issuer quotes it.
+
+    APR / 365, not / 12: interest is assessed per day on the balance carried
+    that day, and the cycle length varies. Returns 0.0 for a missing or
+    unusable rate, which projects no interest rather than guessing at one.
+    """
+    try:
+        apr = float(interest_rate or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if apr <= 0:
+        return 0.0
+    return apr / 100.0 / 365.0
+
+
+class _InterestCycle:
+    """Projects a card's interest charge, one statement at a time.
+
+    Fed each day's closing balance as the balance walk goes forward, because
+    that is the only place the numbers exist: a charge is a function of every
+    balance in the cycle before it, and of whether the previous statement was
+    settled. Computing it outside the walk would mean walking once for the
+    balances and again to absorb the charges - and the second pass changes what
+    the first produced.
+
+    THE ARITHMETIC
+      Cards charge on the average daily balance:
+
+          average balance  x  daily rate  x  days in cycle
+
+      which is just the SUM of the daily balances times the daily rate, since
+      the average is that sum over those same days. So no division, and no
+      rounding error from one.
+
+    THE GRACE PERIOD
+      Interest is only charged when the PREVIOUS statement went unpaid past its
+      due date. So each statement is judged by the one before it, and the first
+      statement in a walk is never charged - there is no prior statement to
+      judge it by, and the cycle before it was only partly observed.
+
+    A cycle whose charge the user has already confirmed is skipped: they have
+    stated the real figure and it is in the entries already.
+    """
+
+    def __init__(self, statement_day, due_day, interest_rate):
+        self.statement_day = statement_day
+        self.due_day = due_day
+        self.daily_rate = _daily_interest_rate(interest_rate)
+        self.active = bool(statement_day and due_day and self.daily_rate > 0)
+
+        self.balance_sum = 0.0          # daily balances since the last statement
+        self.prev_statement_balance = None
+        self.prev_due_date = None
+        self.payments_toward_prev = 0.0
+
+    def observe(self, when, balance, payments):
+        """Take a day's closing balance into the cycle being accumulated."""
+        if not self.active:
+            return
+        self.balance_sum += balance
+        if self.prev_due_date is not None and when <= self.prev_due_date:
+            self.payments_toward_prev += payments
+
+    def charge_for(self, when, balance, already_confirmed):
+        """The interest to post on `when`, or 0.0 if it is not a statement date.
+
+        Call after observe() for the same day: the statement balance includes
+        that day's activity, and the charge is posted on top of it.
+        """
+        if not self.active or not _falls_on_cycle_day(self.statement_day, when):
+            return 0.0
+
+        settled = (self.prev_statement_balance is not None
+                   and self.prev_statement_balance > 0
+                   # Half a cent of slack: the projection and the payment
+                   # figures are both rounded, and a penny short is paid off.
+                   and self.payments_toward_prev >= self.prev_statement_balance - 0.005)
+        first_statement = self.prev_statement_balance is None
+
+        charge = 0.0
+        if not (settled or first_statement or already_confirmed):
+            charge = round(self.balance_sum * self.daily_rate, 2)
+            # A credit balance earns nothing; it does not owe negative interest.
+            if charge < 0:
+                charge = 0.0
+
+        # The cycle closes whether or not anything was charged.
+        self.prev_statement_balance = balance + charge
+        self.prev_due_date = _next_cycle_date_after(self.due_day, when)
+        self.payments_toward_prev = 0.0
+        self.balance_sum = 0.0
+        return charge
+
+
+def _reconcile_interest_entries(user_id, account_id, category_id, projected):
+    """Make the card's Interest Charge entries match what the walk projected.
+
+    The balance already includes these charges - this is what puts them on the
+    screen: an entry on the statement date, in the card's Interest Charge
+    category, as a bucket, so it reaches the evening prompt and can be answered
+    with the real figure when the statement arrives.
+
+    Create, restate, remove. Restate rather than delete-and-recreate, because
+    recreating mints a fresh negative temp id in Redis against a positive row
+    in MySQL, and the orphan sweep then deletes and re-inserts that pairing
+    every fifteen seconds for as long as the row exists.
+
+    A confirmed charge is never touched. The user has told us what actually
+    came off the card, and a projection does not get to overwrite that.
+    """
+    if not category_id:
+        return
+
+    from recurring_bucket_manager import create_bucket_record, set_bucket_record_amount
+
+    entries = _get_entries_from_redis('c_expense_entries', user_id) or []
+    projected_buckets = {}
+    confirmed = set()
+    for entry in entries:
+        if int(entry.get('category_id') or 0) != int(category_id):
+            continue
+        when = entry.get('date')
+        if isinstance(when, str):
+            when = datetime.strptime(when[:10], '%Y-%m-%d').date()
+        if int(entry.get('is_bucket') or 0) == 1:
+            projected_buckets[when] = entry
+        else:
+            confirmed.add(when)
+
+    for when, amount in sorted(projected.items()):
+        if when in confirmed:
+            continue
+        existing = projected_buckets.pop(when, None)
+        if existing is None:
+            _create_bucket_entry_and_record('c_expense_entries', user_id, category_id,
+                                            when, amount, None, account_id=account_id)
+            continue
+        # Keep whatever has been depleted against it: what is left of the new
+        # figure after the same spending, not the new figure outright.
+        spent = (float(existing.get('original_amount') or 0)
+                 - float(existing.get('amount') or 0))
+        _update_entry_in_redis('c_expense_entries', user_id, category_id, when,
+                               round(amount - spent, 2), processed=0,
+                               entry_id=existing.get('id'), is_bucket=True,
+                               original_amount=amount,
+                               match_entry_id=existing.get('id'))
+        set_bucket_record_amount('recurring_c_expense_buckets', category_id,
+                                 when, amount, user_id)
+
+    # Whatever is left was projected once and is not any more - the rate
+    # changed, the balance was paid off, the cycle moved. It is a forecast that
+    # no longer holds, so it goes.
+    for when, stale in projected_buckets.items():
+        _delete_entry_in_redis('c_expense_entries', user_id, category_id,
+                               when, when, specific_entry_id=stale.get('id'))
+
+
 def update_daily_ca_totals(user_id, start_date):
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        # Get all credit accounts for this user
-        cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
-        account_ids = [row['id'] for row in cursor.fetchall()]
+        # Get all credit accounts for this user, with the billing cycle each
+        # one projects its interest from.
+        #
+        # Redis first, like the entries and balances below. Reading the cycle
+        # from MySQL would mean a statement day the user just saved does not
+        # reach the projection until the flush worker gets to it - so the
+        # interest would appear a quarter of a minute after the setting that
+        # asked for it, which reads as the setting not working.
+        accounts = _get_credit_accounts_from_redis(user_id)
+        if accounts is None:
+            cursor.execute(
+                "SELECT id, interest_rate, statement_day, payment_due_day "
+                "  FROM credit_accounts WHERE user_id = %s", (user_id,))
+            accounts = cursor.fetchall()
+        account_ids = [row['id'] for row in accounts]
         if not account_ids:
             cursor.close()
             return
+        accounts_by_id = {row['id']: row for row in accounts}
+
+        # The per-card Interest Charge category, so the walk can tell its own
+        # projected charges from everything else on the card.
+        interest_category_by_account = {}
+        cursor.execute(
+            """
+            SELECT c.id, c.account_id FROM c_expense_categories c
+            INNER JOIN credit_accounts a ON c.account_id = a.id
+            WHERE a.user_id = %s AND c.is_interest = 1
+            """, (user_id,))
+        for row in cursor.fetchall():
+            interest_category_by_account[row['account_id']] = row['id']
 
         # Collect all updates for aggregation
         all_redis_updates = []
+        interest_to_write = []
 
         # Process each account with optimized queries
         for account_id in account_ids:
@@ -8152,18 +8384,36 @@ def update_daily_ca_totals(user_id, start_date):
                 pass
             
             # Filter and aggregate expenses by date for this account
+            interest_category_id = interest_category_by_account.get(account_id)
             expense_by_date = {}
+            # Statement dates whose charge the user has already answered. Those
+            # cycles are not recomputed - the figure below is theirs, not ours.
+            confirmed_interest_dates = set()
             for entry in c_expense_entries:
                 entry_date = entry.get('date')
                 if isinstance(entry_date, str):
                     entry_date = datetime.strptime(entry_date, '%Y-%m-%d').date()
-                
+
                 # Get category to check account_id
                 entry_category_id = entry.get('category_id')
                 cursor.execute("SELECT account_id FROM c_expense_categories WHERE id = %s", (entry_category_id,))
                 cat_row = cursor.fetchone()
-                
+
                 if cat_row and cat_row['account_id'] == account_id and min_date <= entry_date <= max_date:
+                    # A projected interest charge is derived, so the projection
+                    # owns it: it is recomputed below rather than read back.
+                    # Summing the stored one AND computing a fresh one would
+                    # double the charge, and silently - the balance would drift
+                    # rather than anything erroring.
+                    #
+                    # A charge the user has confirmed is different. That is
+                    # money they have said moved, so it counts from the store
+                    # and its cycle is left alone.
+                    if (interest_category_id is not None
+                            and entry_category_id == interest_category_id):
+                        if int(entry.get('is_bucket') or 0) == 1:
+                            continue
+                        confirmed_interest_dates.add(entry_date)
                     expense_by_date[entry_date] = expense_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
 
             # Try to get payment entries from Redis first
@@ -8194,12 +8444,33 @@ def update_daily_ca_totals(user_id, start_date):
 
             # Prepare data for Redis
             redis_updates = []
-            
+
+            # Interest is worked out here rather than anywhere else because
+            # this is the only place the numbers exist: a charge is a function
+            # of every balance in the cycle before it, and those balances are
+            # produced by this loop. See _InterestCycle.
+            account_row = accounts_by_id.get(account_id) or {}
+            cycle = _InterestCycle(account_row.get('statement_day'),
+                                   account_row.get('payment_due_day'),
+                                   account_row.get('interest_rate'))
+            projected_interest = {}
+
             for current_date in all_dates:
                 total_expenses = expense_by_date.get(current_date, 0.0)
                 total_payments = payments_by_date.get(current_date, 0.0)
                 balance = last_day_balance + total_expenses - total_payments
-                
+
+                # The statement balance includes the day's activity, and the
+                # charge is posted on top of it - so observe first, then close.
+                cycle.observe(current_date, balance, total_payments)
+                charge = cycle.charge_for(
+                    current_date, balance,
+                    current_date in confirmed_interest_dates)
+                if charge:
+                    projected_interest[current_date] = charge
+                    total_expenses += charge
+                    balance += charge
+
                 redis_updates.append({
                     'account_id': account_id,
                     'date': current_date,
@@ -8207,18 +8478,44 @@ def update_daily_ca_totals(user_id, start_date):
                     'total_payments': float(total_payments),
                     'balance': float(balance)
                 })
-                
+
                 last_day_balance = balance
+
+            if projected_interest:
+                log_info(app.logger, 'CA_INTEREST',
+                         f"Account {account_id}: projected {len(projected_interest)} "
+                         f"interest charge(s), totalling "
+                         f"{round(sum(projected_interest.values()), 2)}")
+
+            # Reconciled after the cursor closes, not here: writing entries
+            # while this cursor is mid-walk would nest queries inside the loop
+            # that is still reading from it.
+            interest_to_write.append(
+                (account_id, interest_category_id, projected_interest))
             
             # Store for later aggregation
             if redis_updates:
                 all_redis_updates.extend(redis_updates)
 
         cursor.close()
-        
+
         # Update Redis cache only - flush workers will persist to MySQL
         if all_redis_updates:
             _set_ca_balances_to_redis('c_a_balances_d', user_id, all_redis_updates)
+
+    # The balances are written; now make the entries say the same thing. Outside
+    # the connection block so the reconciler gets its own, rather than reusing a
+    # cursor that has just finished walking.
+    for account_id, category_id, projected in interest_to_write:
+        try:
+            _reconcile_interest_entries(user_id, account_id, category_id, projected)
+        except Exception as e:
+            # The balance is already right, which is the part a wrong number
+            # would show up in. A missing entry is visible and self-correcting
+            # on the next recalculation.
+            log_exception(app.logger, 'CA_INTEREST',
+                          f"Could not write interest entries for account "
+                          f"{account_id}: {e}")
 
 def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
     with get_db_pool().get_connection() as conn:
@@ -23609,6 +23906,30 @@ def credit_accounts():
         currency_type=currency_type
     )
 
+def _clean_cycle_day(value):
+    """A day of the month for a card's billing cycle: 1-31, LAST_DAY, or None.
+
+    Same shape the recurring forms store monthly_days in, so the day pickers and
+    everything that already reads that convention work unchanged.
+
+    None for anything unrecognised rather than a guess. These arrive from a
+    browser, and a bad day would place the statement date somewhere the user did
+    not choose - a wrong interest charge is worse than none.
+    """
+    if value is None:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    if value.upper() in ('LAST_DAY', 'LAST DAY'):
+        return 'LAST_DAY'
+    try:
+        day = int(value)
+    except (TypeError, ValueError):
+        return None
+    return str(day) if 1 <= day <= 31 else None
+
+
 @app.route('/add-credit-account', methods=['POST'])
 @login_required
 def add_credit_account():
@@ -23617,6 +23938,8 @@ def add_credit_account():
     interest_rate = data.get('interest_rate')
     account_type = data.get('type')
     starting_balance = data.get('starting_balance', None)
+    statement_day = _clean_cycle_day(data.get('statement_day'))
+    payment_due_day = _clean_cycle_day(data.get('payment_due_day'))
 
     if not name or interest_rate is None or interest_rate == '' or not account_type:
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
@@ -23628,6 +23951,11 @@ def add_credit_account():
     account_data = {
         'name': name,
         'interest_rate': float(interest_rate),
+        # Both or neither: a statement day with no due day cannot answer whether
+        # the grace period applied, and a due day with no statement day has no
+        # cycle to close. Half a cycle would forecast interest off a guess.
+        'statement_day': statement_day if (statement_day and payment_due_day) else None,
+        'payment_due_day': payment_due_day if (statement_day and payment_due_day) else None,
         'is_card': is_card,
         'is_line': is_line,
         'starting_balance': float(starting_balance) if starting_balance else 0.0
@@ -23640,9 +23968,11 @@ def add_credit_account():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                INSERT INTO credit_accounts (user_id, name, interest_rate, is_card, is_line)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (current_user.id, name, interest_rate, is_card, is_line))
+                INSERT INTO credit_accounts (user_id, name, interest_rate, statement_day, payment_due_day, is_card, is_line)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (current_user.id, name, interest_rate,
+                  account_data['statement_day'], account_data['payment_due_day'],
+                  is_card, is_line))
             conn.commit()
             temp_account_id = cursor.lastrowid
             cursor.close()
@@ -23977,9 +24307,16 @@ def update_credit_account():
     name = data.get('name')
     interest_rate = data.get('interest_rate')
     account_type = data.get('type')
-    recurring_payment = data.get('recurring_payment', False)
+    # None, not False. Nothing in the app has ever sent this field, and
+    # defaulting it to False meant every edit of a card - a rename, a rate
+    # change - read as "turn the recurring payment off" and ran the branch that
+    # deletes its future entries. Absent now means leave it exactly as it is;
+    # only a caller that says something gets to change it.
+    recurring_payment = data.get('recurring_payment', None)
     payment_amount = float(data.get('payment_amount', 0) or 0)
     due_date = data.get('due_date', '1')
+    statement_day = _clean_cycle_day(data.get('statement_day'))
+    payment_due_day = _clean_cycle_day(data.get('payment_due_day'))
     
     if not account_id or not name or interest_rate is None or not account_type:
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
@@ -24003,6 +24340,9 @@ def update_credit_account():
                 if acc.get('id') == account_id:
                     acc['name'] = name
                     acc['interest_rate'] = float(interest_rate)
+                    # Both or neither, as on create.
+                    acc['statement_day'] = statement_day if (statement_day and payment_due_day) else None
+                    acc['payment_due_day'] = payment_due_day if (statement_day and payment_due_day) else None
                     acc['is_card'] = is_card
                     acc['is_line'] = is_line
                     break
@@ -24034,7 +24374,11 @@ def update_credit_account():
         # Determine if recurring state changed
         was_recurring = existing_recurring is not None
         
-        if recurring_payment and not was_recurring:
+        if recurring_payment is None:
+            # The caller did not mention the recurring payment, so it is not
+            # theirs to change. Both branches below are skipped.
+            pass
+        elif recurring_payment and not was_recurring:
             # TURNING ON recurring payment
             # Create payment category if it doesn't exist
             if not payment_category:
@@ -24354,6 +24698,13 @@ def update_credit_account():
                 _redis_client.setex(exp_redis_key, PERSISTENT_CACHE_TTL, json.dumps(expense_categories, cls=DecimalEncoder))
                 _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
         
+        # Recalculate the card. Editing an account can now change the billing
+        # cycle or the rate, which move every projected balance on it - and
+        # unlike add_credit_account this route has never recalculated, so the
+        # change would have sat invisible until something unrelated happened to
+        # touch the card.
+        save_ca_daily_balance()
+
         return jsonify({'status': 'success', 'message': 'Credit account updated successfully'})
         
     except Exception as e:
