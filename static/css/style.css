@@ -17200,7 +17200,6 @@ tr[data-collapsed] {
 }
 
 .side-menu .app-footer-inner {
-    justify-content: flex-start;
     max-width: none;
     gap: 4px 8px;
     margin: 0;
@@ -17227,15 +17226,8 @@ tr[data-collapsed] {
     color: white;
 }
 
-/* Left with the rest of the small print rather than centred under it: the
-   panel is narrow enough that a centred row reads as a stray item. */
 .side-menu .app-footer-support {
-    justify-content: flex-start;
     margin-top: 8px;
-}
-
-.side-menu .app-footer-bmc {
-    padding-left: 0;
 }
 
 .side-menu .app-footer-bmc:hover,
