@@ -15711,8 +15711,24 @@ tr.row-animating > td {
 /* Opening runs longer than closing. A row coming back is the direction that
    had no animation at all until recently, and at the closing speed it is hard
    to tell a working one from none. Both numbers are also in script.js, which
-   has to know how long to wait before tidying up. */
+   has to know how long to wait before tidying up.
+
+   height: 0 for the whole of the opening, and this is what makes opening work
+   at all. .row-collapsing comes off as the animation starts, which hands the
+   cell back its `height: 20px` - a minimum, not a height - in one frame. The
+   cell does not animate it: a row that has just come back from display:none
+   has no before-value for its own height, so that property never transitions
+   on the way in, only on the way out. Measured, not guessed: a transition
+   probe on a real row reports four transitions closing and only the wrapper's
+   opening.
+
+   So the row stood at its full height from the first frame while the wrapper
+   grew from nothing inside it, clipped and invisible. Holding the minimum at
+   zero until finish() takes .row-opening off leaves the row's height to the
+   wrapper, which is the thing that does animate. By then the wrapper is the
+   height the content needs, so releasing it changes nothing. */
 tr.row-opening > td {
+    height: 0 !important;
     transition-duration: 400ms;
 }
 

@@ -3214,47 +3214,28 @@ window.rowReveal = (function () {
         //    folds the start and end states together and shows the end at once.
         void document.body.offsetHeight;
 
-        // 5. End state for every row, one frame later.
+        // 5. End state for every row (writes).
         //
-        //    Opening, the row has just come back from display:none and its
-        //    wrapper has only just been created, so neither was rendered when
-        //    this function started. An element that was not rendered has no
-        //    before-value for a transition to run from - it takes the state it
-        //    is left in at the end of the frame as its first - and the forced
-        //    read above cannot invent one. So the collapse animated and the
-        //    expand simply appeared.
-        //
-        //    Two frames, not one: the first gets the start state painted, the
-        //    second changes it with that paint behind it. Both directions go
-        //    this way rather than only opening, so there is one path to reason
-        //    about; closing loses two frames it did not need, which is not
-        //    something anyone can see.
-        window.requestAnimationFrame(function () {
-            window.requestAnimationFrame(function () {
-                var live = plan.filter(function (item) {
-                    return item.row._revealSeq === mine;
-                });
-                if (!live.length) { return; }
-
-                live.forEach(function (item) {
-                    item.wraps.forEach(function (box, i) {
-                        box.style.height = (opening ? item.heights[i] : 0) + 'px';
-                    });
-                    item.row.classList.toggle('row-collapsing', !opening);
-                });
-
-                // Timed from here rather than from the top of run(), or the
-                // two frames above would come out of the animation's own time
-                // and cut the end off it.
-                window.setTimeout(function () {
-                    live.forEach(function (item) {
-                        if (item.row._revealSeq !== mine) { return; }
-                        if (!opening) { item.row.style.display = 'none'; }
-                        finish(item.row);
-                    });
-                }, (opening ? OPEN_DURATION : DURATION) + 30);
+        //    Straight after the read above rather than deferred to a later
+        //    frame. A transition does start on an element that has only just
+        //    come back from display:none, provided something forces the start
+        //    state to be computed first - which step 4 does. Checked directly
+        //    rather than assumed: a probe on a real row reports the wrapper's
+        //    height transition running in both directions.
+        plan.forEach(function (item) {
+            item.wraps.forEach(function (box, i) {
+                box.style.height = (opening ? item.heights[i] : 0) + 'px';
             });
+            item.row.classList.toggle('row-collapsing', !opening);
         });
+
+        window.setTimeout(function () {
+            plan.forEach(function (item) {
+                if (item.row._revealSeq !== mine) { return; }
+                if (!opening) { item.row.style.display = 'none'; }
+                finish(item.row);
+            });
+        }, (opening ? OPEN_DURATION : DURATION) + 30);
     }
 
     function show(rows) { run(rows, true); }
