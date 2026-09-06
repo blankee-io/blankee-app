@@ -1189,22 +1189,25 @@ body {
 /* An app is named by its own outline mark in these rows rather than by a
    stock icon, so the entry and the app read as the same thing.
 
-   The marks are monochrome and drawn dark, for a light background. This one is
-   teal with white icons beside it, so the filter takes the mark to white -
-   brightness(0) flattens it to black whatever it was drawn in, and invert
-   turns that white. A recolour rather than a second file, because the same
-   file also has to serve the admin console, where dark is right. */
+   Shown exactly as drawn. The marks carry their own colours and are made for
+   this ground; recolouring them would throw that away, and an app's mark is
+   the one thing on the row that is meant to look like itself. */
 .dropdown-app-mark {
     width: 17px;
     height: 17px;
     object-fit: contain;
-    filter: brightness(0) invert(1);
 }
 
-/* Same mark, dark, on the console's white. */
+/* The same mark on the console's white. The marks use white as one of their
+   colours, so they get the menu's teal behind them here rather than being
+   recoloured - the file is still shown as drawn, just not against a ground
+   that swallows half of it. */
 .other-app-mark {
     width: 20px;
     height: 20px;
+    padding: 3px;
+    background-color: var(--primary);
+    border-radius: 6px;
     object-fit: contain;
 }
 

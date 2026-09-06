@@ -28428,25 +28428,6 @@ def faq_page():
     return redirect(url_for('support_page'))
 
 
-@app.route('/loaf')
-@login_required
-def loaf_page():
-    """Loaf - the time off planner, not built yet.
-
-    A placeholder so the Other Apps entry has somewhere to go, and so the
-    wordmark it will carry can be looked at before there is an application
-    behind it.
-
-    Behind the instance switch like any sibling app: an administrator who has
-    not turned Loaf on has users who cannot reach it, whether or not they know
-    the address. The menus hide it, and this refuses it.
-    """
-    import apps_registry
-    if not apps_registry.is_enabled('loaf'):
-        abort(404)
-    return render_template('loaf.html')
-
-
 @app.route('/support')
 @login_required
 def support_page():
@@ -28510,6 +28491,21 @@ def support_request():
     log_error(logger, 'SUPPORT', 'Failed to send support request email', user_id=current_user.id, account_email=account_email)
     flash('Failed to send support request. Please try again in a moment.')
     return redirect(url_for('support_page'))
+
+
+##############################################################################
+############################### SIBLING APPS #################################
+##############################################################################
+
+# Each sibling app is a blueprint with its own url_prefix and its own endpoint
+# namespace, registered here. Registration is all that is needed - the app is
+# still invisible to users until an administrator switches it on, which the
+# blueprint enforces for itself.
+#
+# Registered last so a blueprint importing anything from this module finds it
+# defined. See CLAUDE.md 5b.
+from loaf_app import loaf as loaf_blueprint
+app.register_blueprint(loaf_blueprint)
 
 
 ##############################################################################

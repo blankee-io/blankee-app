@@ -17,7 +17,9 @@ to name it and link to it, and it is marked as the host.
 
 ADDING AN APP
     1. Add an entry to APPS below.
-    2. Give it routes, and add each of their endpoints to `endpoints`.
+    2. Give it a blueprint with a url_prefix, register it in app.py, and put
+       its name in `blueprint`. Gate the whole blueprint with a before_request,
+       not each route.
     3. Give it a nav and a menu - see templates/nav.html, which switches on
        current_app_id.
     4. Add its wordmark and mark to static/, matching Blankee's set: one
@@ -38,8 +40,10 @@ import time
 #                 menus paint it white against the teal and leave it dark on
 #                 white, so one file serves both
 # start   - the endpoint a menu entry points at
-# endpoints - every endpoint that belongs to this app, so a request can be
-#             attributed to it; the host app claims everything unclaimed
+# blueprint - the app's blueprint name, which is also its endpoint namespace.
+#             A request is attributed by the part of its endpoint before the
+#             dot, so every page the app ever adds is recognised as its own
+#             without being listed here. The host claims everything unclaimed
 # host    - true for the application that serves the switch, which is Blankee
 APPS = (
     {
@@ -49,7 +53,7 @@ APPS = (
         'wordmark_light': 'teallogotext.svg',
         'mark': 'logooutline.svg',
         'start': None,            # the user's chosen landing page, not a fixed one
-        'endpoints': (),          # everything not claimed below
+        'blueprint': None,        # Blankee is the bare app; it has no prefix
         'host': True,
     },
     {
@@ -58,19 +62,19 @@ APPS = (
         'wordmark': 'loaflogotext.svg',
         'wordmark_light': 'orangeloaflogotext.svg',
         'mark': 'loaflogooutline.svg',
-        'start': 'loaf_page',
-        'endpoints': ('loaf_page',),
+        'start': 'loaf.dashboard',
+        'blueprint': 'loaf',      # so /loaf/... and loaf.* are both its own
         'host': False,
     },
 )
 
 HOST_ID = 'blankee'
 
-# Endpoint -> app id, built once. Anything not in here is the host's.
-_BY_ENDPOINT = {
-    endpoint: app['id']
+# Blueprint name -> app id, built once. Anything else is the host's.
+_BY_BLUEPRINT = {
+    app['blueprint']: app['id']
     for app in APPS
-    for endpoint in app['endpoints']
+    if app.get('blueprint')
 }
 
 _BY_ID = {app['id']: app for app in APPS}
@@ -84,8 +88,15 @@ _cache = {'at': 0.0, 'ids': frozenset()}
 
 
 def app_for_endpoint(endpoint):
-    """Which app a request belongs to. The host owns anything unclaimed."""
-    return _BY_ENDPOINT.get(endpoint or '', HOST_ID)
+    """Which app a request belongs to. The host owns anything unclaimed.
+
+    Flask names a blueprint's endpoints "<blueprint>.<view>", so the part
+    before the dot is the answer for every page an app will ever have - there
+    is no list to keep up to date, and no way to add a page that the shell then
+    renders with the wrong nav.
+    """
+    namespace = (endpoint or '').split('.')[0] if '.' in (endpoint or '') else ''
+    return _BY_BLUEPRINT.get(namespace, HOST_ID)
 
 
 def get(app_id):
