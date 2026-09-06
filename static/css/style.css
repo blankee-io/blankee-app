@@ -615,6 +615,11 @@ body {
     align-items: center;
     width: 40px;
     height: 40px;
+
+    /* The glyph is centred in this 40px box, so it sat 10px inside the row.
+       Pulling the box out by that much puts the glyph itself on the container's
+       left edge - and so on #table-container's, which the row is aligned to. */
+    margin-left: -10px;
     padding: 0;
 
     /* visual */
@@ -685,15 +690,15 @@ body {
     vertical-align: middle;
 }
 
-/* The dropdown's own divider, given room on either side. The one between
-   sections in there separates two lists; this one separates the mark from the
-   menu, which wants to read as a bigger break than that. */
+/* Runs edge to edge directly under the 50px header, which is the nav bar's
+   height - so the line lands exactly where the nav bar's own bottom edge is
+   and the two read as one rule across the screen. The separation the menu
+   needs is below it rather than around it. */
 .side-menu-divider {
-    width: 90%;
+    width: 100%;
     height: 1px;
-    margin: 14px auto 10px;
+    margin: 0 0 10px;
     background: var(--secondary-hover);
-    border-radius: 1px;
     opacity: 0.7;
 }
 
@@ -853,6 +858,10 @@ body {
     align-items: center; 
     height: 40px;
     width: 40px;
+
+    /* The picture is 30px inset 5px inside this 40px box, so it stopped 5px
+       short of the row's right edge. Same idea as .nav-menu-toggle opposite. */
+    margin-right: -5px;
     background-color: transparent;
     border-radius: 50%;
     cursor: pointer;
@@ -1080,25 +1089,31 @@ body {
     text-decoration: none;
 }
 
-/* boxes-stacked has no Light face to fall back to, so the rule below coerced
-   it into a weight where the glyph does not exist and it rendered as nothing.
-   Deferring to the icon's own style gives it the solid face it asks for, in Pro
-   and in Free alike - which is also the icon the Bundles page's own button uses.
-
-   Scoped to this one icon rather than lifting the rule for all of them: every
-   other icon in the menu does have a Light face, and they are meant to match. */
-.dropdown-link i.fa-boxes-stacked {
-    font-weight: var(--fa-style, 900);
-}
-
 .dropdown-link i{
     display: flex;
     align-items: center;
     color: white;
     /* 300 is Font Awesome Light, which is Pro-only. install/build_fa_fallback.py
        rewrites this to var(--fa-style, 900) for installs without Pro, so the
-       menu is not blank there. See the icon exception below. */
+       menu is not blank there.
+
+       This forces Light on every icon whatever face it asked for, which is
+       why the Blankee menu opts out - see .side-menu .dropdown-link i. The
+       icons here all have a Light face, so it holds for them. */
     font-weight: 300;
+}
+
+/* The menu's icons name their own face - fa-light - so the weight comes from
+   Font Awesome rather than from here: Light where Pro is installed, and
+   whatever fa-pro-fallback.css maps .fa-light onto where it is not, which is
+   this same expression against Free's own --fa-style.
+
+   The dropdown above forces 300 on every icon whatever class it carries, which
+   is what left fa-boxes-stacked rendering as nothing - there is no Light face
+   for it in Free, and the icon was never asking for one. This hands the
+   decision back to the icon. */
+.side-menu .dropdown-link i {
+    font-weight: var(--fa-style, 900);
 }
 
 .dropdown-sublink {
@@ -1515,6 +1530,21 @@ transform: scale(1.2);
     margin: 0 auto; 
 
     min-height: 32px;
+}
+
+/* The outermost icon in each row carries .nav-button's own 3px margin and 10px
+   padding, which held its glyph 13px inside the row. Cancelling the margin and
+   absorbing the padding lands the glyph on the container's edge, matching the
+   nav bar above it. Written against whatever wrapper happens to be first or
+   last, because the pages disagree about how deeply these are nested. */
+.calendarnavbuttonscontainer > :first-child .nav-button:first-child,
+.calendarnavbuttonscontainer > .nav-button:first-child {
+    margin-left: -10px;
+}
+
+.calendarnavbuttonscontainer > :last-child .nav-button:last-child,
+.calendarnavbuttonscontainer > .nav-button:last-child {
+    margin-right: -10px;
 }
 
 .nav-button-placeholder {
