@@ -89,6 +89,11 @@
      The two menus are meant to look identical, and a second copy of those
      rules would be a second thing to keep in step. -->
 <div class="side-menu-backdrop" id="sideMenuBackdrop"></div>
+<!-- Dims and blurs the page while the profile menu is open, the way a dialog
+     does. Below the nav bar rather than over it: the menu hangs off the
+     picture up there, and blurring the thing it is attached to would read as
+     the menu having come loose. -->
+<div class="profile-backdrop" id="profileBackdrop"></div>
 <nav class="side-menu" id="sideMenu" aria-label="Blankee menu" aria-hidden="true">
     <div class="side-menu-header">
         <img src="{{ url_for('static', filename='logotext.svg') }}" alt="Blankee" class="side-menu-logo">
@@ -206,6 +211,7 @@
             // Its own state rather than reading style.display back, because
             // through the closing transition the element is still displayed -
             // the same reason the overlay observer in script.js keeps a phase.
+            var backdrop = document.getElementById('profileBackdrop');
             var dropdownOpen = false;
             var dropdownTimer = null;
             var DROPDOWN_MS = 160;
@@ -225,6 +231,8 @@
                 // so height:0 on its own still leaves the 20px and 10px above
                 // and below - the menu would shrink to 30px and then be cut
                 // off by display:none rather than closing.
+                if (backdrop) { backdrop.classList.toggle('open', open); }
+
                 if (open) {
                     dropdown.style.display = 'block';
                     // Its full height including padding, measured before it is

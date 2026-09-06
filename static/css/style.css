@@ -770,6 +770,35 @@ body {
     pointer-events: auto;
 }
 
+/* The same dim and blur a dialog puts behind itself, for the profile menu.
+
+   z-index 99 puts it under the nav bar rather than over it, which is the one
+   way it differs from .side-menu-backdrop above. That menu covers the screen
+   and the bar with it; this one hangs off the picture in the bar, and blurring
+   the thing it is attached to would read as it having come loose.
+
+   No pointer-events even when open: the click that closes the menu is already
+   handled on window, and swallowing it here would take a second click to do
+   anything else on the page. */
+.profile-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 99;
+    width: 100%;
+    height: 100%;
+    background-color: var(--overlay-dim);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.16s ease;
+}
+
+.profile-backdrop.open {
+    opacity: 1;
+}
+
 /* Custom bell shake animation */
 @keyframes bell-shake {
     0%, 100% { transform: rotate(0deg); }
@@ -6237,11 +6266,22 @@ td:has(.bucket-progress-container) {
     display: block;
 }
 
-.ca-collapsed .category-btn-container.ca,
-.ca-collapsed .search-btn-container.ca,
-.ca-collapsed tbody[id^="ca-categories-body-"],
-.ca-collapsed .ca-bottom-row,
-.ca-collapsed .sidebar-group-header {
+/* The resting state of a collapsed credit account: its rows are simply not
+   displayed.
+
+   :not(.ca-animating) suspends that while the rows are shrinking, so
+   rowReveal has something to animate - display:none has no height to take
+   away. The script puts .ca-animating on both tables for the length of the
+   collapse and takes it off at the end, by which point rowReveal has hidden
+   the rows itself and these rules agree with it again.
+
+   Written this way round so the resting state is untouched: an account
+   collapsed on page load never gets .ca-animating, and hides exactly as it
+   always did with no script involved. */
+.ca-collapsed:not(.ca-animating) .category-btn-container.ca,
+.ca-collapsed:not(.ca-animating) .search-btn-container.ca,
+.ca-collapsed:not(.ca-animating) tbody[id^="ca-categories-body-"],
+.ca-collapsed:not(.ca-animating) .sidebar-group-header {
     display: none !important;
 }
 
@@ -6280,12 +6320,20 @@ td:has(.bucket-progress-container) {
     transform: rotate(0deg);
 }
 
-/* Hide .category-cell in category rows, but not in .ca-bottom-row */
-.ca-collapsed tr[data-category-id]:not(.ca-bottom-row) .category-cell {
+/* Hide .category-cell in category rows, but not in .ca-bottom-row. This is
+   what collapses the sidebar: those rows have no other cell, so a row whose
+   only cell is gone has no height left. Suspended while animating for the same
+   reason as above - the row has to keep its content to have a height to lose. */
+.ca-collapsed:not(.ca-animating) tr[data-category-id]:not(.ca-bottom-row) .category-cell {
     display: none !important;
 }
 
-/* Always show the ca-bottom-row */
+/* Always show the ca-bottom-row. It used to be listed in the hide above as
+   well and then brought back here, which worked only because the two were the
+   same specificity and this one came second. Adding :not(.ca-animating) up
+   there would have made the hide the more specific of the two and quietly
+   turned this into the loser, so the row is simply not hidden in the first
+   place. */
 .ca-collapsed .ca-bottom-row {
     display: table-row !important;
 }
