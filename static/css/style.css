@@ -15671,13 +15671,20 @@ tr.row-animating > td {
    Releasing the minimum lets the row follow its content the whole way down.
 
    Both of the dashboards' side-by-side tables get these same classes from the
-   same call, so the names and the amounts shrink in step and stay lined up. */
+   same call, so the names and the amounts shrink in step and stay lined up.
+
+   !important because the heights being released are set through the table's
+   id - `#income-categories-table td { height: 20px }` and its neighbours - and
+   an id beats the class this rule has to hang off. Nothing here can be scoped
+   per table without naming every one of them, and .main-row-dragging > td
+   already reaches for !important against the same rules for the same reason.
+   The padding and borders go with it rather than being left to chance. */
 tr.row-collapsing > td {
-    height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    border-top-width: 0;
-    border-bottom-width: 0;
+    height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    border-top-width: 0 !important;
+    border-bottom-width: 0 !important;
 }
 
 /* Someone who has asked their system for less motion gets none. The script
