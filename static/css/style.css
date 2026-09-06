@@ -1137,9 +1137,12 @@ body {
     font-weight: var(--fa-style, 900);
 }
 
+/* A shade up from the panel behind it, so an open sub-list reads as one block
+   sitting inside the menu rather than as loose rows. The panel itself is
+   --primary; these were set to the same value, which made them invisible. */
 .dropdown-sublink {
     padding-left: 30px;
-    background-color: var(--primary);  
+    background-color: var(--primary-mid);
 }
 
 /* The collapse itself is .menu-collapse now, shared with Dashboards; only the
