@@ -770,6 +770,35 @@ body {
     pointer-events: auto;
 }
 
+/* The same dim and blur a dialog puts behind itself, for the profile menu.
+
+   z-index 99 puts it under the nav bar rather than over it, which is the one
+   way it differs from .side-menu-backdrop above. That menu covers the screen
+   and the bar with it; this one hangs off the picture in the bar, and blurring
+   the thing it is attached to would read as it having come loose.
+
+   No pointer-events even when open: the click that closes the menu is already
+   handled on window, and swallowing it here would take a second click to do
+   anything else on the page. */
+.profile-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 99;
+    width: 100%;
+    height: 100%;
+    background-color: var(--overlay-dim);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.16s ease;
+}
+
+.profile-backdrop.open {
+    opacity: 1;
+}
+
 /* Custom bell shake animation */
 @keyframes bell-shake {
     0%, 100% { transform: rotate(0deg); }
@@ -1079,6 +1108,23 @@ body {
     cursor: default;
     backdrop-filter: blur(20px);
     backdrop-filter: blur(20px);
+
+    /* Opens by growing taller rather than by scaling, so the rows stay their
+       own size the whole way and are simply revealed. height cannot animate to
+       auto, so nav.html measures the menu and transitions to that many pixels,
+       then releases it - the transition is here, the numbers are there.
+
+       overflow hidden is what makes that a reveal rather than an overflow, and
+       it can stay on: nothing in this menu is positioned outside it.
+
+       The padding goes with it. Every element here is border-box, so height:0
+       still leaves the 20px and 10px above and below - the menu could only
+       shrink to 30px before display:none took the rest, which read as it
+       disappearing rather than closing. */
+    overflow: hidden;
+    transition: height 0.16s ease,
+                padding-top 0.16s ease,
+                padding-bottom 0.16s ease;
 }
 
 .dropdown-link {
@@ -1137,9 +1183,12 @@ body {
     font-weight: var(--fa-style, 900);
 }
 
+/* A shade up from the panel behind it, so an open sub-list reads as one block
+   sitting inside the menu rather than as loose rows. The panel itself is
+   --primary; these were set to the same value, which made them invisible. */
 .dropdown-sublink {
     padding-left: 30px;
-    background-color: var(--primary);  
+    background-color: var(--primary-mid);
 }
 
 /* The collapse itself is .menu-collapse now, shared with Dashboards; only the
@@ -1502,7 +1551,11 @@ transform: scale(1.2);
     /* positioning */
     position: sticky;
     top: 50px;
-    z-index: 99;
+    /* One below .profile-backdrop, so the profile menu blurs this bar along
+       with the rest of the page. They were both 99 and this one is later in
+       the document, so it painted over the backdrop and stayed sharp. Still
+       above the page it sticks over, and still below the nav bar at 100. */
+    z-index: 98;
 
     /* box model */
     padding: 10px;
@@ -6217,11 +6270,22 @@ td:has(.bucket-progress-container) {
     display: block;
 }
 
-.ca-collapsed .category-btn-container.ca,
-.ca-collapsed .search-btn-container.ca,
-.ca-collapsed tbody[id^="ca-categories-body-"],
-.ca-collapsed .ca-bottom-row,
-.ca-collapsed .sidebar-group-header {
+/* The resting state of a collapsed credit account: its rows are simply not
+   displayed.
+
+   :not(.ca-animating) suspends that while the rows are shrinking, so
+   rowReveal has something to animate - display:none has no height to take
+   away. The script puts .ca-animating on both tables for the length of the
+   collapse and takes it off at the end, by which point rowReveal has hidden
+   the rows itself and these rules agree with it again.
+
+   Written this way round so the resting state is untouched: an account
+   collapsed on page load never gets .ca-animating, and hides exactly as it
+   always did with no script involved. */
+.ca-collapsed:not(.ca-animating) .category-btn-container.ca,
+.ca-collapsed:not(.ca-animating) .search-btn-container.ca,
+.ca-collapsed:not(.ca-animating) tbody[id^="ca-categories-body-"],
+.ca-collapsed:not(.ca-animating) .sidebar-group-header {
     display: none !important;
 }
 
@@ -6260,12 +6324,20 @@ td:has(.bucket-progress-container) {
     transform: rotate(0deg);
 }
 
-/* Hide .category-cell in category rows, but not in .ca-bottom-row */
-.ca-collapsed tr[data-category-id]:not(.ca-bottom-row) .category-cell {
+/* Hide .category-cell in category rows, but not in .ca-bottom-row. This is
+   what collapses the sidebar: those rows have no other cell, so a row whose
+   only cell is gone has no height left. Suspended while animating for the same
+   reason as above - the row has to keep its content to have a height to lose. */
+.ca-collapsed:not(.ca-animating) tr[data-category-id]:not(.ca-bottom-row) .category-cell {
     display: none !important;
 }
 
-/* Always show the ca-bottom-row */
+/* Always show the ca-bottom-row. It used to be listed in the hide above as
+   well and then brought back here, which worked only because the two were the
+   same specificity and this one came second. Adding :not(.ca-animating) up
+   there would have made the hide the more specific of the two and quietly
+   turned this into the loser, so the row is simply not hidden in the first
+   place. */
 .ca-collapsed .ca-bottom-row {
     display: table-row !important;
 }
@@ -9735,6 +9807,149 @@ transform: scale(1.2);
        them off centre. */
     .row-actions > button {
         margin-right: 0;
+    }
+}
+
+/* Opening ---------------------------------------------------------------------
+
+   A dialog grows out of whatever was last clicked, which is the control that
+   opened it, while its sheet fades the page behind it.
+
+   Driven by @keyframes on the dialog rather than by script, because a CSS
+   animation plays whenever an element goes from display:none to shown - and
+   every overlay in this app is opened exactly that way, by an inline style
+   rather than a class. So nothing at those call sites had to change, and an
+   overlay added later gets this for free by carrying one of these classes.
+
+   The origin comes from two custom properties that script.js sets on :root
+   from the last pointer or keyboard activation. The 50% terms resolve against
+   the dialog's own box and the viewport terms against the screen, so
+   `click - 50vw + 50%` is the click's distance from the dialog's left edge -
+   exact for a dialog centred horizontally, which margin:auto makes all of
+   them. Vertically it is approximate, since a tall dialog starts at the top
+   rather than centring; close enough for a 160ms scale, and it falls back to
+   the middle of the screen when nothing has been clicked.
+
+   Closing is not here. An element set to display:none is gone on the same
+   frame, so animating it out means holding the element open past the moment
+   the code that closed it thinks it is shut - which is a change at every one
+   of those call sites, not a stylesheet. */
+@keyframes modal-grow-in {
+    from { opacity: 0; transform: scale(0.94); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes modal-sheet-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.modal,
+.footer-modal,
+.dashboard-d-modal,
+.modal-setup-profile,
+.category-edit-modal,
+.center-modal-overlay,
+.test-purchase-modal,
+.bundle-input-overlay,
+.category-input-overlay {
+    animation: modal-sheet-in 0.16s ease-out;
+}
+
+.modal-content,
+.modal-content-center,
+.alert-modal-content,
+.center-modal-content,
+.modal-content-setup-profile,
+.modal-content-category-recommendations,
+.footer-modal-content,
+.dashboard-d-modal-content,
+.category-edit-modal-content,
+.add-credit-account-modal-content,
+.change-password-modal-content,
+.test-purchase-modal-content {
+    transform-origin:
+        calc(var(--open-x, 50vw) - 50vw + 50%)
+        calc(var(--open-y, 50vh) - 50vh + 50%);
+    animation: modal-grow-in 0.16s ease-out;
+}
+
+/* Closing ---------------------------------------------------------------------
+
+   The mirror of the above, played while script.js holds the overlay open past
+   the moment it was told to hide - see "Closing an overlay" there.
+
+   .modal-closing sits on the sheet, so one list of dialog classes covers every
+   sheet rather than needing a rule per pairing. Both selectors are a class
+   deeper than the opening ones they replace, so the out animation wins while
+   it runs without either being marked important.
+
+   forwards, so the last frame holds until the element is actually hidden
+   rather than snapping back to full opacity for one frame first. */
+@keyframes modal-grow-out {
+    from { opacity: 1; transform: scale(1); }
+    to   { opacity: 0; transform: scale(0.94); }
+}
+
+@keyframes modal-sheet-out {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+}
+
+.modal-closing {
+    animation: modal-sheet-out 0.14s ease-in forwards;
+}
+
+.modal-closing .modal-content,
+.modal-closing .modal-content-center,
+.modal-closing .alert-modal-content,
+.modal-closing .center-modal-content,
+.modal-closing .modal-content-setup-profile,
+.modal-closing .modal-content-category-recommendations,
+.modal-closing .footer-modal-content,
+.modal-closing .dashboard-d-modal-content,
+.modal-closing .category-edit-modal-content,
+.modal-closing .add-credit-account-modal-content,
+.modal-closing .change-password-modal-content,
+.modal-closing .test-purchase-modal-content {
+    animation: modal-grow-out 0.14s ease-in forwards;
+}
+
+/* The profile dropdown is the exception: it grows taller rather than scaling,
+   and its two declarations live with the rest of .dropdown-content rather than
+   here, so there is one rule for that selector instead of two. */
+
+@media (prefers-reduced-motion: reduce) {
+    .modal,
+    .footer-modal,
+    .dashboard-d-modal,
+    .modal-setup-profile,
+    .category-edit-modal,
+    .center-modal-overlay,
+    .test-purchase-modal,
+    .bundle-input-overlay,
+    .category-input-overlay,
+    .modal-content,
+    .modal-content-center,
+    .alert-modal-content,
+    .center-modal-content,
+    .modal-content-setup-profile,
+    .modal-content-category-recommendations,
+    .footer-modal-content,
+    .dashboard-d-modal-content,
+    .category-edit-modal-content,
+    .add-credit-account-modal-content,
+    .change-password-modal-content,
+    .test-purchase-modal-content,
+    .modal-closing {
+        animation: none;
+    }
+
+    /* The dropdown's is a transition rather than an animation. nav.html still
+       sets the heights; with no transition to run they simply apply, which is
+       the instant open and close this asks for. */
+    .dropdown-content {
+        transition: none;
     }
 }
 
@@ -14124,18 +14339,6 @@ transform: scale(1.2);
     flex-direction: column;
     max-height: 100%;
     box-shadow: 0 20px 60px var(--shadow-xl);
-    animation: modalSlideIn 0.25s ease-out;
-}
-
-@keyframes modalSlideIn {
-    from {
-        opacity: 0;
-        transform: translateY(-20px) scale(0.95);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
 }
 
 .test-purchase-modal-header {
@@ -15485,37 +15688,104 @@ transform: scale(1.2);
    something is animating. */
 .row-reveal-wrap {
     overflow: hidden;
-    /* The fade is what keeps the content attached to the row. Height alone
-       clips the text where the closing edge crosses it, which reads as the row
-       being cut through rather than going away. Fading as it shrinks means the
-       text leaves with the edge instead of being sliced by it.
+    /* Height alone, at the profile dropdown's timing, because a row should
+       close the way that menu does: the content keeps its own size and is
+       clipped as the edge crosses it.
 
-       ease-in-out rather than ease: the row should start and finish gently, so
-       a group of them settles rather than snapping to a stop. */
-    transition: height 220ms ease-in-out, opacity 180ms ease-in-out;
-}
-
-tr.row-collapsing > td > .row-reveal-wrap {
-    opacity: 0;
+       It used to fade as well, on the reasoning that a fade keeps the text
+       attached to the row rather than letting the edge slice through it. Seen
+       next to the dropdown that reads as the text doing something of its own
+       while the row does something else, which is worse than the slicing it
+       was avoiding. */
+    transition: height 160ms ease;
 }
 
 /* The padding is on the cell, not the wrapper, so it has to be animated
-   separately or the row keeps that much height after the content has gone. */
-/* The same curve and duration as the wrapper, or the padding finishes at a
-   different moment from the content and the row lands in two steps. */
+   separately or the row keeps that much height after the content has gone -
+   the same reason the profile dropdown collapses its own padding alongside its
+   height. The same curve and duration as the wrapper, or the padding finishes
+   at a different moment from the content and the row lands in two steps. */
 tr.row-animating > td {
-    transition: padding-top 220ms ease-in-out, padding-bottom 220ms ease-in-out,
-                border-top-width 220ms ease-in-out,
-                border-bottom-width 220ms ease-in-out;
+    transition: height 160ms ease,
+                padding-top 160ms ease, padding-bottom 160ms ease,
+                border-top-width 160ms ease,
+                border-bottom-width 160ms ease;
 }
 
-/* Padding and borders both, or the row keeps that much height after its
-   content has gone and leaves a line across the gap it is closing. */
+/* Opening runs longer than closing. A row coming back is the direction that
+   had no animation at all until recently, and at the closing speed it is hard
+   to tell a working one from none. Both numbers are also in script.js, which
+   has to know how long to wait before tidying up.
+
+   height: 0 for the whole of the opening, and this is what makes opening work
+   at all. .row-collapsing comes off as the animation starts, which hands the
+   cell back its `height: 20px` - a minimum, not a height - in one frame. The
+   cell does not animate it: a row that has just come back from display:none
+   has no before-value for its own height, so that property never transitions
+   on the way in, only on the way out. Measured, not guessed: a transition
+   probe on a real row reports four transitions closing and only the wrapper's
+   opening.
+
+   So the row stood at its full height from the first frame while the wrapper
+   grew from nothing inside it, clipped and invisible. Holding the minimum at
+   zero until finish() takes .row-opening off leaves the row's height to the
+   wrapper, which is the thing that does animate. By then the wrapper is the
+   height the content needs, so releasing it changes nothing. */
+tr.row-opening > td {
+    height: 0 !important;
+    /* Padding and borders held down for the whole opening as well, so the
+       row's height is exactly its wrapper's height and the animation lands on
+       the number it was aimed at. .row-collapsing comes off as the open
+       starts, and letting these come back with it put the row above its
+       final height for the last part of the way. */
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    border-top-width: 0 !important;
+    border-bottom-width: 0 !important;
+}
+
+/* The duration override needs .row-animating beside it, and that is not
+   tidiness. transition-duration on its own leaves transition-property at its
+   initial `all`, so this rule by itself declared a transition on every
+   property of the cell - and .row-opening is added while the cell is still at
+   its 20px minimum, so setting it to 0 became an animation running down while
+   the wrapper ran up. The row takes whichever is taller: 20 at the start, 10.3
+   where the two crossed, 20 at the end. That was the bounce.
+   .row-animating is what names the properties, so the duration only applies
+   once it is there. */
+tr.row-animating.row-opening > td {
+    transition-duration: 160ms;
+}
+
+tr.row-opening > td > .row-reveal-wrap {
+    transition-duration: 160ms;
+}
+
+/* Height, padding and borders all three, or the row keeps that much of itself
+   after its content has gone.
+
+   The height is the one that was missing, and it is why the row used to blink.
+   These cells carry `height: 20px`, which on a table cell is a minimum rather
+   than a height - see "Edit mode must not change the height of a category row"
+   for the rest of that story. So the row could only shrink to 20px however far
+   the content collapsed, and display:none took that last step in one frame.
+   Releasing the minimum lets the row follow its content the whole way down.
+
+   Both of the dashboards' side-by-side tables get these same classes from the
+   same call, so the names and the amounts shrink in step and stay lined up.
+
+   !important because the heights being released are set through the table's
+   id - `#income-categories-table td { height: 20px }` and its neighbours - and
+   an id beats the class this rule has to hang off. Nothing here can be scoped
+   per table without naming every one of them, and .main-row-dragging > td
+   already reaches for !important against the same rules for the same reason.
+   The padding and borders go with it rather than being left to chance. */
 tr.row-collapsing > td {
-    padding-top: 0;
-    padding-bottom: 0;
-    border-top-width: 0;
-    border-bottom-width: 0;
+    height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    border-top-width: 0 !important;
+    border-bottom-width: 0 !important;
 }
 
 /* Someone who has asked their system for less motion gets none. The script
