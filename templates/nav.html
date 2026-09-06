@@ -256,11 +256,20 @@
         // The collapsing rows - Dashboards, Manage Recurring - all behave the
         // same way, so they say what they open with data-menu-collapse rather
         // than each needing a handler of its own here.
+        //
+        // One at a time: opening a row closes whichever other one was open, so
+        // the menu never grows past what a short screen can show. Closing the
+        // row you are already on still just closes it.
         document.querySelectorAll('[data-menu-collapse]').forEach(function (btn) {
             btn.addEventListener('click', function (e) {
                 e.preventDefault();
                 var target = document.getElementById(btn.getAttribute('data-menu-collapse'));
-                if (target) { target.classList.toggle('expanded'); }
+                if (!target) { return; }
+                var opening = !target.classList.contains('expanded');
+                document.querySelectorAll('.menu-collapse.expanded').forEach(function (other) {
+                    if (other !== target) { other.classList.remove('expanded'); }
+                });
+                target.classList.toggle('expanded', opening);
             });
         });
     });
