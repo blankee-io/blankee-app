@@ -1086,9 +1086,16 @@ body {
        then releases it - the transition is here, the numbers are there.
 
        overflow hidden is what makes that a reveal rather than an overflow, and
-       it can stay on: nothing in this menu is positioned outside it. */
+       it can stay on: nothing in this menu is positioned outside it.
+
+       The padding goes with it. Every element here is border-box, so height:0
+       still leaves the 20px and 10px above and below - the menu could only
+       shrink to 30px before display:none took the rest, which read as it
+       disappearing rather than closing. */
     overflow: hidden;
-    transition: height 0.16s ease;
+    transition: height 0.16s ease,
+                padding-top 0.16s ease,
+                padding-bottom 0.16s ease;
 }
 
 .dropdown-link {

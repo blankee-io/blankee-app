@@ -210,26 +210,43 @@
             var dropdownTimer = null;
             var DROPDOWN_MS = 160;
 
+            function collapse() {
+                dropdown.style.height = '0px';
+                dropdown.style.paddingTop = '0px';
+                dropdown.style.paddingBottom = '0px';
+            }
+
             function setDropdown(open) {
                 if (open === dropdownOpen) { return; }
                 dropdownOpen = open;
                 clearTimeout(dropdownTimer);
 
+                // Padding as well as height. Everything here is border-box,
+                // so height:0 on its own still leaves the 20px and 10px above
+                // and below - the menu would shrink to 30px and then be cut
+                // off by display:none rather than closing.
                 if (open) {
                     dropdown.style.display = 'block';
-                    dropdown.style.height = '0px';
+                    // Its full height including padding, measured before it is
+                    // collapsed and while nothing has been painted yet.
+                    var target = dropdown.offsetHeight;
+                    collapse();
                     void dropdown.offsetHeight;   // start from 0, not from auto
-                    dropdown.style.height = dropdown.scrollHeight + 'px';
+                    dropdown.style.height = target + 'px';
+                    dropdown.style.paddingTop = '';
+                    dropdown.style.paddingBottom = '';
                     dropdownTimer = setTimeout(function () {
                         dropdown.style.height = '';
                     }, DROPDOWN_MS + 20);
                 } else {
-                    dropdown.style.height = dropdown.scrollHeight + 'px';
+                    dropdown.style.height = dropdown.offsetHeight + 'px';
                     void dropdown.offsetHeight;
-                    dropdown.style.height = '0px';
+                    collapse();
                     dropdownTimer = setTimeout(function () {
                         dropdown.style.display = 'none';
                         dropdown.style.height = '';
+                        dropdown.style.paddingTop = '';
+                        dropdown.style.paddingBottom = '';
                     }, DROPDOWN_MS + 20);
                 }
             }
