@@ -8113,6 +8113,43 @@ def _next_cycle_date_after(day_setting, after):
     return None
 
 
+def _previous_cycle_date_before(day_setting, before):
+    """The last date strictly before `before` on this day of the month."""
+    if not day_setting:
+        return None
+    year, month = before.year, before.month
+    for _ in range(3):
+        day = _cycle_day_of(day_setting, year, month)
+        if day is not None:
+            candidate = date(year, month, day)
+            if candidate < before:
+                return candidate
+        month -= 1
+        if month < 1:
+            month, year = 12, year - 1
+    return None
+
+
+def _interest_lookback_start(day_setting, from_date):
+    """How far back a walk has to start to charge `from_date` onwards properly.
+
+    A charge needs two things behind it: the balances of the cycle it is drawn
+    from, and the statement before that, whose settlement decides whether it is
+    charged at all. A walk beginning at from_date has neither, so its first
+    statement is treated as the first one ever and skipped.
+
+    Three statement dates back covers both with a period to spare, and bounds
+    the extra work at about three months whatever else changed.
+    """
+    probe = from_date
+    for _ in range(3):
+        earlier = _previous_cycle_date_before(day_setting, probe)
+        if earlier is None:
+            return None
+        probe = earlier
+    return probe
+
+
 def _daily_interest_rate(interest_rate):
     """APR as a daily periodic rate, the way a card issuer quotes it.
 
@@ -8177,14 +8214,34 @@ class _InterestCycle:
         if self.prev_due_date is not None and when <= self.prev_due_date:
             self.payments_toward_prev += payments
 
-    def charge_for(self, when, balance, already_confirmed):
+    def charge_for(self, when, balance, already_confirmed, replay=None):
         """The interest to post on `when`, or 0.0 if it is not a statement date.
 
         Call after observe() for the same day: the statement balance includes
         that day's activity, and the charge is posted on top of it.
+
+        `replay` posts a charge that is already on record instead of deriving
+        one. A walk starting partway through the timeline begins earlier than
+        it was asked to, purely to get a complete cycle behind its first real
+        statement - and over that run-up it has no business recomputing
+        anything. It replays what is already there, so the balance it carries
+        into the requested range is the one the user has been looking at.
+
+        Without this the run-up's own first statement looked like the first
+        statement ever, went uncharged, and every balance after it came out low
+        by that charge - compounding, from an edit that never touched it.
         """
         if not self.active or not _falls_on_cycle_day(self.statement_day, when):
             return 0.0
+
+        if replay is not None:
+            # The cycle still closes on it: a replayed charge is part of the
+            # statement balance the next cycle is judged against.
+            self.prev_statement_balance = balance + replay
+            self.prev_due_date = _next_cycle_date_after(self.due_day, when)
+            self.payments_toward_prev = 0.0
+            self.balance_sum = 0.0
+            return replay
 
         settled = (self.prev_statement_balance is not None
                    and self.prev_statement_balance > 0
@@ -8208,7 +8265,8 @@ class _InterestCycle:
         return charge
 
 
-def _reconcile_interest_entries(user_id, account_id, category_id, projected):
+def _reconcile_interest_entries(user_id, account_id, category_id, projected,
+                                window_start=None, window_end=None):
     """Make the card's Interest Charge entries match what the walk projected.
 
     The balance already includes these charges - this is what puts them on the
@@ -8260,13 +8318,30 @@ def _reconcile_interest_entries(user_id, account_id, category_id, projected):
                                entry_id=existing.get('id'), is_bucket=True,
                                original_amount=amount,
                                match_entry_id=existing.get('id'))
-        set_bucket_record_amount('recurring_c_expense_buckets', category_id,
-                                 when, amount, user_id)
+        # An entry with no bucket record behind it never reaches the evening
+        # prompt, so if the record has gone missing - the cycle was switched
+        # off and back on, say, which removes the entries - restate becomes
+        # create. set_bucket_record_amount says so by returning False.
+        if not set_bucket_record_amount('recurring_c_expense_buckets', category_id,
+                                        when, amount, user_id):
+            create_bucket_record('c_expense_entries', user_id, category_id,
+                                 when, amount, account_id=account_id)
 
-    # Whatever is left was projected once and is not any more - the rate
-    # changed, the balance was paid off, the cycle moved. It is a forecast that
-    # no longer holds, so it goes.
+    # Whatever is left inside the window was projected once and is not any
+    # more - the rate changed, the balance was paid off, the cycle moved. It is
+    # a forecast that no longer holds, so it goes.
+    #
+    # ONLY inside the window. A recalculation is usually asked to start from a
+    # recent date, so `projected` describes that stretch of the timeline and
+    # says nothing at all about what came before it. Treating "not projected"
+    # as "no longer holds" across the whole history deleted every earlier charge
+    # on the card - which from the outside looked like editing something today
+    # emptying the past.
     for when, stale in projected_buckets.items():
+        if window_start is not None and when < window_start:
+            continue
+        if window_end is not None and when > window_end:
+            continue
         _delete_entry_in_redis('c_expense_entries', user_id, category_id,
                                when, when, specific_entry_id=stale.get('id'))
 
@@ -8324,7 +8399,32 @@ def update_daily_ca_totals(user_id, start_date):
                 continue
                 
             min_date, max_date = date_range['min_date'], date_range['max_date']
-            
+
+            # The range the caller asked about. Interest is only reconciled
+            # inside this, because it is the only stretch of the timeline this
+            # pass is entitled to have an opinion on - see the reconciler.
+            requested_min = min_date
+
+            # For a card projecting interest, start earlier than asked. The
+            # first statement in the requested range needs a whole cycle behind
+            # it and a prior statement to be judged by, and a walk beginning at
+            # the requested date has neither - so that charge would compute as
+            # zero and then be removed as though it no longer applied.
+            account_row = accounts_by_id.get(account_id) or {}
+            cycle = _InterestCycle(account_row.get('statement_day'),
+                                   account_row.get('payment_due_day'),
+                                   account_row.get('interest_rate'))
+            if cycle.active:
+                lookback = _interest_lookback_start(
+                    account_row.get('statement_day'), min_date)
+                if lookback and lookback < min_date:
+                    cursor.execute(
+                        "SELECT MIN(date) AS earliest FROM c_a_balances_d "
+                        " WHERE account_id = %s", (account_id,))
+                    row = cursor.fetchone()
+                    earliest = row['earliest'] if row else None
+                    min_date = max(lookback, earliest) if earliest else lookback
+
             # Get all dates within the range
             cursor.execute("""
                 SELECT date FROM c_a_balances_d
@@ -8389,6 +8489,9 @@ def update_daily_ca_totals(user_id, start_date):
             # Statement dates whose charge the user has already answered. Those
             # cycles are not recomputed - the figure below is theirs, not ours.
             confirmed_interest_dates = set()
+            # The projected charges already on record, for replaying the run-up
+            # to a partial walk rather than recomputing it. See charge_for.
+            stored_interest = {}
             for entry in c_expense_entries:
                 entry_date = entry.get('date')
                 if isinstance(entry_date, str):
@@ -8412,6 +8515,9 @@ def update_daily_ca_totals(user_id, start_date):
                     if (interest_category_id is not None
                             and entry_category_id == interest_category_id):
                         if int(entry.get('is_bucket') or 0) == 1:
+                            stored_interest[entry_date] = (
+                                stored_interest.get(entry_date, 0.0)
+                                + float(entry.get('amount', 0)))
                             continue
                         confirmed_interest_dates.add(entry_date)
                     expense_by_date[entry_date] = expense_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
@@ -8448,11 +8554,8 @@ def update_daily_ca_totals(user_id, start_date):
             # Interest is worked out here rather than anywhere else because
             # this is the only place the numbers exist: a charge is a function
             # of every balance in the cycle before it, and those balances are
-            # produced by this loop. See _InterestCycle.
-            account_row = accounts_by_id.get(account_id) or {}
-            cycle = _InterestCycle(account_row.get('statement_day'),
-                                   account_row.get('payment_due_day'),
-                                   account_row.get('interest_rate'))
+            # produced by this loop. See _InterestCycle. The cycle itself was
+            # built above, where it decided how far back this walk had to go.
             projected_interest = {}
 
             for current_date in all_dates:
@@ -8463,13 +8566,21 @@ def update_daily_ca_totals(user_id, start_date):
                 # The statement balance includes the day's activity, and the
                 # charge is posted on top of it - so observe first, then close.
                 cycle.observe(current_date, balance, total_payments)
+                # Before the date this pass was actually asked about, replay
+                # what is already on record. A confirmed charge is in the
+                # expenses above and so replays as nothing extra.
+                replay = (stored_interest.get(current_date, 0.0)
+                          if current_date < requested_min else None)
                 charge = cycle.charge_for(
                     current_date, balance,
-                    current_date in confirmed_interest_dates)
+                    current_date in confirmed_interest_dates, replay=replay)
                 if charge:
-                    projected_interest[current_date] = charge
                     total_expenses += charge
                     balance += charge
+                    # Only the requested range is reconciled, so only it is
+                    # collected. A replayed charge is already an entry.
+                    if current_date >= requested_min:
+                        projected_interest[current_date] = charge
 
                 redis_updates.append({
                     'account_id': account_id,
@@ -8491,7 +8602,8 @@ def update_daily_ca_totals(user_id, start_date):
             # while this cursor is mid-walk would nest queries inside the loop
             # that is still reading from it.
             interest_to_write.append(
-                (account_id, interest_category_id, projected_interest))
+                (account_id, interest_category_id, projected_interest,
+                 requested_min, max_date))
             
             # Store for later aggregation
             if redis_updates:
@@ -8506,9 +8618,10 @@ def update_daily_ca_totals(user_id, start_date):
     # The balances are written; now make the entries say the same thing. Outside
     # the connection block so the reconciler gets its own, rather than reusing a
     # cursor that has just finished walking.
-    for account_id, category_id, projected in interest_to_write:
+    for account_id, category_id, projected, window_start, window_end in interest_to_write:
         try:
-            _reconcile_interest_entries(user_id, account_id, category_id, projected)
+            _reconcile_interest_entries(user_id, account_id, category_id, projected,
+                                        window_start, window_end)
         except Exception as e:
             # The balance is already right, which is the part a wrong number
             # would show up in. A missing entry is visible and self-correcting
