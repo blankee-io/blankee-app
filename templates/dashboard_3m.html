@@ -5342,6 +5342,13 @@
                             if (typeof refreshNotificationBadge === 'function') {
                                 refreshNotificationBadge();
                             }
+                            // A card's balance carries forward: a payment
+                            // changes every date after it, not just the week it
+                            // was entered in. The line below drops one week, so
+                            // when the server says it recalculated a card the
+                            // whole credit cache goes instead - the same thing
+                            // an edit on the card itself already does.
+                            if (response.ca_recalculated) { batchCaBalancesCache = {}; }
                             // Invalidate batch cache for the affected date so fresh data is fetched
                             invalidateBatchCacheForDate(endDate);
                             // Also invalidate cache for any bucket dates that were affected (may be in different months)
@@ -5533,6 +5540,13 @@
                             if (typeof refreshNotificationBadge === 'function') {
                                 refreshNotificationBadge();
                             }
+                            // A card's balance carries forward: a payment
+                            // changes every date after it, not just the week it
+                            // was entered in. The line below drops one week, so
+                            // when the server says it recalculated a card the
+                            // whole credit cache goes instead - the same thing
+                            // an edit on the card itself already does.
+                            if (response.ca_recalculated) { batchCaBalancesCache = {}; }
                             // Invalidate batch cache for the affected date so fresh data is fetched
                             invalidateBatchCacheForDate(endDate);
                             // Also invalidate cache for any bucket dates that were affected (may be in different months)
