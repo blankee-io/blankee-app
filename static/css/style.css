@@ -17633,7 +17633,8 @@ tr[data-collapsed] {
 }
 
 .app-lockup-large .app-by img {
-    height: 25px;
+    /* The same ratio to its own 20px "by" as the pair above. */
+    height: 34px;
 }
 
 /* On the nav bar and in the menu header, where the ground is teal. The name
@@ -17644,9 +17645,10 @@ tr[data-collapsed] {
 }
 
 .app-lockup-nav .app-wordmark-img {
-    /* A touch under .nav-logo's 38px: the credit sits beside it now, and the
-       two together have to fit the same 50px bar. */
-    height: 32px;
+    /* Exactly .nav-logo's height. An app's wordmark stands where Blankee's
+       does, so it has to be the same size as it - anything else reads as a
+       different rank rather than a different app. Keep the two in step. */
+    height: 38px;
 }
 
 .app-lockup-nav .app-wordmark {
@@ -17662,7 +17664,11 @@ tr[data-collapsed] {
 }
 
 .app-lockup-nav .app-by img {
-    height: 14px;
+    /* Sized against the "by" beside it, not to a round number. The footer
+       works this out in full: "blankee" is 0.434 of its 500-unit box, Nunito's
+       cap height is near 0.705em, and matching the two puts the image at about
+       1.7x the text - 22px against 12px there. The same ratio here. */
+    height: 19px;
 }
 
 /* One row per sibling app in the admin console, named the way the menus name
