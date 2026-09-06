@@ -15687,6 +15687,19 @@ transform: scale(1.2);
    The wrapper is added and removed by the script, so it exists only while
    something is animating. */
 .row-reveal-wrap {
+    /* The content sits in the middle of the wrapper, because that is where the
+       cell puts it once the wrapper is gone - these cells are vertical-align:
+       middle. As a plain block the content stayed at the top all the way
+       through and then dropped to the centre at the end, which is a jump at
+       exactly the moment the row is meant to have finished moving.
+
+       A column flex rather than align-items on a row flex: children stay
+       stacked and stretched to the full width, the way blocks are, so a
+       right-aligned amount stays against the right edge. Only the group of
+       them is centred. */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
     overflow: hidden;
     /* Height alone, at the profile dropdown's timing, because a row should
        close the way that menu does: the content keeps its own size and is
@@ -15732,7 +15745,9 @@ tr.row-animating > td {
    wrapper, which is the thing that does animate. By then the wrapper is the
    height the content needs, so releasing it changes nothing. */
 tr.row-opening > td {
-    height: 0 !important;
+    /* auto rather than 0, for the reason given on tr.row-collapsing above:
+       these cells are blocks under 600px, where 0 is a limit and not a floor. */
+    height: auto !important;
     /* Padding and borders held down for the whole opening as well, so the
        row's height is exactly its wrapper's height and the animation lands on
        the number it was aimed at. .row-collapsing comes off as the open
@@ -15781,7 +15796,13 @@ tr.row-opening > td > .row-reveal-wrap {
    already reaches for !important against the same rules for the same reason.
    The padding and borders go with it rather than being left to chance. */
 tr.row-collapsing > td {
-    height: 0 !important;
+    /* auto, not 0. On a table cell `height` is a minimum, so either would let
+       the wrapper drive the row - but under 600px these cells compute to
+       display: flow-root, and on a block box height is a limit rather than a
+       floor. `height: 0` clamped the cell shut there and the wrapper animated
+       inside a box that could not grow, so nothing moved. auto means "as tall
+       as your content" to both kinds of box, which is the wrapper either way. */
+    height: auto !important;
     padding-top: 0 !important;
     padding-bottom: 0 !important;
     border-top-width: 0 !important;

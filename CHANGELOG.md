@@ -8,6 +8,17 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.24.1 — 2026-09-06
+
+### Fixed
+- **Collapsing a group or a credit account animates on a phone too.** On a
+  narrow screen the category names simply appeared and disappeared while the
+  amounts beside them slid — the two halves of the same row behaving
+  differently. Both now open and close together, at either width.
+- **A category name no longer starts at the top of its row and drops to the
+  middle** as the row finishes opening. Most noticeable on a phone, where a
+  long name wraps and the row is twice as tall as the text in it.
+
 ## 1.24.0 — 2026-09-06
 
 ### Added
