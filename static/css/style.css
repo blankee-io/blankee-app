@@ -15654,14 +15654,26 @@ transform: scale(1.2);
    height. The same curve and duration as the wrapper, or the padding finishes
    at a different moment from the content and the row lands in two steps. */
 tr.row-animating > td {
-    transition: padding-top 160ms ease, padding-bottom 160ms ease,
+    transition: height 160ms ease,
+                padding-top 160ms ease, padding-bottom 160ms ease,
                 border-top-width 160ms ease,
                 border-bottom-width 160ms ease;
 }
 
-/* Padding and borders both, or the row keeps that much height after its
-   content has gone and leaves a line across the gap it is closing. */
+/* Height, padding and borders all three, or the row keeps that much of itself
+   after its content has gone.
+
+   The height is the one that was missing, and it is why the row used to blink.
+   These cells carry `height: 20px`, which on a table cell is a minimum rather
+   than a height - see "Edit mode must not change the height of a category row"
+   for the rest of that story. So the row could only shrink to 20px however far
+   the content collapsed, and display:none took that last step in one frame.
+   Releasing the minimum lets the row follow its content the whole way down.
+
+   Both of the dashboards' side-by-side tables get these same classes from the
+   same call, so the names and the amounts shrink in step and stay lined up. */
 tr.row-collapsing > td {
+    height: 0;
     padding-top: 0;
     padding-bottom: 0;
     border-top-width: 0;
