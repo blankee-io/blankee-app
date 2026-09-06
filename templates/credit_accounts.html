@@ -62,6 +62,8 @@
                             <tr data-account-id="{{ account.id }}" 
                                 data-name="{{ account.name }}" 
                                 data-interest="{{ account.interest_rate }}"
+                                data-statement-day="{{ account.statement_day or '' }}"
+                                data-due-day="{{ account.payment_due_day or '' }}"
                                 data-type="{% if account.is_card %}card{% elif account.is_line %}line{% else %}other{% endif %}"
                                 data-recurring="{{ 'true' if recurring_info.get('enabled') else 'false' }}"
                                 data-payment-amount="{{ recurring_info.get('amount', 0) }}"
@@ -154,6 +156,92 @@
                     </select>
                 </div>
                 <div class="footer-form-group">
+                    <label for="credit-account-statement-day">Statement closes on:</label>
+                    <select id="credit-account-statement-day" name="statement_day">
+                        <option value="">Not set</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                            <option value="9">9</option>
+                            <option value="10">10</option>
+                            <option value="11">11</option>
+                            <option value="12">12</option>
+                            <option value="13">13</option>
+                            <option value="14">14</option>
+                            <option value="15">15</option>
+                            <option value="16">16</option>
+                            <option value="17">17</option>
+                            <option value="18">18</option>
+                            <option value="19">19</option>
+                            <option value="20">20</option>
+                            <option value="21">21</option>
+                            <option value="22">22</option>
+                            <option value="23">23</option>
+                            <option value="24">24</option>
+                            <option value="25">25</option>
+                            <option value="26">26</option>
+                            <option value="27">27</option>
+                            <option value="28">28</option>
+                            <option value="29">29</option>
+                            <option value="30">30</option>
+                            <option value="31">31</option>
+                        <option value="LAST_DAY">Last day of the month</option>
+                    </select>
+                </div>
+                <div class="footer-form-group">
+                    <label for="credit-account-due-day">Payment due on:</label>
+                    <select id="credit-account-due-day" name="payment_due_day">
+                        <option value="">Not set</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                            <option value="9">9</option>
+                            <option value="10">10</option>
+                            <option value="11">11</option>
+                            <option value="12">12</option>
+                            <option value="13">13</option>
+                            <option value="14">14</option>
+                            <option value="15">15</option>
+                            <option value="16">16</option>
+                            <option value="17">17</option>
+                            <option value="18">18</option>
+                            <option value="19">19</option>
+                            <option value="20">20</option>
+                            <option value="21">21</option>
+                            <option value="22">22</option>
+                            <option value="23">23</option>
+                            <option value="24">24</option>
+                            <option value="25">25</option>
+                            <option value="26">26</option>
+                            <option value="27">27</option>
+                            <option value="28">28</option>
+                            <option value="29">29</option>
+                            <option value="30">30</option>
+                            <option value="31">31</option>
+                        <option value="LAST_DAY">Last day of the month</option>
+                    </select>
+                </div>
+                <p class="cycle-note">
+                    Leave these blank and no interest is forecast. Fill them in and
+                    Blankee projects the charge from your rate and the balance it
+                    expects you to carry, and asks you to confirm it when the
+                    statement arrives.
+                    <br>
+                    It uses your purchase rate only &mdash; not cash advances,
+                    balance transfers, or a promotional 0%% period. On a promotional
+                    rate, set the rate to 0 until it ends.
+                </p>
+                <div class="footer-form-group">
                     <label for="credit-account-balance">Today's Balance:</label>
                     <div class="currency-input-container">
                         <span class="f-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
@@ -189,6 +277,92 @@
                         <option value="line">Line</option>
                     </select>
                 </div>
+                <div class="footer-form-group">
+                    <label for="edit-credit-account-statement-day">Statement closes on:</label>
+                    <select id="edit-credit-account-statement-day" name="statement_day">
+                        <option value="">Not set</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                            <option value="9">9</option>
+                            <option value="10">10</option>
+                            <option value="11">11</option>
+                            <option value="12">12</option>
+                            <option value="13">13</option>
+                            <option value="14">14</option>
+                            <option value="15">15</option>
+                            <option value="16">16</option>
+                            <option value="17">17</option>
+                            <option value="18">18</option>
+                            <option value="19">19</option>
+                            <option value="20">20</option>
+                            <option value="21">21</option>
+                            <option value="22">22</option>
+                            <option value="23">23</option>
+                            <option value="24">24</option>
+                            <option value="25">25</option>
+                            <option value="26">26</option>
+                            <option value="27">27</option>
+                            <option value="28">28</option>
+                            <option value="29">29</option>
+                            <option value="30">30</option>
+                            <option value="31">31</option>
+                        <option value="LAST_DAY">Last day of the month</option>
+                    </select>
+                </div>
+                <div class="footer-form-group">
+                    <label for="edit-credit-account-due-day">Payment due on:</label>
+                    <select id="edit-credit-account-due-day" name="payment_due_day">
+                        <option value="">Not set</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                            <option value="9">9</option>
+                            <option value="10">10</option>
+                            <option value="11">11</option>
+                            <option value="12">12</option>
+                            <option value="13">13</option>
+                            <option value="14">14</option>
+                            <option value="15">15</option>
+                            <option value="16">16</option>
+                            <option value="17">17</option>
+                            <option value="18">18</option>
+                            <option value="19">19</option>
+                            <option value="20">20</option>
+                            <option value="21">21</option>
+                            <option value="22">22</option>
+                            <option value="23">23</option>
+                            <option value="24">24</option>
+                            <option value="25">25</option>
+                            <option value="26">26</option>
+                            <option value="27">27</option>
+                            <option value="28">28</option>
+                            <option value="29">29</option>
+                            <option value="30">30</option>
+                            <option value="31">31</option>
+                        <option value="LAST_DAY">Last day of the month</option>
+                    </select>
+                </div>
+                <p class="cycle-note">
+                    Leave these blank and no interest is forecast. Fill them in and
+                    Blankee projects the charge from your rate and the balance it
+                    expects you to carry, and asks you to confirm it when the
+                    statement arrives.
+                    <br>
+                    It uses your purchase rate only &mdash; not cash advances,
+                    balance transfers, or a promotional 0%% period. On a promotional
+                    rate, set the rate to 0 until it ends.
+                </p>
                 <div class="footer-form-group">
                     <button type="submit">Save Changes</button>
                 </div>
@@ -275,11 +449,18 @@
                 const interest = $row.data('interest');
                 const type = $row.data('type');
                 
-                // Populate the edit form
+                // Populate the edit form.
+                // The two day values are read as attributes rather than through
+                // .data(), which coerces "1" to the number 1 and "" to undefined -
+                // and .val(undefined) leaves the select on whatever the last card
+                // opened had chosen, which would silently show one card's cycle
+                // while editing another.
                 $('#edit-credit-account-id').val(accountId);
                 $('#edit-credit-account-name').val(name);
                 $('#edit-credit-account-interest').val(interest);
                 $('#edit-credit-account-type').val(type);
+                $('#edit-credit-account-statement-day').val($row.attr('data-statement-day') || '');
+                $('#edit-credit-account-due-day').val($row.attr('data-due-day') || '');
                 
                 // display:flex, not .show() - see .footer-modal in style.css.
                 $('#edit-credit-account-modal').css('display', 'flex');
@@ -304,7 +485,9 @@
                     id: $('#edit-credit-account-id').val(),
                     name: $('#edit-credit-account-name').val().trim(),
                     interest_rate: $('#edit-credit-account-interest').val().trim(),
-                    type: $('#edit-credit-account-type').val()
+                    type: $('#edit-credit-account-type').val(),
+                    statement_day: $('#edit-credit-account-statement-day').val(),
+                    payment_due_day: $('#edit-credit-account-due-day').val()
                 };
                 $.ajax({
                     url: '/update-credit-account',
@@ -365,6 +548,11 @@
                     name: $('#credit-account-name').val().trim(),
                     interest_rate: $('#credit-account-interest').val().trim(),
                     type: $('#credit-account-type').val(),
+                    // Empty string rather than omitted, so "Not set" is sent as a
+                    // choice and the server stores NULL - which is what turns the
+                    // interest forecast off for this card.
+                    statement_day: $('#credit-account-statement-day').val(),
+                    payment_due_day: $('#credit-account-due-day').val(),
                     starting_balance: $('#credit-account-balance').val().trim()
                 };
                 $.ajax({
