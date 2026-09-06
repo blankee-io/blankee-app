@@ -272,6 +272,20 @@
                 target.classList.toggle('expanded', opening);
             });
         });
+
+        // Clicking the panel's own background closes whatever is open. Only
+        // the background: a row, a link, the coffee button - anything that
+        // acts - handles its own click and is left alone, which is also what
+        // stops a toggle from closing the list it has just opened as the event
+        // bubbles up to here.
+        if (sideMenu) {
+            sideMenu.addEventListener('click', function (event) {
+                if (event.target.closest('.dropdown-link, a, button')) { return; }
+                document.querySelectorAll('.menu-collapse.expanded').forEach(function (el) {
+                    el.classList.remove('expanded');
+                });
+            });
+        }
     });
 </script>
 
