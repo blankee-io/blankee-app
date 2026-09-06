@@ -32,10 +32,10 @@
         <div class="calendarnavbuttonscontainer">   
             <!-- Single button with repeat icon -->
             <div class="nav-dash-container">
-                <!-- Link to Recurring Summary -->
+                <!-- Link to the Summary View -->
                 <a href="{{ url_for('dashboard_summary') }}" class="nav-button">
                     <i class="fa-solid fa-bars-progress"></i>
-                    <span class="nav-tooltip">Recurring Summary</span>
+                    <span class="nav-tooltip">Summary View</span>
                 </a>
                 <!-- Inline nav buttons (icons only) -->
                 <div id="nav-inline-buttons">
@@ -6690,6 +6690,8 @@
                             // Ensure profile dropdown is closed
                             var dd = document.getElementById('profileDropdown');
                             if (dd) dd.style.display = 'none';
+                            // ...and the Blankee menu with it
+                            if (window.blankeeSideMenu) window.blankeeSideMenu.close();
                             // Recalculate outlines after removing temp elements
                             setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 50);
                         }
@@ -6697,7 +6699,7 @@
                         startTutorial('tutorial_dashboard_3m', [
                             { selector: '#nav-inline-buttons > :nth-child(1), #nav-inline-buttons > :nth-child(2), #nav-inline-buttons > :nth-child(3)', text: 'These icons switch between your main views: <b>Day</b>, <b>Week</b>, and <b>Month</b>. Each shows the same data at a different level of detail.' },
                             { selector: '#nav-inline-buttons > :nth-child(4), #nav-inline-buttons > :nth-child(5)', text: 'The <b>Month Overview</b> and <b>Year Overview</b> show high-level summaries of your income, expenses, and remainder across longer time periods.' },
-                            { selector: '.nav-dash-container > a.nav-button:first-child', text: 'The <b>Dashboard Summary</b> shows all your recurring entries and their projected totals at a glance.' },
+                            { selector: '.nav-dash-container > a.nav-button:first-child', text: 'The <b>Summary View</b> shows all your recurring entries and their projected totals at a glance.' },
                             { selector: '#calendarnavbuttons', text: 'Navigate between time periods. The arrows move forward and back, and the calendar icon returns you to the current period.' },
                             { selector: '#income-categories-table tbody tr:not(#income-total-row), #expense-categories-table tbody tr:not(#expense-total-row):not([data-is-credit-account=\"1\"])', text: 'These are the categories you created during setup. Income categories are on top, expense categories below.' },
                             { selector: '#toggle-all-hidden-btn', text: 'Toggle visibility of hidden categories.' },
@@ -6713,8 +6715,10 @@
                             { selector: '#income-categories-body, #expense-categories-body, .cas-table:not(.ca-collapsed) tbody[id^=\"ca-categories-body-\"]', text: 'Tap any cell in the table to add, edit, or delete an entry for that category and week. Entries added here are placed on the <b>last day of the month</b>.' },
                             { selector: '#savings-categories-table, #savings-table', text: 'The <b>Savings</b> row tracks your cumulative savings balance. The Savings categories in income and expenses modify this balance.' },
                             { selector: '.nav-notifications', text: 'The <b>Notifications</b> bell alerts you to important updates like bank connection issues or balance warnings.' },
-                            { selector: '.sidenav-profile-pic', text: 'Tap your <b>profile picture</b> to open the navigation menu.' },
-                            { selector: '#profileDropdown', text: 'The menu gives you quick access to <b>Manage Categories</b>, <b>Manage Recurring</b> entries, <b>Credit Accounts</b>, <b>Settings</b>, <b>Bank Accounts</b>, and <b>Pending Transactions</b>.', onShow: function() { var d = document.getElementById('profileDropdown'); if (d) d.style.display = 'block'; }, onHide: function() { var d = document.getElementById('profileDropdown'); if (d) d.style.display = 'none'; } }
+                            { selector: '#navMenuToggle', text: 'The <b>menu button</b> opens the Blankee menu, where everything you manage lives.' },
+                            { selector: '#sideMenu', text: 'The menu gives you quick access to <b>Manage Categories</b>, <b>Manage Recurring</b> entries, <b>Credit Accounts</b>, <b>Bundles</b>, <b>Settings</b>, <b>Bank Accounts</b>, and <b>Pending Transactions</b>.', onShow: function() { if (window.blankeeSideMenu) window.blankeeSideMenu.open(); }, onHide: function() { if (window.blankeeSideMenu) window.blankeeSideMenu.close(); } },
+                            { selector: '.sidenav-profile-pic', text: 'Tap your <b>profile picture</b> for your profile and to log out.' },
+                            { selector: '#profileDropdown', text: 'Your <b>profile</b> settings and <b>Log out</b> are here.', onShow: function() { var d = document.getElementById('profileDropdown'); if (d) d.style.display = 'block'; }, onHide: function() { var d = document.getElementById('profileDropdown'); if (d) d.style.display = 'none'; } }
                         ], { delay: 500, onComplete: cleanup });
                     })
                     .catch(function() { /* silently ignore */ });

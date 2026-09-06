@@ -1,51 +1,14 @@
 {#
-  AGPL-3.0 section 13: anyone interacting with this application over a network
-  must be offered its source. A visible link is how that obligation is met, so
-  this is a licence requirement rather than decoration - if you fork and deploy
-  it, the link has to point at *your* source, not this one.
+  The footer's scripts. The visible footer itself moved to
+  _footer_content.html, which signed-in pages render inside the Blankee menu
+  and signed-out ones render at the foot of the page.
+
+  These stayed here, at the very bottom of every page, because they have to run
+  after script.js: the update notice checks for showConfirmModal as it parses,
+  and would silently never fire if it ran first. The menu is rendered near the
+  top of the body, long before that.
 #}
-<footer class="app-footer">
-    <div class="app-footer-inner">
-        {# The teal mark, not the orange one the navbar uses: the footer sits on #}
-        {# the page background rather than the dark bar. #}
-        <img class="app-footer-brand" alt="Blankee"
-             src="{{ url_for('static', filename='teallogotext.svg') }}">
-        {# Version only, never the commit: a SHA tells an anonymous visitor exactly #}
-        {# which commit is running, and therefore which fixes are missing. The #}
-        {# exact commit belongs in the admin console, behind admin_required. #}
-        {% if app_version %}<span class="app-footer-version">v{{ app_version }}</span>{% endif %}
-        {% set notice = update_notice() %}
-        {% if notice %}
-        {# Only an administrator ever sees this: nobody else can act on it. #}
-        <a class="app-footer-link app-footer-update" href="{{ url_for('admin_console') }}"
-           title="Version {{ notice.to_version or notice.to_short }} is available">
-            <i class="fa-solid fa-cloud-arrow-down"></i><span>Update available</span>
-        </a>
-        {% endif %}
-        {# The brand is already the word beside it, so this is just the notice. #}
-        <span class="app-footer-copyright">&copy; {{ copyright_years() }}</span>
-        <span class="app-footer-sep" aria-hidden="true"></span>
-        <a class="app-footer-link" href="https://github.com/blankee-io/blankee-app"
-           target="_blank" rel="noopener noreferrer">
-            <i class="fa-solid fa-code-branch"></i><span>Source</span>
-        </a>
-        <a class="app-footer-link" href="https://github.com/blankee-io/blankee-app/blob/main/LICENSE"
-           target="_blank" rel="noopener noreferrer">
-            <i class="fa-solid fa-scale-balanced"></i><span>AGPL-3.0</span>
-        </a>
-    </div>
-
-    {# Its own row so the licence line above stays the licence line. The button
-       is ours; the overlay it opens is the vendor's widget, loaded below. #}
-    <div class="app-footer-support">
-        <button type="button" class="app-footer-bmc" id="footer-bmc-btn"
-                title="Buy me a coffee">
-            <img src="{{ url_for('static', filename='bmac/bmc-full-logo.svg') }}"
-                 alt="Buy me a coffee">
-        </button>
-    </div>
-</footer>
-
+{% set notice = update_notice() %}
 {% if notice %}
 <script>
     // Uses the shared confirm modal rather than a bespoke one - see CLAUDE.md
