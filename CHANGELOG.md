@@ -8,6 +8,46 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.25.0 — 2026-09-06
+
+### Added
+- **Loaf, a time off planner, is the first app to run alongside Blankee.**
+  Switch it on in the admin console and it appears under Other Apps in the
+  profile menu. It keeps paid and unpaid leave in **baskets** — a pool of hours
+  with a working week to measure time off against — and forecasts what will be
+  left the way Blankee forecasts money.
+
+- **A basket knows how it fills and when the year turns.** Hours can accrue
+  each pay period, be granted in a lump at the start of the year, or both. It
+  can hold a maximum balance, warn you below a level you choose, and carry over
+  in full, up to a cap, or not at all. The year does not have to start in
+  January.
+
+- **Time off is booked as a range and costed against your working week.** Whole
+  days take what that day is actually worth, so a four-hour Friday costs four
+  hours and not eight. A part-day takes the overlap with your hours. You can
+  override the figure, and editing your working week later leaves overridden
+  bookings alone.
+
+- **A month view showing what was worked, what was taken, what accrued and what
+  is left**, on any day of any month, for one basket at a time. Days you do not
+  work are marked as such, and the day the balance would run out is called out.
+
+- **A summary page with a chart per basket**, and a **Test Time Off** button
+  that tries a booking without saving it.
+
+### Notes
+- **Taking time off changes what you go on to accrue, in both directions.**
+  Accrual follows the hours you actually work, so a week off shrinks the next
+  one — including in your other baskets, since an hour not worked is an hour
+  not worked whichever pool it came from. And where a basket has a maximum
+  balance, sitting at that maximum means accrual is being lost; taking time off
+  makes room for it. Loaf works both through rather than estimating, which is
+  why Test Time Off reports more hours gone than the ones you booked.
+
+- Loaf is off until an administrator switches it on, and nothing about Blankee
+  changes when it is off.
+
 ## 1.24.1 — 2026-09-06
 
 ### Fixed
