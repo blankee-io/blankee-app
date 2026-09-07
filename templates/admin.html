@@ -68,12 +68,15 @@
                                 {% for other in switchable_apps %}
                                 <div class="input-group">
                                     <span class="other-app-name">
-                                        {# The same outline mark the menus use. Dark on
-                                           white here, so it needs no help; the menus
-                                           paint it white against the teal. #}
-                                        <img class="other-app-mark"
-                                             src="{{ url_for('static', filename=other.mark) }}" alt="">
-                                        {{ other.name }}
+                                        {# The app's own wordmark, in the version drawn for
+                                           a light background - it names itself better than
+                                           its name set in the row's font does, and this is
+                                           the same lockup the app shows in its own bar. The
+                                           alt carries the name for a reader that gets no
+                                           image. #}
+                                        <img class="other-app-wordmark"
+                                             src="{{ url_for('static', filename=other.wordmark_light) }}"
+                                             alt="{{ other.name }}">
                                     </span>
                                     <input type="text" disabled class="hidden-spacer">
                                     <button type="button" class="toggle-switch other-app-toggle"

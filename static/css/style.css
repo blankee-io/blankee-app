@@ -1198,19 +1198,6 @@ body {
     object-fit: contain;
 }
 
-/* The same mark on the console's white. The marks use white as one of their
-   colours, so they get the menu's teal behind them here rather than being
-   recoloured - the file is still shown as drawn, just not against a ground
-   that swallows half of it. */
-.other-app-mark {
-    width: 20px;
-    height: 20px;
-    padding: 3px;
-    background-color: var(--primary);
-    border-radius: 6px;
-    object-fit: contain;
-}
-
 .dropdown-sublink {
     padding-left: 30px;
     background-color: var(--primary-mid);
@@ -8600,7 +8587,8 @@ transform: scale(1.2);
    as .profile-form label - the row itself is a plain .input-group, which is what
    also gives the toggle its size and colour. */
 .update-line-name,
-.logs-line-name {
+.logs-line-name,
+.other-app-name {
     flex-shrink: 0;
     width: 30%;
     min-width: 40px;
@@ -17679,18 +17667,15 @@ tr[data-collapsed] {
     height: 19px;
 }
 
-/* One row per sibling app in the admin console, named the way the menus name
-   it so the switch and the entry are recognisably the same thing. */
-.other-app-name {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-dark);
-    font-weight: 600;
-}
-
-.other-app-name i {
-    color: var(--primary);
+/* The wordmark that names a sibling app's row, sized against the 14px labels
+   beside it the way the footer's is: these marks put their cap height at about
+   0.44 of a 500-unit box and Nunito's is near 0.705em, so matching the two is
+   the 1.7x this file already uses - 24px against 14px. It is the label here
+   rather than an icon beside one, so it takes the column's right edge. */
+.other-app-wordmark {
+    height: 24px;
+    width: auto;
+    vertical-align: middle;
 }
 
 /* A menu that has nothing in it yet says so, rather than being empty or full
