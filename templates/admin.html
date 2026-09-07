@@ -64,11 +64,6 @@
                        listed: it is the application serving this page. #}
                     <div class="other-apps-section">
                         <div class="section-liner">
-                            <p class="setting-description">
-                                Other apps built on Blankee. Switching one on gives every
-                                user on this instance access to it; switching it off hides
-                                it and closes it, whether or not they know the address.
-                            </p>
                             <form class="profile-form">
                                 {% for other in switchable_apps %}
                                 <div class="input-group">
@@ -89,7 +84,6 @@
                                 </div>
                                 {% endfor %}
                             </form>
-                            <p class="setting-description" id="other-apps-status"></p>
                         </div>
                     </div>
                     <div class="logs-section">

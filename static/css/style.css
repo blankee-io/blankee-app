@@ -8513,16 +8513,16 @@ transform: scale(1.2);
        token there is exactly what would push a fixed-layout cell over. */
 }
 
-/* Status line inside the create-user modal. Errors are the common case here -
-   duplicate address, weak password - so it needs to read against the modal's
-/* ===== Updates panel (admin console) =====
-   Same panel treatment as .admin-users-section, with its own label. The third
-   near-copy of these rules in this file; the alternative is a shared class the
-   ::before content would have to be layered onto, which reads worse than the
-   repetition. */
+/* ===== Labelled panels (admin console) =====
+   The panel and its tab, for the sections that carry a title: Updates, Logs and
+   Other Apps. Same treatment as .admin-users-section, one word apiece. The
+   third near-copy of these rules in this file; the alternative is a shared
+   class the ::before content would have to be layered onto, which reads worse
+   than the repetition. */
 
 .updates-section,
-.logs-section {
+.logs-section,
+.other-apps-section {
     position: relative;
     margin: 30px 0 35px;
     padding: 16px;
@@ -8535,7 +8535,8 @@ transform: scale(1.2);
 }
 
 .updates-section::before,
-.logs-section::before {
+.logs-section::before,
+.other-apps-section::before {
     content: "Updates";
     position: absolute;
     top: -25px;
@@ -8550,9 +8551,13 @@ transform: scale(1.2);
     letter-spacing: 0.5px;
 }
 
-/* Same tab, different word. */
+/* Same tab, different word each. */
 .logs-section::before {
     content: "Logs";
+}
+
+.other-apps-section::before {
+    content: "Other Apps";
 }
 
 /* Boxed to the same metrics as .profile-form .input-group, so help text and
