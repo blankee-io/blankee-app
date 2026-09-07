@@ -23,12 +23,14 @@ by user - see its docstring. Nothing in here talks to Redis or MySQL directly.
 """
 
 import json
+from datetime import date, timedelta
 
 from flask import Blueprint, render_template, request, jsonify, abort
 from flask_login import login_required, current_user
 
 import apps_registry
 import loaf_data
+import loaf_forecast
 from db_connections import get_db_pool
 from log_config import get_logger, log_exception
 
@@ -128,11 +130,56 @@ def home():
     return dashboard()
 
 
+def _today():
+    """Today where the user is, not where the server is.
+
+    bucket_confirmation._user_today is the one implementation of this, and it
+    lives outside app.py - so Loaf can use it without importing the app that
+    imports Loaf. The Docker image runs UTC, where the server's date runs ahead
+    of a user's for a good part of their day.
+    """
+    try:
+        import bucket_confirmation
+        return bucket_confirmation._user_today(current_user.id)
+    except Exception:
+        return date.today()
+
+
+def _pick_basket(wanted):
+    """The basket being looked at: the one asked for, or the first there is.
+
+    Scoped through loaf_data, so an id belonging to someone else simply is not
+    found rather than being read and refused.
+    """
+    baskets = loaf_data.get_baskets(current_user.id, include_hidden=False)
+    if not baskets:
+        return None
+    if wanted:
+        try:
+            return loaf_data.get_basket(current_user.id, int(wanted))
+        except (TypeError, ValueError):
+            return None
+    return baskets[0]
+
+
 @loaf.route('/dashboard')
 @login_required
 def dashboard():
-    """The month view for one basket. Still the placeholder."""
-    return render_template('loaf/dashboard.html', **_shell())
+    """One basket, one month: what was worked, what was taken, what is left.
+
+    The grid itself is fetched and drawn by /api/month, the way dashboard_m
+    builds its calendar - so changing month or swiping is one request rather
+    than a page load, and the cell markup exists in one place instead of once
+    in Jinja and once in JS.
+    """
+    today = _today()
+    basket = _pick_basket(request.args.get('basket'))
+    return render_template(
+        'loaf/dashboard.html',
+        baskets=loaf_data.get_baskets(current_user.id, include_hidden=False),
+        basket=basket,
+        today=today,
+        **_shell())
 
 
 @loaf.route('/baskets')
@@ -253,4 +300,183 @@ def api_basket_order():
     if not loaf_data.set_basket_order(current_user.id, order):
         return jsonify({'status': 'error',
                         'message': 'Could not save the new order.'}), 500
+    return jsonify({'status': 'success'})
+
+
+# ------------------------------------------------- the month, as JSON ----
+
+def _month_payload(user_id, basket, year, month, today):
+    """Everything the calendar draws for one basket in one month.
+
+    Built here rather than in the template because the grid is assembled in
+    JS - the same division dashboard_m makes, and it means a month change or a
+    swipe is one fetch rather than a page load.
+    """
+    entries = loaf_data.get_entries(user_id)
+    baskets = loaf_data.get_baskets(user_id)
+
+    # usage is this basket's; absence is everyone's, because any hour not
+    # worked pro-rates the accrual whichever basket it came out of.
+    usage = loaf_forecast.usage_by_date(basket, entries)
+    absence = loaf_forecast.absence_by_date(baskets, entries)
+
+    viewing = date(int(year), int(month), 1)
+    through = loaf_forecast.horizon_for(basket, viewing, today=today)
+    result = loaf_forecast.project(basket, usage, absence, through, today=today)
+
+    grid_start, grid_end, first, last = loaf_forecast.grid_bounds(year, month)
+    rows = loaf_forecast.month_rows(basket, result, absence, grid_start, grid_end)
+
+    # Which bookings touch each day, so a click can open the one that is
+    # already there instead of always adding another.
+    mine = int(basket['id'])
+    touching = {}
+    for entry in entries:
+        if int(entry.get('basket_id') or 0) != mine:
+            continue
+        starts = str(entry.get('starts_at') or '')[:10]
+        ends = str(entry.get('ends_at') or '')[:10]
+        if not starts:
+            continue
+        day = date.fromisoformat(starts)
+        stop = date.fromisoformat(ends) if ends else day
+        while day <= stop:
+            touching.setdefault(day.isoformat(), []).append({
+                'id': entry.get('id'),
+                'starts_at': entry.get('starts_at'),
+                'ends_at': entry.get('ends_at'),
+                'all_day': int(entry.get('all_day') or 0),
+                'hours': entry.get('hours'),
+                'hours_overridden': int(entry.get('hours_overridden') or 0),
+                'status': entry.get('status'),
+                'note': entry.get('note'),
+            })
+            day += timedelta(days=1)
+
+    out = []
+    for row in rows:
+        stamp = row['date'].isoformat()
+        out.append({
+            'date': stamp,
+            'day': row['date'].day,
+            'weekday': row['date'].weekday(),
+            'in_month': first <= row['date'] <= last,
+            'is_today': row['date'] == today,
+            'non_working': row['non_working'],
+            'worked': row['worked'],
+            'taken': row['taken'],
+            'accrued': row['accrued'],
+            'granted': row['granted'],
+            'balance': row['balance'],
+            'entries': touching.get(stamp, []),
+        })
+
+    summary = dict(result['summary'])
+    summary.pop('checkpoints', None)
+    for key in ('year_end_date', 'lowest_date', 'first_negative'):
+        if summary.get(key) is not None:
+            summary[key] = summary[key].isoformat()
+
+    return {'rows': out, 'summary': summary,
+            'first': first.isoformat(), 'last': last.isoformat()}
+
+
+@loaf.route('/api/month')
+@login_required
+def api_month():
+    today = _today()
+    basket = _pick_basket(request.args.get('basket_id'))
+    if basket is None:
+        return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
+
+    try:
+        year = int(request.args.get('year') or today.year)
+        month = int(request.args.get('month') or today.month)
+        if not 1 <= month <= 12 or not 1970 <= year <= 2999:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error', 'message': 'That is not a month.'}), 400
+
+    payload = _month_payload(current_user.id, basket, year, month, today)
+    payload['status'] = 'success'
+    payload['basket'] = {
+        'id': basket['id'], 'name': basket['name'],
+        'basket_type': basket['basket_type'],
+        'low_balance_hours': basket.get('low_balance_hours'),
+    }
+    return jsonify(payload)
+
+
+# --------------------------------------------------------- the bookings ----
+
+def _recompute(basket, values):
+    """Fill in what the schedule says a booking costs.
+
+    computed_hours is always what the working week produces. hours follows it
+    unless the user typed a figure, which is the whole point of
+    hours_overridden - a comparison could not tell an override of 8.00 with
+    8.00 from no override at all.
+    """
+    computed = loaf_forecast.entry_hours(basket, values)
+    values['computed_hours'] = computed
+    if not int(values.get('hours_overridden') or 0):
+        values['hours'] = computed
+    return values
+
+
+@loaf.route('/api/entries', methods=['POST'])
+@login_required
+def api_create_entry():
+    values, error = loaf_data.clean_entry(_flat(_payload()))
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+
+    basket = loaf_data.get_basket(current_user.id, values['basket_id'])
+    if basket is None:
+        return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
+
+    values = _recompute(basket, values)
+    if not values.get('hours_overridden') and not values['hours']:
+        return jsonify({'status': 'error',
+                        'message': 'That range does not cover any of your working '
+                                   'hours, so it costs nothing. Change the dates, or '
+                                   'enter the hours yourself.'}), 400
+
+    entry_id = loaf_data.create_entry(current_user.id, values)
+    if entry_id is None:
+        return jsonify({'status': 'error', 'message': 'Could not save that.'}), 500
+    return jsonify({'status': 'success', 'entry_id': entry_id,
+                    'hours': values['hours']})
+
+
+@loaf.route('/api/entries/<int:entry_id>', methods=['POST'])
+@login_required
+def api_update_entry(entry_id):
+    existing = [e for e in loaf_data.get_entries(current_user.id)
+                if int(e.get('id') or 0) == entry_id]
+    if not existing:
+        return jsonify({'status': 'error', 'message': 'No such booking.'}), 404
+
+    values, error = loaf_data.clean_entry(_flat(_payload()))
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+
+    basket = loaf_data.get_basket(current_user.id, values['basket_id'])
+    if basket is None:
+        return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
+
+    values = _recompute(basket, values)
+    if not loaf_data.update_entry(current_user.id, entry_id, values):
+        return jsonify({'status': 'error', 'message': 'Could not save that.'}), 500
+    return jsonify({'status': 'success', 'hours': values['hours']})
+
+
+@loaf.route('/api/entries/<int:entry_id>/delete', methods=['POST'])
+@login_required
+def api_delete_entry(entry_id):
+    if not any(int(e.get('id') or 0) == entry_id
+               for e in loaf_data.get_entries(current_user.id)):
+        return jsonify({'status': 'error', 'message': 'No such booking.'}), 404
+    if not loaf_data.delete_entry(current_user.id, entry_id):
+        return jsonify({'status': 'error', 'message': 'Could not delete that.'}), 500
     return jsonify({'status': 'success'})

@@ -673,6 +673,90 @@ def clean_basket(payload):
     return values, None
 
 
+def clean_entry(payload):
+    """A booking form as column values, or an error to show the user.
+
+    The form collects a start date, an end date and - unless the whole day is
+    being taken - a time for each. Composed into the two datetimes the column
+    pair holds, rather than asking the browser for a datetime-local, which
+    renders as two different controls depending on the browser and cannot be
+    left half-filled.
+
+    hours is NOT set here. It depends on the basket's working week, so the
+    caller computes it with loaf_forecast.entry_hours once ownership of the
+    basket has been established. Returns (values, error).
+    """
+    values = {}
+
+    basket_id, ok = _opt_number(payload.get('basket_id'), int)
+    if not ok or not basket_id:
+        return None, 'Pick a basket for these hours.'
+    values['basket_id'] = basket_id
+
+    all_day = str(payload.get('all_day') or '') in ('1', 'true', 'on')
+    values['all_day'] = 1 if all_day else 0
+
+    start_date, ok = _opt_date(payload.get('start_date'))
+    if not ok or start_date is None:
+        return None, 'When does the time off start?'
+    # An end date left blank means a single day, which is the common case and
+    # not worth making someone type twice.
+    end_date, ok = _opt_date(payload.get('end_date'))
+    if not ok:
+        return None, 'That end date is not one Loaf can read.'
+    if end_date is None:
+        end_date = start_date
+
+    if all_day:
+        # 23:59 rather than the next midnight: the range is inclusive of the
+        # end date, and 00:00 the following day would pull in a day nobody
+        # asked for. all_day makes the engine substitute the scheduled day
+        # anyway, so the times only have to bracket it.
+        start_time, end_time = '00:00:00', '23:59:00'
+    else:
+        start_time, ok = _opt_time(payload.get('start_time'))
+        if not ok:
+            return None, 'That start time is not a time.'
+        end_time, ok = _opt_time(payload.get('end_time'))
+        if not ok:
+            return None, 'That end time is not a time.'
+        if start_time is None or end_time is None:
+            return None, ('Give a start and an end time, or tick whole days.')
+
+    values['starts_at'] = '%s %s' % (start_date, start_time)
+    values['ends_at'] = '%s %s' % (end_date, end_time)
+
+    if values['ends_at'] <= values['starts_at']:
+        # String comparison is safe on ISO datetimes, and is what the rest of
+        # this codebase does with dates out of Redis.
+        return None, 'That time off ends before it starts.'
+
+    status = str(payload.get('status') or 'planned').strip().lower()
+    if status not in ENTRY_STATUSES:
+        return None, 'That status is not one Loaf understands.'
+    values['status'] = status
+
+    note = str(payload.get('note') or '').strip()
+    if len(note) > 255:
+        return None, 'That note is too long.'
+    values['note'] = note or None
+
+    # An override is only an override when a figure was actually typed. A blank
+    # box means "work it out", which is the default and not a zero.
+    typed, ok = _opt_number(payload.get('hours'))
+    if not ok:
+        return None, 'Those hours are not a number.'
+    if typed is not None and typed < 0:
+        return None, 'Hours cannot be negative.'
+    overridden = str(payload.get('hours_overridden') or '') in ('1', 'true', 'on')
+    if overridden and typed is None:
+        overridden = False
+    values['hours_overridden'] = 1 if overridden else 0
+    if overridden:
+        values['hours'] = typed
+
+    return values, None
+
 # ------------------------------------------------------------- describing ----
 
 _MONTH_NAMES = ('January', 'February', 'March', 'April', 'May', 'June', 'July',

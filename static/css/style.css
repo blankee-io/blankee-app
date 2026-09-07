@@ -19086,39 +19086,6 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     right: -5px;
 }
 
-/* The Loaf placeholder page. Goes when the real month view replaces it. */
-.loaf-placeholder {
-    max-width: 520px;
-    margin: 60px auto;
-    padding: 0 20px;
-    text-align: left;
-}
-
-.loaf-tagline {
-    margin: 26px 0 10px;
-    color: var(--text-dark);
-    font-size: 19px;
-    font-weight: 700;
-}
-
-.loaf-note {
-    margin: 0 0 22px;
-    color: var(--secondary-dark);
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-.loaf-soon {
-    display: inline-block;
-    margin: 0;
-    padding: 5px 12px;
-    background-color: var(--primary-lighter);
-    border-radius: 20px;
-    color: var(--primary);
-    font-size: 12px;
-    font-weight: 700;
-}
-
 /* ===== LOAF: BASKETS =====
    The management page, built on recurring_i.html's shape: the same container
    metrics, the same table skeleton, the same row-action buttons, and the same
@@ -19483,5 +19450,307 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     .loaf-schedule-row {
         grid-template-columns: 34px 1fr 1fr 60px;
         gap: 4px;
+    }
+}
+
+/* ===== LOAF: THE MONTH VIEW =====
+   dashboard_m's calendar, re-pointed at hours. Its day cell stacks income,
+   expense, remainder and savings; this one stacks worked, taken, accrual and
+   what is left - which is why that page was the right one to copy rather than
+   the week grid.
+
+   Reused from it unchanged, because they are about the calendar and not about
+   money: .dashboard-m-today (the orange outline) and .dashboard-m-other-month
+   (the dimming overlay). Reused from the dashboards: .negative,
+   .below-threshold and .above-threshold on the balance, driven here by the
+   basket's own low_balance_hours rather than by one figure for everything. */
+
+/* The period line: switcher hard left, month and year hard right.
+   .month-year-header is already flex with space-between, so this only has to
+   undo its left padding and let the pair sit at the end. */
+.loaf-period-header {
+    max-width: 875px;
+    margin: 10px auto 12px;
+    padding-left: 0;
+}
+
+.loaf-period-pair {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* The switcher reads as the page's subject rather than as a control, which is
+   why it takes the heading's own size and colour. */
+.loaf-basket-dropdown {
+    max-width: 45vw;
+    color: var(--accent);
+    font-size: inherit;
+    font-weight: bold;
+}
+
+.loaf-period-header .styled-dropdown:first-of-type .styled-dropdown-trigger {
+    color: var(--accent);
+}
+
+.loaf-calendar-container {
+    max-width: 875px;
+    margin: 0 auto;
+}
+
+#loaf-calendar {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 3px;
+    table-layout: fixed;
+}
+
+#loaf-calendar th {
+    padding: 2px 0;
+    color: var(--secondary-dark);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+/* Seven equal columns, and a fixed height so the grid does not change shape
+   between a month with five rows of content and one with six. */
+#loaf-calendar td {
+    width: 14.2857%;
+    height: 82px;
+    padding: 0;
+    background-color: var(--white);
+    border-radius: 8px;
+    vertical-align: top;
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: transform 0.12s ease;
+}
+
+#loaf-calendar td:hover {
+    transform: scale(1.03);
+    box-shadow: 0 2px 6px var(--shadow-lg);
+}
+
+.loaf-cal-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    height: 100%;
+    padding: 4px 5px;
+    box-sizing: border-box;
+}
+
+.loaf-cal-date-number {
+    color: var(--text-dark);
+    font-size: 12px;
+    font-weight: 700;
+    text-align: right;
+    line-height: 1.1;
+}
+
+/* A day the schedule does not work. Not called "weekend" on purpose: a
+   Tuesday off is as non-working as a Sunday, and the schedule is per basket. */
+.loaf-cal-nonworking {
+    background-color: var(--secondary-lighter) !important;
+}
+
+.loaf-cal-nonworking .loaf-cal-date-number {
+    color: var(--secondary);
+}
+
+/* A day with something booked against it. A left edge rather than a fill, so
+   it survives on top of the non-working and out-of-month treatments. */
+.loaf-cal-booked {
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.loaf-cal-worked,
+.loaf-cal-taken,
+.loaf-cal-accrual,
+.loaf-cal-left {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 2px;
+    font-size: 10px;
+    line-height: 1.25;
+}
+
+/* The single-letter tags are in the DOM but not drawn, exactly as
+   .dashboard-m-label is: they name the lines for anyone reading the markup,
+   and at 10px on a phone four labelled figures is unreadable. */
+.loaf-cal-label {
+    display: none;
+}
+
+.loaf-cal-value {
+    width: 100%;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.loaf-cal-worked {
+    color: var(--secondary-dark);
+}
+
+.loaf-cal-taken {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.loaf-cal-accrual {
+    color: var(--success);
+    font-weight: 600;
+}
+
+/* What is left. Pushed to the bottom of the cell so the figure the page exists
+   for sits on the same line in every cell, whatever is above it. */
+.loaf-cal-left {
+    margin-top: auto;
+    padding-top: 2px;
+    border-top: 1px solid var(--secondary-lighter);
+    color: var(--text-dark);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.loaf-cal-left.negative {
+    color: var(--danger);
+}
+
+.loaf-cal-left.below-threshold {
+    color: var(--accent);
+}
+
+/* The strip under the grid. Left today is the headline; the other two are the
+   numbers that disagree with each other, and both are worth showing because a
+   plan can end the year comfortably and still go negative in July. */
+.loaf-summary-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    max-width: 875px;
+    margin: 14px auto 30px;
+}
+
+.loaf-summary-item {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 120px;
+    padding: 10px 14px;
+    background-color: var(--white);
+    border-radius: 10px;
+    box-shadow: 0 -4px 8px var(--shadow-sm);
+}
+
+.loaf-summary-label {
+    color: var(--secondary-dark);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+.loaf-summary-value {
+    color: var(--text-dark);
+    font-size: 22px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.loaf-summary-value.negative {
+    color: var(--danger);
+}
+
+.loaf-summary-value.below-threshold {
+    color: var(--accent);
+}
+
+.loaf-summary-warn {
+    background-color: var(--accent-lighter);
+}
+
+.loaf-summary-warn .loaf-summary-value {
+    color: var(--danger);
+    font-size: 16px;
+}
+
+/* The booking form. Times sit beside their date in a .cadence-row, so they are
+   sized by it; disabling rather than hiding them when whole days are ticked
+   keeps the form from jumping height as the box is toggled. */
+.loaf-entry-time {
+    flex: 0 0 110px;
+}
+
+.loaf-entry-time:disabled {
+    background-color: var(--secondary-lighter);
+    color: var(--secondary);
+}
+
+#loaf-entry-delete {
+    width: 100%;
+    margin-top: 10px;
+}
+
+@media (max-width: 600px) {
+    .loaf-calendar-container,
+    .loaf-summary-strip,
+    .loaf-period-header {
+        padding: 0 6px;
+        box-sizing: border-box;
+    }
+
+    #loaf-calendar {
+        border-spacing: 2px;
+    }
+
+    /* Shorter cells and smaller figures rather than a scroller: seven columns
+       is seven columns, and dashboard_m shrinks its type the same way instead
+       of letting the month go sideways. */
+    #loaf-calendar td {
+        height: 62px;
+    }
+
+    .loaf-cal-inner {
+        padding: 2px 3px;
+    }
+
+    .loaf-cal-date-number {
+        font-size: 10px;
+    }
+
+    .loaf-cal-worked,
+    .loaf-cal-taken,
+    .loaf-cal-accrual {
+        font-size: 8px;
+    }
+
+    .loaf-cal-left {
+        font-size: 9px;
+    }
+
+    /* Worked hours are the least interesting line on a small screen - the
+       schedule already says them - so they give up their space first. */
+    .loaf-cal-worked {
+        display: none;
+    }
+
+    .loaf-summary-value {
+        font-size: 17px;
+    }
+
+    .loaf-summary-item {
+        min-width: 96px;
+        padding: 8px 10px;
+    }
+
+    #loaf-calendar td:hover {
+        transform: none;
+        box-shadow: none;
     }
 }

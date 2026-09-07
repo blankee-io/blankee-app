@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>{{ current_app.name }}</title>
+    <title>{{ basket.name ~ ' · ' if basket else '' }}{{ current_app.name }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% include '_fontawesome.html' %}
     <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
@@ -12,49 +12,551 @@
 </head>
 <body id="loaf-page">
     {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
 
     <div class="calendarnav">
         <div class="calendarnavbuttonscontainer">
-            <div class="nav-buttons">
-                {# landing_url() rather than url_for(landing_page): the variable is
-                   passed in by each route that wants it, and the global already
-                   falls back when a user's chosen landing page no longer exists. #}
-                <a href="{{ landing_url() }}" class="nav-button">
-                    <i class="fa-solid fa-turn-left"></i>
-                    <span class="nav-tooltip">Back</span>
+            <div class="nav-dash-container">
+                <a href="{{ url_for('loaf.baskets') }}" class="nav-button">
+                    <i class="fa-solid fa-basket-shopping"></i>
+                    <span class="nav-tooltip">Manage Baskets</span>
                 </a>
             </div>
-        </div>
-    </div>
-
-    <div class="main-container">
-        <div class="loaf-placeholder">
-            {# The lockup Loaf will carry in its own nav bar and menu: its name
-               where Blankee puts its mark, and the mark itself underneath at a
-               size that reads as a maker's credit rather than a second brand. #}
-            <div class="app-lockup app-lockup-large">
-                {# The light-background pair: the app's own wordmark in its darker
-                   colours, and Blankee's teal one, because the versions drawn for
-                   the nav bar are white and would vanish here. #}
-                <img class="app-wordmark-img"
-                     src="{{ url_for('static', filename=current_app.wordmark_light) }}"
-                     alt="{{ current_app.name }}">
-                <span class="app-by">by
-                    <img src="{{ url_for('static', filename='teallogotext.svg') }}" alt="Blankee">
-                </span>
+            {% if basket %}
+            <div class="calendarnavbuttons">
+                <a id="loaf-prev" class="nav-button" href="javascript:void(0);">
+                    <i class="fa-solid fa-left"></i>
+                    <span class="nav-tooltip">Previous Month</span>
+                </a>
+                <a id="loaf-today" class="nav-button" href="javascript:void(0);">
+                    <span class="nav-current-icon"><i class="fa-solid fa-calendar-day"></i></span>
+                    <span class="nav-tooltip">Go to This Month</span>
+                </a>
+                <a id="loaf-next" class="nav-button" href="javascript:void(0);">
+                    <i class="fa-solid fa-right"></i>
+                    <span class="nav-tooltip">Next Month</span>
+                </a>
             </div>
-
-            <p class="loaf-tagline">Time off, planned.</p>
-            <p class="loaf-note">
-                Paid and unpaid leave in one place - what you have left, what
-                you have booked, and who is away when you want to be.
-            </p>
-            <p class="loaf-soon">Not built yet.</p>
+            {% endif %}
         </div>
     </div>
 
-{# The visible footer comes from nav.html, at the bottom of the Blankee menu.
-   Only the scripts belong here - see the note in footer.html. #}
+    <div class="main-container" id="main-container">
+    {% if not basket %}
+        <div class="recurring-income-empty-info">
+            <h2>Nothing to show yet</h2>
+            <p>
+                Loaf needs a <strong>basket</strong> before it can forecast anything -
+                a pool of hours, with a working week to measure time off against.
+            </p>
+            <p><a href="{{ url_for('loaf.baskets') }}">Add your first basket</a>.</p>
+        </div>
+    {% else %}
+        {# Switcher on the left, month and year hard right, all on one line.
+           .month-year-header is already display:flex with space-between, so
+           putting the basket first and the period last needs no new rule -
+           unlike .dashboard-m-month-year-header, whose margin: 0 50% centring
+           would have to be undone first. #}
+        <div id="loaf-period-header" class="month-year-header loaf-period-header">
+            <select id="loaf-basket-dropdown" class="loaf-basket-dropdown"
+                    aria-label="Which basket">
+                {% for option in baskets %}
+                <option value="{{ option.id }}" {{ 'selected' if option.id == basket.id }}>
+                    {{ option.name }}
+                </option>
+                {% endfor %}
+            </select>
+            <span class="loaf-period-pair">
+                <select id="loaf-month-dropdown" class="month-dropdown" aria-label="Month"></select>
+                <select id="loaf-year-dropdown" class="year-dropdown" aria-label="Year"></select>
+            </span>
+        </div>
+
+        <div class="loaf-calendar-container">
+            <table id="loaf-calendar">
+                <thead id="loaf-calendar-head"></thead>
+                {# Filled by JS from /api/month, the way dashboard_m fills its
+                   calendar - so the cell markup lives in one place. #}
+                <tbody id="loaf-calendar-body"></tbody>
+            </table>
+        </div>
+
+        {# The two figures that differ: what is left at the end of the accrual
+           year, and the lowest the balance ever gets. They diverge whenever a
+           big booking sits before later accruals. #}
+        <div class="loaf-summary-strip" id="loaf-summary">
+            <div class="loaf-summary-item">
+                <span class="loaf-summary-label">Left today</span>
+                <span class="loaf-summary-value" id="loaf-today-balance">--</span>
+            </div>
+            <div class="loaf-summary-item">
+                <span class="loaf-summary-label">At year end <span id="loaf-year-end-date"></span></span>
+                <span class="loaf-summary-value" id="loaf-year-end">--</span>
+            </div>
+            <div class="loaf-summary-item">
+                <span class="loaf-summary-label">Lowest it gets</span>
+                <span class="loaf-summary-value" id="loaf-lowest">--</span>
+            </div>
+            <div class="loaf-summary-item loaf-summary-warn" id="loaf-negative-item" style="display:none;">
+                <span class="loaf-summary-label">Runs out</span>
+                <span class="loaf-summary-value" id="loaf-negative">--</span>
+            </div>
+        </div>
+
+        {# Booking. This is the only place time off is entered - a day click
+           opens it with that date already filled in. #}
+        <div id="loaf-entry-modal" class="modal">
+            <div class="income-form-container">
+                <h2 id="loaf-entry-title">Book Time Off</h2>
+                <form id="loaf-entry-form" autocomplete="off">
+                    <input type="hidden" id="loaf-entry-id" value="">
+
+                    <label for="loaf-entry-basket">Basket</label>
+                    <select id="loaf-entry-basket">
+                        {% for option in baskets %}
+                        <option value="{{ option.id }}">{{ option.name }}</option>
+                        {% endfor %}
+                    </select>
+
+                    <div class="date-checkbox-row">
+                        <input type="checkbox" id="loaf-entry-all-day" checked>
+                        <label for="loaf-entry-all-day" class="date-checkbox-label">
+                            Whole days
+                            <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                                <span class="info-tip-text">Takes each day as your working week
+                                    has it, so a short Friday costs what a short Friday is worth.
+                                    Untick to give times instead.</span>
+                            </span>
+                        </label>
+                    </div>
+
+                    <label for="loaf-entry-start-date">From</label>
+                    <div class="cadence-row">
+                        <input type="date" id="loaf-entry-start-date" required>
+                        <input type="time" id="loaf-entry-start-time" class="loaf-entry-time">
+                    </div>
+
+                    <label for="loaf-entry-end-date">Until
+                        <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                            <span class="info-tip-text">Leave blank for a single day. The end date
+                                is included.</span>
+                        </span>
+                    </label>
+                    <div class="cadence-row">
+                        <input type="date" id="loaf-entry-end-date">
+                        <input type="time" id="loaf-entry-end-time" class="loaf-entry-time">
+                    </div>
+
+                    <label for="loaf-entry-status">Status</label>
+                    <select id="loaf-entry-status">
+                        <option value="planned">Planned</option>
+                        <option value="taken">Taken</option>
+                        <option value="cancelled">Cancelled - costs nothing</option>
+                    </select>
+
+                    <div class="date-checkbox-row">
+                        <input type="checkbox" id="loaf-entry-override">
+                        <label for="loaf-entry-override" class="date-checkbox-label">
+                            Set the hours myself
+                            <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                                <span class="info-tip-text">Loaf works the hours out from your
+                                    working week. Tick this to type a figure instead, and editing
+                                    the working week later will leave it alone.</span>
+                            </span>
+                        </label>
+                    </div>
+                    <input type="number" id="loaf-entry-hours" class="recurring-amount"
+                           step="0.01" min="0" placeholder="Worked out from your week" disabled>
+
+                    <label for="loaf-entry-note">Note</label>
+                    <input type="text" id="loaf-entry-note" class="category-input" maxlength="255">
+
+                    <button type="submit" id="loaf-entry-submit">Book It</button>
+                    <button type="button" id="loaf-entry-delete" class="remove-day-btn"
+                            style="display:none;">Delete this booking</button>
+                </form>
+            </div>
+        </div>
+    {% endif %}
+    </div>
+
+    {% include 'loading_modals.html' %}
+
+{% if basket %}
+<script>
+// ---------------------------------------------------------------------------
+// Loaf's month view. The grid is fetched and drawn here rather than rendered
+// by Jinja, so a month change is one request and the cell markup exists once.
+// ---------------------------------------------------------------------------
+(function () {
+    'use strict';
+
+    var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                  'August', 'September', 'October', 'November', 'December'];
+    // Saturday first, matching dashboard_m's default week.
+    var DAY_LABELS = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+
+    var TODAY = '{{ today.isoformat() }}';
+    var state = {
+        basketId: {{ basket.id }},
+        year: {{ today.year }},
+        month: {{ today.month }},
+        threshold: {{ basket.low_balance_hours if basket.low_balance_hours is not none else 'null' }}
+    };
+
+    function el(id) { return document.getElementById(id); }
+
+    // Hours, never money. formatCurrency and currencySymbol are wired through
+    // every value path in Blankee's dashboards; this is the Loaf equivalent.
+    function formatHours(value) {
+        var number = parseFloat(value);
+        if (isNaN(number)) { return '--'; }
+        return number.toFixed(2);
+    }
+
+    function fillPeriodSelects() {
+        var monthSelect = el('loaf-month-dropdown');
+        var yearSelect = el('loaf-year-dropdown');
+        monthSelect.innerHTML = '';
+        MONTHS.forEach(function (name, index) {
+            monthSelect.appendChild(new Option(name, String(index + 1)));
+        });
+        yearSelect.innerHTML = '';
+        var thisYear = parseInt(TODAY.substring(0, 4), 10);
+        for (var year = thisYear - 2; year <= thisYear + 4; year++) {
+            yearSelect.appendChild(new Option(String(year), String(year)));
+        }
+        monthSelect.value = String(state.month);
+        yearSelect.value = String(state.year);
+    }
+
+    // The same custom dropdown Blankee's month and year pickers use, so the
+    // basket switcher is visually identical to them with no CSS of its own.
+    //
+    // Also the refresh. The native select stays the source of truth and the
+    // visible trigger is only updated when something dispatches a change;
+    // setting .value in code does not, so the label would keep showing the
+    // month we just left. Calling this again takes enhanceSelectAsDropdown's
+    // already-wrapped branch, which is a bare syncLabel() - so it both
+    // enhances and resyncs, and is safe to call as often as needed.
+    function resyncSelects() {
+        if (typeof enhanceSelectAsDropdown !== 'function') { return; }
+        ['loaf-basket-dropdown', 'loaf-month-dropdown', 'loaf-year-dropdown']
+            .forEach(function (id) { enhanceSelectAsDropdown(el(id)); });
+    }
+
+    function drawHead() {
+        var head = el('loaf-calendar-head');
+        head.innerHTML = '';
+        var row = document.createElement('tr');
+        DAY_LABELS.forEach(function (label) {
+            var cell = document.createElement('th');
+            cell.textContent = label;
+            row.appendChild(cell);
+        });
+        head.appendChild(row);
+    }
+
+    function balanceClass(balance) {
+        if (balance < 0) { return 'negative'; }
+        if (state.threshold !== null && balance < state.threshold) {
+            return 'below-threshold';
+        }
+        return 'above-threshold';
+    }
+
+    function line(className, label, value) {
+        var wrap = document.createElement('div');
+        wrap.className = className;
+        var text = document.createElement('span');
+        text.className = 'loaf-cal-value';
+        text.textContent = value;
+        if (label) {
+            var tag = document.createElement('span');
+            tag.className = 'loaf-cal-label';
+            tag.textContent = label;
+            wrap.appendChild(tag);
+        }
+        wrap.appendChild(text);
+        return wrap;
+    }
+
+    function drawCell(row) {
+        var cell = document.createElement('td');
+        cell.className = 'loaf-cal-cell';
+        cell.setAttribute('data-date', row.date);
+        if (!row.in_month) { cell.classList.add('dashboard-m-other-month'); }
+        if (row.is_today) { cell.classList.add('dashboard-m-today'); }
+        if (row.non_working) { cell.classList.add('loaf-cal-nonworking'); }
+
+        var inner = document.createElement('div');
+        inner.className = 'loaf-cal-inner';
+
+        var number = document.createElement('div');
+        number.className = 'loaf-cal-date-number';
+        number.textContent = row.day;
+        inner.appendChild(number);
+
+        if (row.worked) { inner.appendChild(line('loaf-cal-worked', 'W', formatHours(row.worked))); }
+        if (row.taken) { inner.appendChild(line('loaf-cal-taken', 'T', '-' + formatHours(row.taken))); }
+        if (row.accrued) { inner.appendChild(line('loaf-cal-accrual', 'A', '+' + formatHours(row.accrued))); }
+        if (row.granted) { inner.appendChild(line('loaf-cal-accrual', 'G', '+' + formatHours(row.granted))); }
+
+        // The balance is always drawn, because "what is left" is the number
+        // the page exists for. It takes the same threshold classes Blankee's
+        // remainder row uses.
+        var left = line('loaf-cal-left ' + balanceClass(row.balance), 'L', formatHours(row.balance));
+        inner.appendChild(left);
+
+        if (row.entries.length) { cell.classList.add('loaf-cal-booked'); }
+
+        cell.appendChild(inner);
+        cell.addEventListener('click', function () { openEntry(row); });
+        return cell;
+    }
+
+    function drawGrid(rows) {
+        var body = el('loaf-calendar-body');
+        body.innerHTML = '';
+        var tr = null;
+        rows.forEach(function (row, index) {
+            if (index % 7 === 0) {
+                tr = document.createElement('tr');
+                body.appendChild(tr);
+            }
+            tr.appendChild(drawCell(row));
+        });
+    }
+
+    function drawSummary(summary) {
+        el('loaf-today-balance').textContent = formatHours(summary.balance_today);
+        el('loaf-today-balance').className =
+            'loaf-summary-value ' + balanceClass(summary.balance_today);
+        el('loaf-year-end').textContent = formatHours(summary.balance_year_end);
+        el('loaf-year-end-date').textContent =
+            summary.year_end_date ? '(' + summary.year_end_date + ')' : '';
+        el('loaf-lowest').textContent = formatHours(summary.lowest);
+        el('loaf-lowest').className = 'loaf-summary-value ' + balanceClass(summary.lowest);
+
+        var item = el('loaf-negative-item');
+        if (summary.first_negative) {
+            el('loaf-negative').textContent = summary.first_negative;
+            item.style.display = '';
+        } else {
+            item.style.display = 'none';
+        }
+    }
+
+    function load() {
+        $.ajax({
+            url: '/loaf/api/month',
+            data: {basket_id: state.basketId, year: state.year, month: state.month},
+            success: function (response) {
+                if (response.status !== 'success') {
+                    showToast(response.message || 'Could not load that month.', 'error');
+                    return;
+                }
+                state.threshold = response.basket.low_balance_hours;
+                drawHead();
+                drawGrid(response.rows);
+                drawSummary(response.summary);
+            },
+            error: function (xhr) {
+                var body = xhr.responseJSON || {};
+                showToast(body.message || 'Could not load that month.', 'error');
+            }
+        });
+    }
+
+    function shiftMonth(by) {
+        var month = state.month + by;
+        var year = state.year;
+        while (month > 12) { month -= 12; year += 1; }
+        while (month < 1) { month += 12; year -= 1; }
+        state.month = month;
+        state.year = year;
+        el('loaf-month-dropdown').value = String(month);
+        el('loaf-year-dropdown').value = String(year);
+        resyncSelects();
+        load();
+    }
+
+    // ------------------------------------------------------------ booking ----
+
+    function syncEntryFields() {
+        var allDay = el('loaf-entry-all-day').checked;
+        $('.loaf-entry-time').prop('disabled', allDay);
+        el('loaf-entry-hours').disabled = !el('loaf-entry-override').checked;
+    }
+
+    function openEntry(row) {
+        var form = el('loaf-entry-form');
+        form.reset();
+        el('loaf-entry-id').value = '';
+        el('loaf-entry-basket').value = String(state.basketId);
+        el('loaf-entry-title').textContent = 'Book Time Off';
+        el('loaf-entry-submit').textContent = 'Book It';
+        el('loaf-entry-delete').style.display = 'none';
+        el('loaf-entry-all-day').checked = true;
+        el('loaf-entry-override').checked = false;
+        el('loaf-entry-start-date').value = row.date;
+        el('loaf-entry-end-date').value = '';
+
+        // A day that already has a booking opens that booking rather than
+        // stacking another on top of it, which is what a second click on the
+        // same cell almost always means.
+        if (row.entries.length) {
+            var entry = row.entries[0];
+            el('loaf-entry-id').value = entry.id;
+            el('loaf-entry-title').textContent = 'Edit Time Off';
+            el('loaf-entry-submit').textContent = 'Save';
+            el('loaf-entry-delete').style.display = '';
+            el('loaf-entry-all-day').checked = !!entry.all_day;
+            el('loaf-entry-start-date').value = (entry.starts_at || '').substring(0, 10);
+            el('loaf-entry-end-date').value = (entry.ends_at || '').substring(0, 10);
+            el('loaf-entry-start-time').value = (entry.starts_at || '').substring(11, 16);
+            el('loaf-entry-end-time').value = (entry.ends_at || '').substring(11, 16);
+            el('loaf-entry-status').value = entry.status || 'planned';
+            el('loaf-entry-override').checked = !!entry.hours_overridden;
+            el('loaf-entry-hours').value = entry.hours;
+            el('loaf-entry-note').value = entry.note || '';
+        }
+
+        syncEntryFields();
+        el('loaf-entry-modal').style.display = 'flex';
+    }
+
+    function closeEntry() { el('loaf-entry-modal').style.display = 'none'; }
+
+    function collectEntry() {
+        return {
+            basket_id: el('loaf-entry-basket').value,
+            all_day: el('loaf-entry-all-day').checked ? '1' : '',
+            start_date: el('loaf-entry-start-date').value,
+            end_date: el('loaf-entry-end-date').value,
+            start_time: el('loaf-entry-start-time').value,
+            end_time: el('loaf-entry-end-time').value,
+            status: el('loaf-entry-status').value,
+            hours_overridden: el('loaf-entry-override').checked ? '1' : '',
+            hours: el('loaf-entry-hours').value,
+            note: el('loaf-entry-note').value
+        };
+    }
+
+    el('loaf-entry-form').addEventListener('submit', function (event) {
+        event.preventDefault();
+        var entryId = el('loaf-entry-id').value;
+        var url = entryId ? '/loaf/api/entries/' + entryId : '/loaf/api/entries';
+        el('loaf-entry-submit').disabled = true;
+        $.ajax({
+            url: url, method: 'POST', contentType: 'application/json',
+            data: JSON.stringify(collectEntry()),
+            success: function (response) {
+                el('loaf-entry-submit').disabled = false;
+                if (response.status === 'success') {
+                    closeEntry();
+                    showToast(formatHours(response.hours) + ' hours booked.', 'success');
+                    load();
+                } else {
+                    showToast(response.message || 'Could not save that.', 'error');
+                }
+            },
+            error: function (xhr) {
+                el('loaf-entry-submit').disabled = false;
+                var body = xhr.responseJSON || {};
+                showToast(body.message || 'Could not save that.', 'error');
+            }
+        });
+    });
+
+    el('loaf-entry-delete').addEventListener('click', async function () {
+        var entryId = el('loaf-entry-id').value;
+        if (!entryId) { return; }
+        var ok = await showConfirmModal({
+            title: 'Delete this booking?',
+            message: 'The hours go back into the basket.',
+            confirmText: 'Delete', cancelText: 'Keep it', danger: true
+        });
+        if (!ok) { return; }
+        $.ajax({
+            url: '/loaf/api/entries/' + entryId + '/delete',
+            method: 'POST', contentType: 'application/json',
+            success: function () { closeEntry(); load(); },
+            error: function (xhr) {
+                var body = xhr.responseJSON || {};
+                showToast(body.message || 'Could not delete that.', 'error');
+            }
+        });
+    });
+
+    // ------------------------------------------------------------ wiring ----
+
+    fillPeriodSelects();
+    resyncSelects();
+    drawHead();
+    load();
+
+    $('#loaf-basket-dropdown').on('change', function () {
+        state.basketId = parseInt(this.value, 10);
+        // In the URL as well, so a reload and a shared link both come back to
+        // the basket being looked at.
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, '', '/loaf/dashboard?basket=' + state.basketId);
+        }
+        load();
+    });
+    $('#loaf-month-dropdown').on('change', function () {
+        state.month = parseInt(this.value, 10); load();
+    });
+    $('#loaf-year-dropdown').on('change', function () {
+        state.year = parseInt(this.value, 10); load();
+    });
+
+    $('#loaf-prev').on('click', function () { shiftMonth(-1); });
+    $('#loaf-next').on('click', function () { shiftMonth(1); });
+    $('#loaf-today').on('click', function () {
+        state.year = parseInt(TODAY.substring(0, 4), 10);
+        state.month = parseInt(TODAY.substring(5, 7), 10);
+        el('loaf-month-dropdown').value = String(state.month);
+        el('loaf-year-dropdown').value = String(state.year);
+        resyncSelects();
+        load();
+    });
+
+    $('#loaf-entry-modal').on('click', function (event) {
+        if (event.target === this) { closeEntry(); }
+    });
+    $('#loaf-entry-all-day, #loaf-entry-override').on('change', syncEntryFields);
+    $(document).on('keydown', function (event) {
+        if (event.key === 'Escape' && el('loaf-entry-modal').style.display === 'flex') {
+            closeEntry();
+        }
+    });
+
+    // Swipe between months, the way dashboard_m does. Passive listeners, and a
+    // fifth of the width to commit, so a vertical scroll is not read as one.
+    (function () {
+        var startX = null, startY = null;
+        var container = el('main-container');
+        container.addEventListener('touchstart', function (event) {
+            startX = event.touches[0].clientX;
+            startY = event.touches[0].clientY;
+        }, {passive: true});
+        container.addEventListener('touchend', function (event) {
+            if (startX === null) { return; }
+            var dx = event.changedTouches[0].clientX - startX;
+            var dy = event.changedTouches[0].clientY - startY;
+            startX = startY = null;
+            if (Math.abs(dx) < window.innerWidth / 5 || Math.abs(dx) < Math.abs(dy)) {
+                return;
+            }
+            shiftMonth(dx < 0 ? 1 : -1);
+        }, {passive: true});
+    })();
+})();
+</script>
+{% endif %}
+
 {% include 'footer.html' %}
 </body>
 </html>

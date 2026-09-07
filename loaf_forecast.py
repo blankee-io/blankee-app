@@ -471,6 +471,66 @@ def _balance_at(checkpoints, when):
     return answer
 
 
+# ----------------------------------------------------------- the horizon ----
+
+def accrual_year_bounds(basket, when):
+    """The accrual year a given date falls in, as (first, last).
+
+    Read from the basket, so a fiscal or anniversary year is handled the same
+    way a calendar one is. The last day is the day before the next turn, which
+    is what makes "what will be left at the end of the year" a date rather than
+    an assumption about December.
+    """
+    when = _as_date(when) or date.today()
+    month = int(_as_float(basket.get('year_start_month'), 1))
+    day = int(_as_float(basket.get('year_start_day'), 1))
+    month = min(max(month, 1), 12)
+
+    def turn(year):
+        last = calendar.monthrange(year, month)[1]
+        return date(year, month, min(day, last))
+
+    first = turn(when.year)
+    if first > when:
+        first = turn(when.year - 1)
+    return first, turn(first.year + 1) - timedelta(days=1)
+
+
+def month_bounds(year, month):
+    """The first and last day of a calendar month."""
+    year, month = int(year), int(month)
+    return (date(year, month, 1),
+            date(year, month, calendar.monthrange(year, month)[1]))
+
+
+def horizon_for(basket, viewing, today=None):
+    """How far to project when someone is looking at one month.
+
+    Far enough to answer both questions on the screen: what happens in the
+    month being viewed, and what will be left at the end of the accrual year.
+    Whichever of those is later wins - projecting only to the end of the viewed
+    month would leave the year-end figure blank every January.
+    """
+    today = _as_date(today) or date.today()
+    _, month_end = month_bounds(viewing.year, viewing.month)
+    _, year_end = accrual_year_bounds(basket, today)
+    return max(month_end, year_end)
+
+
+def grid_bounds(year, month, week_starts_on=5):
+    """The six-by-seven span a month calendar draws.
+
+    week_starts_on is a weekday index with monday=0; 5 is Saturday, which is
+    what dashboard_m starts its week on. The grid always covers whole weeks, so
+    it reaches into the months either side - those are the cells that get
+    dimmed rather than left blank.
+    """
+    first, last = month_bounds(year, month)
+    lead = (first.weekday() - week_starts_on) % 7
+    start = first - timedelta(days=lead)
+    # Six rows always, so the grid does not change height from month to month.
+    return start, start + timedelta(days=41), first, last
+
 # ------------------------------------------------- what a calendar shows ----
 
 def month_rows(basket, result, absence, first, last):
