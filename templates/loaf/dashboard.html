@@ -16,11 +16,18 @@
 
     <div class="calendarnav">
         <div class="calendarnavbuttonscontainer">
-            <div class="nav-dash-container">
-                <a href="{{ url_for('loaf.baskets') }}" class="nav-button">
-                    <i class="fa-solid fa-basket-shopping"></i>
-                    <span class="nav-tooltip">Manage Baskets</span>
+            {# Same switcher, other way round - see the note on the summary. #}
+            <div class="nav-dash-container" id="nav-dash-container">
+                <a href="{{ url_for('loaf.summary') }}" class="nav-button">
+                    <i class="fa-solid fa-bars-progress"></i>
+                    <span class="nav-tooltip">Summary View</span>
                 </a>
+                <div id="nav-inline-buttons">
+                    <div class="nav-button nav-button-focus">
+                        <i class="fa-solid fa-calendar-days"></i>
+                        <span class="nav-tooltip">Month View</span>
+                    </div>
+                </div>
             </div>
             {% if basket %}
             <div class="calendarnavbuttons">

@@ -21,6 +21,10 @@
 
     <div class="calendarnav">
         <div class="calendarnavbuttonscontainer">
+            {# Back and nothing else, exactly as manage_categories does it -
+               a settings page is not one of the views, so it does not carry the
+               view switcher. Loaf's landing is its month view, which is what
+               apps_registry declares as this app's start. #}
             <div class="nav-buttons">
                 <a href="{{ url_for('loaf.dashboard') }}" class="nav-button">
                     <i class="fa-solid fa-turn-left"></i>

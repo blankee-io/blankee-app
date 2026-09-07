@@ -20,15 +20,31 @@
 
     <div class="calendarnav">
         <div class="calendarnavbuttonscontainer">
-            <div class="nav-dash-container">
-                <a href="{{ url_for('loaf.dashboard') }}" class="nav-button">
-                    <i class="fa-solid fa-calendar-days"></i>
-                    <span class="nav-tooltip">Month View</span>
-                </a>
-                <a href="{{ url_for('loaf.baskets') }}" class="nav-button">
-                    <i class="fa-solid fa-basket-shopping"></i>
-                    <span class="nav-tooltip">Manage Baskets</span>
-                </a>
+            {# The view switcher, in dashboard_summary's shape: the page you are
+               on is a div with nav-button-focus rather than a link, which is what
+               paints it accent. Summary sits outside #nav-inline-buttons and the
+               rest go in it, the same division Blankee makes.
+
+               Manage Baskets is not here. Blankee's dashboards do not carry a
+               Manage Categories button either - that lives in the side menu. #}
+            <div class="nav-dash-container" id="nav-dash-container">
+                <div class="nav-button nav-button-focus">
+                    <i class="fa-solid fa-bars-progress"></i>
+                    <span class="nav-tooltip">Summary View</span>
+                </div>
+                <div id="nav-inline-buttons">
+                    <a href="{{ url_for('loaf.dashboard') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-days"></i>
+                        <span class="nav-tooltip">Month View</span>
+                    </a>
+                </div>
+            </div>
+            {# Hidden rather than absent, so the container's space-between keeps
+               the switcher in the same place it sits on the month view. #}
+            <div class="calendarnavbuttons" style="visibility: hidden;">
+                <div class="nav-button"><i class="fa-solid fa-left"></i></div>
+                <div class="nav-button"><span class="nav-current-icon"><i class="fa-solid fa-calendar-day"></i></span></div>
+                <div class="nav-button"><i class="fa-solid fa-right"></i></div>
             </div>
         </div>
     </div>
