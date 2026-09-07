@@ -740,6 +740,13 @@ body {
     max-height: 240px;
 }
 
+/* Loaf's Dashboards row opens two entries, not Blankee's six. Its own id for
+   exactly this reason - the collapse animates max-height, so borrowing a
+   height set for six rows would make a two-row list appear to snap open. */
+#loaf-dashboards-sections.expanded {
+    max-height: 80px;
+}
+
 .side-menu-backdrop {
     position: fixed;
     top: 0;
