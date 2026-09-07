@@ -480,3 +480,139 @@ def api_delete_entry(entry_id):
     if not loaf_data.delete_entry(current_user.id, entry_id):
         return jsonify({'status': 'error', 'message': 'Could not delete that.'}), 500
     return jsonify({'status': 'success'})
+
+
+# --------------------------------------------------------- the summary ----
+
+def _weekly_series(basket, result, first, last):
+    """Balance once a week across a span - what the little charts plot.
+
+    Weekly rather than daily because the balance only moves on accrual dates
+    and days off, so a daily series would repeat the same figure six times out
+    of seven and make the chart no more truthful. A year is 53 points, which
+    fits without the scrolling machinery Blankee's charts need for 3,650.
+    """
+    points = []
+    when = first
+    while when <= last:
+        points.append({'date': when.isoformat(),
+                       'balance': loaf_forecast.balance_on(result, when)})
+        when += timedelta(days=7)
+    if points and points[-1]['date'] != last.isoformat():
+        points.append({'date': last.isoformat(),
+                       'balance': loaf_forecast.balance_on(result, last)})
+    return points
+
+
+def _basket_summary(basket, entries, baskets, today, extra=None):
+    """One basket's figures, and optionally the same again with a proposed
+    booking folded in.
+
+    extra is an unsaved entry. It is added to BOTH usage and absence, because a
+    booking costs its own basket the hours and costs every basket the accrual
+    those hours would have earned - which is the whole reason Test Time Off
+    cannot be answered by subtracting a number.
+    """
+    usage = loaf_forecast.usage_by_date(basket, entries)
+    absence = loaf_forecast.absence_by_date(baskets, entries)
+
+    if extra is not None:
+        split = loaf_forecast._entry_split(basket, extra)
+        for when, hours in split.items():
+            usage[when] = round(usage.get(when, 0.0) + hours, 2)
+            absence[when] = round(absence.get(when, 0.0) + hours, 2)
+
+    year_start, year_end = loaf_forecast.accrual_year_bounds(basket, today)
+    result = loaf_forecast.project(basket, usage, absence, year_end, today=today)
+
+    summary = dict(result['summary'])
+    summary.pop('checkpoints', None)
+    for key in ('year_end_date', 'lowest_date', 'first_negative'):
+        if summary.get(key) is not None:
+            summary[key] = summary[key].isoformat()
+
+    summary.update({
+        'id': basket['id'],
+        'name': basket['name'],
+        'basket_type': basket['basket_type'],
+        'max_balance_hours': basket.get('max_balance_hours'),
+        'year_start': year_start.isoformat(),
+        'year_end': year_end.isoformat(),
+        'series': _weekly_series(basket, result, year_start, year_end),
+    })
+    return summary
+
+
+@loaf.route('/summary')
+@login_required
+def summary():
+    """Every basket at once: what is left, what has gone, and where it is going."""
+    return render_template(
+        'loaf/summary.html',
+        baskets=loaf_data.get_baskets(current_user.id, include_hidden=False),
+        today=_today(),
+        **_shell())
+
+
+@loaf.route('/api/summary')
+@login_required
+def api_summary():
+    today = _today()
+    baskets = loaf_data.get_baskets(current_user.id, include_hidden=False)
+    entries = loaf_data.get_entries(current_user.id)
+    return jsonify({
+        'status': 'success',
+        'today': today.isoformat(),
+        'baskets': [_basket_summary(b, entries, baskets, today) for b in baskets],
+    })
+
+
+@loaf.route('/api/test-time-off', methods=['POST'])
+@login_required
+def api_test_time_off():
+    """What a proposed booking would do, without saving anything.
+
+    Nothing is written. The proposed entry is folded into a copy of the figures
+    and the walk is run twice - as things stand, and with it - so the answer
+    accounts for the accrual those hours would have earned as well as for the
+    hours themselves. Subtracting the cost from the balance would miss half of
+    it, and would miss it in the reassuring direction.
+    """
+    values, error = loaf_data.clean_entry(_flat(_payload()))
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+
+    basket = loaf_data.get_basket(current_user.id, values['basket_id'])
+    if basket is None:
+        return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
+
+    today = _today()
+    baskets = loaf_data.get_baskets(current_user.id, include_hidden=False)
+    entries = loaf_data.get_entries(current_user.id)
+
+    values = _recompute(basket, values)
+    cost = values['hours']
+    if not cost:
+        return jsonify({'status': 'error',
+                        'message': 'That range does not cover any of your working '
+                                   'hours, so it would cost nothing.'}), 400
+
+    now = _basket_summary(basket, entries, baskets, today)
+    then = _basket_summary(basket, entries, baskets, today, extra=values)
+
+    return jsonify({
+        'status': 'success',
+        'basket': {'id': basket['id'], 'name': basket['name'],
+                   'low_balance_hours': basket.get('low_balance_hours')},
+        'cost': cost,
+        'now': now,
+        'then': then,
+        # The two numbers worth saying out loud, and they are not the same
+        # question: whether it ever goes negative, and how much slack is left
+        # at the worst moment.
+        'goes_negative': then.get('first_negative'),
+        'lowest': then.get('lowest'),
+        'lowest_date': then.get('lowest_date'),
+        'accrual_lost': round((now.get('accrued_total') or 0)
+                              - (then.get('accrued_total') or 0), 2),
+    })

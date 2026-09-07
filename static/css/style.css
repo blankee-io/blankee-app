@@ -19754,3 +19754,114 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
         box-shadow: none;
     }
 }
+
+/* ===== LOAF: THE SUMMARY =====
+   dashboard_summary's page, re-pointed at hours. The layout, the card, the
+   section headers, the progress bars and the test modal are all its classes
+   unchanged - .summary-page-layout, .summary-left-column (the narrow 33% one,
+   despite the name reading like the main column), .summary-right-column,
+   .buffer-card, .summary-section, .bucket-bar-container, .test-purchase-*.
+   Only the handful below are Loaf's own. */
+
+#loaf-summary-body {
+    background-color: var(--secondary-lighter);
+    min-height: 100vh;
+}
+
+/* The light-background wordmark, on the one page with a white card to put it
+   on. Sized against the card's own heading rather than the nav bar's. */
+.loaf-summary-mark {
+    display: block;
+    width: auto;
+    height: 26px;
+    margin: 0 0 14px;
+}
+
+.loaf-basket-section {
+    overflow: visible;
+}
+
+/* Loaf's sections are the accent, where Blankee's balance and savings graphs
+   are the primary teal - so a Loaf page never reads as a Blankee one at a
+   glance. */
+.loaf-basket-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background-color: var(--accent);
+}
+
+.loaf-basket-header .basket-kind {
+    margin-left: auto;
+    font-size: 10px;
+}
+
+/* The badge is on the accent bar here rather than on white, so the paid one
+   inverts and the unpaid one outlines in white instead of in accent. */
+.loaf-basket-header .basket-kind-pto {
+    background-color: var(--text-light);
+    color: var(--accent);
+}
+
+.loaf-basket-header .basket-kind-uto {
+    border-color: var(--text-light);
+    color: var(--text-light);
+}
+
+/* .summary-row is a fixed 50px built for one line of figures. This one holds a
+   heading and a bar, so it releases the height and stacks on narrow screens
+   the way the original does only under its own breakpoint. */
+.loaf-summary-row {
+    height: auto;
+    padding: 12px 14px;
+    background-color: var(--white);
+}
+
+.loaf-summary-row .summary-category-name {
+    flex: 0 0 auto;
+    min-width: 96px;
+    color: var(--text-dark);
+    font-size: 16px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.loaf-basket-warning {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background-color: var(--accent-lighter);
+    color: var(--danger);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Shorter than Blankee's 200px graphs, because there is one per basket and
+   three of them stacked at that height is a page of nothing but charts. No
+   overflow-x either: 53 weekly points fit, which is the reason this page does
+   not need the scrolling machinery the balance chart has. */
+.loaf-basket-graph {
+    height: 150px;
+    padding: 10px 12px 12px;
+    overflow: hidden;
+    cursor: default;
+}
+
+@media (max-width: 600px) {
+    .loaf-summary-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    .loaf-basket-graph {
+        height: 130px;
+        padding: 8px;
+    }
+
+    .loaf-summary-mark {
+        height: 22px;
+    }
+}

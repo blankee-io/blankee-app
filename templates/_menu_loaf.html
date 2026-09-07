@@ -6,9 +6,12 @@
   What is NOT here, because it is shared by every app: the header wordmark,
   the divider under it, and the footer at the bottom.
 
-  Summary joins this list when that page lands.
 #}
     <div class="dropdown-menu-section">
+        <div class="dropdown-link">
+            <a href="{{ url_for('loaf.summary') }}">Summary View</a>
+            <i class="fa-light fa-bars-progress"></i>
+        </div>
         <div class="dropdown-link">
             <a href="{{ url_for('loaf.dashboard') }}">Month View</a>
             <i class="fa-light fa-calendar-days"></i>
