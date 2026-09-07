@@ -17667,15 +17667,36 @@ tr[data-collapsed] {
     height: 19px;
 }
 
-/* The wordmark that names a sibling app's row, sized against the 14px labels
-   beside it the way the footer's is: these marks put their cap height at about
-   0.44 of a 500-unit box and Nunito's is near 0.705em, so matching the two is
-   the 1.7x this file already uses - 24px against 14px. It is the label here
-   rather than an icon beside one, so it takes the column's right edge. */
+/* The wordmark is the row's label, so it takes the row's full height rather
+   than a size matched to the text beside it. Matching cap height is right for
+   a mark sitting next to words - the footer's "by blankee" - but here there
+   are no words to match, and at label size a lockup reads as an icon.
+
+   Out of flow, and that part is not optional. The row's height comes from its
+   contents, so an in-flow image asked for 100% of it is circular - Chrome
+   resolves that by falling back to the image's own width, which took the
+   column to 243px and the row to 163. Absolute takes the image out of the
+   height calculation entirely: the row is then sized by the spacer and the
+   toggle, exactly as every other row is, and the image is 100% of the result.
+
+   The stretch is the other half - the row centres its items, so without it the
+   column is only as tall as its contents and there is nothing to be 100% of. */
+.other-app-name {
+    position: relative;
+    align-self: stretch;
+}
+
 .other-app-wordmark {
-    height: 24px;
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
     width: auto;
-    vertical-align: middle;
+    /* Loaf's is 57.6px wide in a column that never falls below 120, so this is
+       for the next app rather than this one. object-fit with it, because the
+       cap alone would squash a wider wordmark instead of fitting it. */
+    max-width: 100%;
+    object-fit: contain;
 }
 
 /* A menu that has nothing in it yet says so, rather than being empty or full
