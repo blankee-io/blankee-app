@@ -1,13 +1,20 @@
 {#
-  Loaf's own menu. Nothing behind it yet, so it says so rather than offering
-  rows that go nowhere - an empty menu reads as broken, and a menu of dead
-  links reads worse.
+  Loaf's own menu - the rows that belong to this application rather than
+  to the shell around it. nav.html picks the file by current_app_id, so a
+  sibling app gets its own list here without touching the nav.
 
-  When Loaf gets its screens they go here, in the same .dropdown-link shape
-  Blankee's use, and nothing in nav.html changes.
+  What is NOT here, because it is shared by every app: the header wordmark,
+  the divider under it, and the footer at the bottom.
+
+  Summary joins this list when that page lands.
 #}
-<div class="dropdown-menu-section">
-    <div class="side-menu-note">
-        Loaf is not built yet. When it is, your time off will be planned here.
+    <div class="dropdown-menu-section">
+        <div class="dropdown-link">
+            <a href="{{ url_for('loaf.dashboard') }}">Month View</a>
+            <i class="fa-light fa-calendar-days"></i>
+        </div>
+        <div class="dropdown-link">
+            <a href="{{ url_for('loaf.baskets') }}">Manage Baskets</a>
+            <i class="fa-light fa-basket-shopping"></i>
+        </div>
     </div>
-</div>

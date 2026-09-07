@@ -446,3 +446,312 @@ def invalidate_projection(user_id):
         log_exception(logger, 'LOAF',
                       'Could not invalidate projection for %s: %s' % (user_id, e))
         return False
+
+
+# ------------------------------------------------- turning a form into rows ----
+#
+# Coercion lives here rather than beside the routes because this module already
+# owns the column list, and two places that both believe they know the columns
+# is how one of them ends up wrong.
+
+CADENCE_UNITS = ('days', 'weeks', 'months', 'years')
+BASKET_TYPES = ('pto', 'uto')
+CARRYOVER_MODES = ('reset', 'all', 'capped')
+ENTRY_STATUSES = ('planned', 'taken', 'cancelled')
+
+# The same lowercase names the recurring forms emit and auto_balance validates,
+# so a cadence written here is one bucket_utils recognises. It skips a name it
+# does not know in silence, which is a cadence that never fires.
+WEEKDAY_NAMES = ('monday', 'tuesday', 'wednesday', 'thursday', 'friday',
+                 'saturday', 'sunday')
+
+LAST_DAY = 'Last Day'
+
+
+def _opt_number(value, cast=float):
+    """A nullable number from a form field.
+
+    An empty HTML number input arrives as '' and must become NULL, not 0 - the
+    difference between "no ceiling" and "a ceiling of nothing", and between
+    "carry everything" and "carry none of it". Returns (value, ok).
+    """
+    if value is None:
+        return None, True
+    text = str(value).strip()
+    if text == '':
+        return None, True
+    try:
+        return cast(text), True
+    except (TypeError, ValueError):
+        return None, False
+
+
+def _opt_time(value):
+    """A nullable TIME from an input type=time, which sends HH:MM."""
+    if value is None:
+        return None, True
+    text = str(value).strip()
+    if text == '':
+        return None, True
+    parts = text.split(':')
+    if len(parts) not in (2, 3):
+        return None, False
+    try:
+        hour, minute = int(parts[0]), int(parts[1])
+        second = int(parts[2]) if len(parts) == 3 else 0
+    except (TypeError, ValueError):
+        return None, False
+    if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+        return None, False
+    return '%02d:%02d:%02d' % (hour, minute, second), True
+
+
+def _opt_date(value):
+    if value is None:
+        return None, True
+    text = str(value).strip()
+    if text == '':
+        return None, True
+    try:
+        date.fromisoformat(text[:10])
+    except ValueError:
+        return None, False
+    return text[:10], True
+
+
+def _weekday_list(value):
+    """Whichever recognised weekday names were sent, in week order."""
+    if isinstance(value, (list, tuple)):
+        sent = [str(v).strip().lower() for v in value]
+    else:
+        sent = [p.strip().lower() for p in str(value or '').split(',')]
+    keep = [d for d in WEEKDAY_NAMES if d in sent]
+    return ','.join(keep) if keep else None
+
+
+def _monthly_day_list(value):
+    """Day-of-month entries: 1-31, or the literal Last Day.
+
+    Order is preserved and duplicates dropped. Anything unrecognised is
+    discarded rather than rejected, matching _clean_monthly_days.
+    """
+    if isinstance(value, (list, tuple)):
+        sent = [str(v).strip() for v in value]
+    else:
+        sent = [p.strip() for p in str(value or '').split(',')]
+    keep = []
+    for item in sent:
+        if item.lower() == LAST_DAY.lower():
+            candidate = LAST_DAY
+        else:
+            try:
+                number = int(item)
+            except (TypeError, ValueError):
+                continue
+            if not 1 <= number <= 31:
+                continue
+            candidate = str(number)
+        if candidate not in keep:
+            keep.append(candidate)
+    return ','.join(keep) if keep else None
+
+
+def clean_basket(payload):
+    """A basket form as column values, or an error to show the user.
+
+    Returns (values, error). error is a sentence fit for a toast; when it is
+    None, values is safe to hand to create_basket or update_basket.
+    """
+    values = {}
+
+    name = str(payload.get('name') or '').strip()
+    if not name:
+        return None, 'A basket needs a name.'
+    if len(name) > 255:
+        return None, 'That name is too long.'
+    values['name'] = name
+
+    kind = str(payload.get('basket_type') or 'pto').strip().lower()
+    if kind not in BASKET_TYPES:
+        return None, 'A basket is either PTO or UTO.'
+    values['basket_type'] = kind
+
+    unit = str(payload.get('cadence_unit') or 'weeks').strip().lower()
+    if unit not in CADENCE_UNITS:
+        return None, 'That pay cadence is not one Loaf understands.'
+    values['cadence_unit'] = unit
+
+    interval, ok = _opt_number(payload.get('cadence_interval'), int)
+    if not ok or (interval is not None and interval < 1):
+        return None, 'Pay has to land every one period or more.'
+    values['cadence_interval'] = interval or 1
+
+    mode = str(payload.get('carryover_mode') or 'reset').strip().lower()
+    if mode not in CARRYOVER_MODES:
+        return None, 'That carryover setting is not one Loaf understands.'
+    values['carryover_mode'] = mode
+
+    # Nullable figures. Empty means "not set", which is a real answer for every
+    # one of these - see _opt_number.
+    for field, label in (('max_balance_hours', 'The maximum balance'),
+                         ('grant_hours', 'The granted hours'),
+                         ('accrual_hours', 'The accrual'),
+                         ('carryover_cap_hours', 'The carryover cap'),
+                         ('low_balance_hours', 'The low-balance warning')):
+        number, ok = _opt_number(payload.get(field))
+        if not ok:
+            return None, '%s has to be a number.' % label
+        if number is not None and number < 0:
+            return None, '%s cannot be negative.' % label
+        values[field] = number
+
+    starting, ok = _opt_number(payload.get('starting_hours'))
+    if not ok:
+        return None, 'The starting balance has to be a number.'
+    values['starting_hours'] = 0.0 if starting is None else starting
+
+    for field, label in (('accrual_anchor_date', 'The first pay date'),
+                         ('starting_date', 'The starting date')):
+        when, ok = _opt_date(payload.get(field))
+        if not ok:
+            return None, '%s is not a date Loaf can read.' % label
+        values[field] = when
+
+    month, ok = _opt_number(payload.get('year_start_month'), int)
+    if not ok or (month is not None and not 1 <= month <= 12):
+        return None, 'The month the year starts in has to be 1 to 12.'
+    values['year_start_month'] = month or 1
+
+    day, ok = _opt_number(payload.get('year_start_day'), int)
+    if not ok or (day is not None and not 1 <= day <= 31):
+        return None, 'The day the year starts on has to be 1 to 31.'
+    values['year_start_day'] = day or 1
+
+    yearly_day, ok = _opt_number(payload.get('yearly_day'), int)
+    if not ok or (yearly_day is not None and not 1 <= yearly_day <= 31):
+        return None, 'That day of the year is not one Loaf can use.'
+    values['yearly_day'] = yearly_day
+
+    yearly_month, ok = _opt_number(payload.get('yearly_month'), int)
+    if not ok or (yearly_month is not None and not 1 <= yearly_month <= 12):
+        return None, 'That month of the year is not one Loaf can use.'
+    values['yearly_month'] = yearly_month
+
+    values['weekdays'] = _weekday_list(payload.get('weekdays'))
+    values['monthly_days'] = _monthly_day_list(payload.get('monthly_days'))
+    values['hidden'] = 1 if str(payload.get('hidden') or '') in ('1', 'true', 'on') else 0
+
+    # The working week. A day with no start is a day not worked, which is how
+    # the form says "I do not work Sundays" - it clears the two time inputs.
+    for index, prefix in enumerate(WEEKDAY_PREFIXES):
+        for part in ('start', 'end'):
+            field = '%s_%s' % (prefix, part)
+            when, ok = _opt_time(payload.get(field))
+            if not ok:
+                return None, 'The %s time for %s is not a time.' % (
+                    part, WEEKDAY_NAMES[index].capitalize())
+            values[field] = when
+        pause, ok = _opt_number(payload.get('%s_break_minutes' % prefix), int)
+        if not ok or (pause is not None and pause < 0):
+            return None, 'The break on %s has to be a whole number of minutes.' % (
+                WEEKDAY_NAMES[index].capitalize())
+        values['%s_break_minutes' % prefix] = pause or 0
+
+    # A day whose end is not after its start would be silently treated as not
+    # worked by the engine. Said out loud here instead, while someone is
+    # looking at the form.
+    for index, prefix in enumerate(WEEKDAY_PREFIXES):
+        start = _minutes(values['%s_start' % prefix])
+        end = _minutes(values['%s_end' % prefix])
+        if (start is None) != (end is None):
+            return None, ('%s needs both a start and an end, or neither.'
+                          % WEEKDAY_NAMES[index].capitalize())
+        if start is not None and end is not None and end <= start:
+            return None, ('%s finishes before it starts. Overnight shifts are not '
+                          'supported yet.' % WEEKDAY_NAMES[index].capitalize())
+
+    return values, None
+
+
+# ------------------------------------------------------------- describing ----
+
+_MONTH_NAMES = ('January', 'February', 'March', 'April', 'May', 'June', 'July',
+                'August', 'September', 'October', 'November', 'December')
+
+
+def _ordinal(number):
+    number = int(number)
+    if 10 <= number % 100 <= 20:
+        suffix = 'th'
+    else:
+        suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(number % 10, 'th')
+    return '%d%s' % (number, suffix)
+
+
+def describe_cadence(basket):
+    """When pay lands, in a sentence fragment.
+
+    The period itself comes from bucket_utils._format_cadence_string, which is
+    what the recurring pages already use - so "every 2 weeks" is worded the
+    same in both apps. Only the day detail is added here, because that part
+    reads differently for a pay date than for a bill.
+    """
+    from bucket_utils import _format_cadence_string
+
+    unit = str(basket.get('cadence_unit') or 'weeks')
+    interval = int(_as_int(basket.get('cadence_interval'), 1))
+    period = _format_cadence_string(unit, interval)
+
+    if unit == 'weeks':
+        days = [d.capitalize() for d in str(basket.get('weekdays') or '').split(',') if d]
+        if days:
+            return 'every %s on %s' % (period, ', '.join(days))
+    elif unit == 'months':
+        parts = [p.strip() for p in str(basket.get('monthly_days') or '').split(',') if p.strip()]
+        if parts:
+            shown = [p if p.lower() == LAST_DAY.lower() else _ordinal(p) for p in parts]
+            return 'every %s on the %s' % (period, ', '.join(shown))
+    elif unit == 'years':
+        day, month = basket.get('yearly_day'), basket.get('yearly_month')
+        if day and month:
+            try:
+                return 'every %s on %s %s' % (
+                    period, _MONTH_NAMES[int(month) - 1], _ordinal(day))
+            except (IndexError, TypeError, ValueError):
+                pass
+
+    return 'every %s' % period
+
+
+def _as_int(value, default=0):
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def describe_fill(basket):
+    """How a basket fills, in a sentence fragment, or None if it does not."""
+    accrual = basket.get('accrual_hours')
+    grant = basket.get('grant_hours')
+    parts = []
+    if accrual is not None:
+        parts.append('%.2f h %s' % (float(accrual), describe_cadence(basket)))
+    if grant is not None:
+        parts.append('%.2f h granted each year' % float(grant))
+    return ', then '.join(parts) if parts else None
+
+
+def describe_carryover(basket):
+    """What happens to the balance when the year turns."""
+    mode = str(basket.get('carryover_mode') or 'reset')
+    if mode == 'all':
+        return 'carries over'
+    if mode == 'capped':
+        cap = basket.get('carryover_cap_hours')
+        # A capped basket with no cap is resolved as zero by the engine, so it
+        # is described as what it does rather than as what it was set to.
+        if cap is None:
+            return 'resets (no cap set)'
+        return 'carries up to %.2f h' % float(cap)
+    return 'resets'

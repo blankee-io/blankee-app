@@ -17709,37 +17709,6 @@ tr[data-collapsed] {
 }
 
 /* The placeholder page, until there is an application behind the name. */
-.loaf-placeholder {
-    max-width: 520px;
-    margin: 60px auto;
-    padding: 0 20px;
-    text-align: left;
-}
-
-.loaf-tagline {
-    margin: 26px 0 10px;
-    color: var(--text-dark);
-    font-size: 19px;
-    font-weight: 700;
-}
-
-.loaf-note {
-    margin: 0 0 22px;
-    color: var(--secondary-dark);
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-.loaf-soon {
-    display: inline-block;
-    margin: 0;
-    padding: 5px 12px;
-    background-color: var(--primary-lighter);
-    border-radius: 20px;
-    color: var(--primary);
-    font-size: 12px;
-    font-weight: 700;
-}
 
 /* The widget ships its own floating button. Hidden so there is one way in,
    rather than two controls for the same overlay, one of them covering the page.
@@ -19115,4 +19084,404 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 #dashboard .bucket-late-badge,
 #dashboard-m-body .bucket-late-badge {
     right: -5px;
+}
+
+/* The Loaf placeholder page. Goes when the real month view replaces it. */
+.loaf-placeholder {
+    max-width: 520px;
+    margin: 60px auto;
+    padding: 0 20px;
+    text-align: left;
+}
+
+.loaf-tagline {
+    margin: 26px 0 10px;
+    color: var(--text-dark);
+    font-size: 19px;
+    font-weight: 700;
+}
+
+.loaf-note {
+    margin: 0 0 22px;
+    color: var(--secondary-dark);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.loaf-soon {
+    display: inline-block;
+    margin: 0;
+    padding: 5px 12px;
+    background-color: var(--primary-lighter);
+    border-radius: 20px;
+    color: var(--primary);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* ===== LOAF: BASKETS =====
+   The management page, built on recurring_i.html's shape: the same container
+   metrics, the same table skeleton, the same row-action buttons, and the same
+   mobile trick of hiding a merged value in the primary cell and swapping
+   display at the breakpoint.
+
+   Column names are Loaf's own rather than aliases onto .income-*-col, so a
+   change to Blankee's recurring pages cannot move this one.
+
+   Colour: the --accent family. Loaf's wordmark is #E45F25 and Blankee's accent
+   is #E45F1C - close enough that a parallel palette would be two names for one
+   colour, and one of them would drift. */
+
+#loaf-baskets-body {
+    min-width: 340px !important;
+}
+
+.loaf-baskets-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-width: 300px;
+    max-width: 875px;
+    margin: 0 auto;
+    background-color: transparent;
+    border-radius: 10px;
+    text-overflow: ellipsis;
+}
+
+.recurring-header.baskets {
+    color: var(--accent);
+}
+
+.recurring-header.baskets span {
+    color: var(--accent);
+}
+
+.loaf-baskets-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: clamp(11px, calc(7.5px + 0.5vw), 14px);
+    text-align: left;
+}
+
+.loaf-baskets-table th,
+.loaf-baskets-table td {
+    height: 35px;
+    padding: 4px 12px;
+    box-sizing: border-box;
+}
+
+.loaf-baskets-table thead {
+    background-color: var(--accent);
+    color: var(--text-light);
+}
+
+.loaf-baskets-table th:first-child {
+    border-top-left-radius: 10px;
+}
+
+.loaf-baskets-table th:last-child {
+    border-top-right-radius: 10px;
+}
+
+.loaf-baskets-table tfoot tr {
+    background-color: var(--secondary);
+}
+
+.loaf-baskets-table tfoot tr:last-child td:first-child {
+    border-bottom-left-radius: 10px;
+}
+
+.loaf-baskets-table tfoot tr:last-child td:last-child {
+    border-bottom-right-radius: 10px;
+}
+
+.loaf-baskets-table tbody tr:nth-child(even) {
+    background-color: var(--accent-lighter);
+}
+
+.loaf-baskets-table tbody tr:nth-child(odd) {
+    background-color: var(--accent-hover);
+}
+
+/* Column widths. Fills takes the most because it is the only cell holding a
+   sentence; everything else is a figure or a short label. */
+.loaf-baskets-table th.basket-handle-col,
+.loaf-baskets-table td.basket-handle-col { width: 4%; }
+.loaf-baskets-table th.basket-name-col,
+.loaf-baskets-table td.basket-name-col { width: 20%; }
+.loaf-baskets-table th.basket-type-col,
+.loaf-baskets-table td.basket-type-col { width: 7%; }
+.loaf-baskets-table th.basket-start-col,
+.loaf-baskets-table td.basket-start-col { width: 10%; }
+.loaf-baskets-table th.basket-fill-col,
+.loaf-baskets-table td.basket-fill-col { width: 26%; }
+.loaf-baskets-table th.basket-max-col,
+.loaf-baskets-table td.basket-max-col { width: 10%; }
+.loaf-baskets-table th.basket-carry-col,
+.loaf-baskets-table td.basket-carry-col { width: 13%; }
+.loaf-baskets-table th.basket-action-col,
+.loaf-baskets-table td.basket-action-col { width: 10%; }
+
+.loaf-baskets-table td.basket-start,
+.loaf-baskets-table td.basket-max {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.loaf-baskets-table td.basket-name,
+.loaf-baskets-table td.basket-fill,
+.loaf-baskets-table td.basket-carry {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.basket-name-text {
+    font-weight: 600;
+}
+
+.basket-handle {
+    padding-right: 0 !important;
+    text-align: center;
+}
+
+/* PTO and UTO read as a pair, so they differ by fill rather than by wording:
+   paid is solid, unpaid is outlined. */
+.basket-kind {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 0.85em;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+.basket-kind-pto {
+    background-color: var(--accent);
+    color: var(--text-light);
+}
+
+.basket-kind-uto {
+    background-color: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+}
+
+.basket-none,
+.basket-unlimited {
+    color: var(--secondary-dark);
+    font-style: italic;
+}
+
+/* The action cell, joined onto the same treatment .income-actions gets rather
+   than restated - see the group at the recurring tables above. */
+.basket-actions {
+    padding-right: 12px !important;
+    padding-left: 2px !important;
+    text-align: right !important;
+    vertical-align: middle;
+}
+
+/* ===== LOAF: THE BASKET FORM =====
+   The modal reuses .income-form-container and the whole cadence-form family.
+   Only the two things below are new. */
+
+/* A labelled rule, because this form has four distinct sections - what it
+   holds, how it fills, the working week, the year end - and without them it
+   reads as twenty unrelated fields. */
+.loaf-form-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    margin: 18px 0 6px;
+}
+
+.loaf-form-divider::before,
+.loaf-form-divider::after {
+    flex: 1;
+    height: 1px;
+    background-color: var(--secondary-hover);
+    content: "";
+}
+
+.loaf-form-divider span {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+/* The working week. A grid rather than seven rows of floated inputs so the
+   three columns line up without each row measuring itself, and it collapses to
+   the same shape on a narrow screen. */
+.loaf-schedule-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    padding: 10px;
+    background-color: var(--accent-lighter);
+    border: 1px solid var(--accent-hover);
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+
+.loaf-schedule-head,
+.loaf-schedule-row {
+    display: grid;
+    grid-template-columns: 42px 1fr 1fr 74px;
+    gap: 6px;
+    align-items: center;
+}
+
+.loaf-schedule-head span {
+    color: var(--secondary-dark);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+.loaf-schedule-day {
+    margin: 0 !important;
+    color: var(--text-dark);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Both inputs are sized by the grid, not by themselves - a time input left to
+   its intrinsic width is a different size in every browser. */
+.loaf-schedule-time,
+.loaf-schedule-break {
+    width: 100%;
+    min-width: 0;
+    padding: 4px 6px;
+    background-color: var(--white);
+    border: 1px solid var(--secondary-hover);
+    border-radius: 6px;
+    box-sizing: border-box;
+    font-size: 12px;
+}
+
+.loaf-schedule-time:focus,
+.loaf-schedule-break:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+/* A day with no times is a day not worked, which is easy to read as a mistake.
+   Dimming the empty pair says it was deliberate. */
+.loaf-schedule-time:placeholder-shown,
+.loaf-schedule-time:not(:valid) {
+    color: var(--secondary);
+}
+
+.loaf-schedule-tools {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.loaf-schedule-tools .add-day-btn,
+.loaf-schedule-tools .remove-day-btn {
+    margin: 0;
+}
+
+/* ===== LOAF: BASKETS, NARROWER SCREENS ===== */
+
+@media (max-width: 900px) {
+    .loaf-baskets-table th,
+    .loaf-baskets-table td {
+        padding: 4px 6px;
+    }
+
+    .loaf-baskets-table th.basket-fill-col,
+    .loaf-baskets-table td.basket-fill-col { width: 24%; }
+    .loaf-baskets-table th.basket-carry-col,
+    .loaf-baskets-table td.basket-carry-col { width: 15%; }
+    .loaf-baskets-table th.basket-action-col,
+    .loaf-baskets-table td.basket-action-col {
+        width: 87px;
+        min-width: 87px;
+        max-width: 87px;
+    }
+}
+
+@media (max-width: 600px) {
+    .loaf-baskets-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .loaf-baskets-table {
+        min-width: 350px;
+    }
+
+    /* Type and Year End are dropped rather than shrunk. Type reappears inside
+       the name cell from the span already in the markup; Year End is a setting
+       rather than a figure, so it is left to the edit modal on a phone. */
+    .loaf-baskets-table th.basket-type-col,
+    .loaf-baskets-table td.basket-type,
+    .loaf-baskets-table th.basket-carry-col,
+    .loaf-baskets-table td.basket-carry {
+        display: none;
+    }
+
+    .mobile-type-label {
+        display: block;
+        color: var(--secondary-dark);
+        font-size: 0.8em;
+    }
+
+    .loaf-baskets-table th.basket-start-col .th-full,
+    .loaf-baskets-table th.basket-max-col .th-full {
+        display: none;
+    }
+
+    .loaf-baskets-table th.basket-start-col .th-mobile,
+    .loaf-baskets-table th.basket-max-col .th-mobile {
+        display: inline;
+    }
+
+    .loaf-baskets-table th.basket-handle-col,
+    .loaf-baskets-table td.basket-handle-col { width: 24px; }
+    .loaf-baskets-table th.basket-name-col,
+    .loaf-baskets-table td.basket-name-col { width: 26%; }
+    .loaf-baskets-table th.basket-start-col,
+    .loaf-baskets-table td.basket-start-col { width: 15%; }
+    .loaf-baskets-table th.basket-fill-col,
+    .loaf-baskets-table td.basket-fill-col { width: 34%; }
+    .loaf-baskets-table th.basket-max-col,
+    .loaf-baskets-table td.basket-max-col { width: 15%; }
+    .loaf-baskets-table th.basket-action-col,
+    .loaf-baskets-table td.basket-action-col {
+        width: 34px;
+        min-width: 34px;
+        max-width: 34px;
+    }
+
+    .loaf-baskets-table td.basket-name,
+    .loaf-baskets-table td.basket-fill {
+        white-space: normal;
+    }
+
+    /* Same as the recurring tables: three icons stack in a 34px column rather
+       than shrinking to nothing. */
+    .loaf-baskets-table .row-actions {
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    /* The break column loses its own header word and keeps its width, because
+       a minutes field narrower than this shows two digits and an ellipsis. */
+    .loaf-schedule-head,
+    .loaf-schedule-row {
+        grid-template-columns: 34px 1fr 1fr 60px;
+        gap: 4px;
+    }
 }
