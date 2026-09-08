@@ -19570,7 +19570,13 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     font-weight: bold;
 }
 
-.loaf-period-header .styled-dropdown:first-of-type .styled-dropdown-trigger {
+/* Only the basket switcher. This was written as
+   .loaf-period-header .styled-dropdown:first-of-type, which reads as "the
+   first dropdown in the header" and is not: :first-of-type matches by tag,
+   and enhanceSelectAsDropdown wraps every select in a div - so the month
+   was first-of-type inside .loaf-period-pair and took the accent too,
+   leaving the month orange and the year teal. */
+.loaf-basket-pair .styled-dropdown-trigger {
     color: var(--accent);
 }
 
