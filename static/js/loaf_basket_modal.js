@@ -97,6 +97,7 @@
     function syncAmounts() {
         syncNone('basket-no-accrual', 'basket-accrual-hours');
         syncNone('basket-no-grant', 'basket-grant-hours');
+        syncNone('basket-warn-negative-only', 'basket-low-balance-hours');
     }
 
     // Off is the same idea for a day: the engine reads a missing start as a day
@@ -122,6 +123,7 @@
         $('.basket-weekday').prop('checked', false);
         el('basket-no-accrual').checked = false;
         el('basket-no-grant').checked = false;
+        el('basket-warn-negative-only').checked = false;
         el('basket-break').value = '0';
         WEEKDAY_PREFIXES.forEach(function (prefix) {
             el('basket-' + prefix + '-start').value = '';
@@ -142,6 +144,10 @@
         el('basket-year-start-month').value = '1';
         el('basket-year-start-day').value = '1';
         el('basket-carryover-mode').value = 'reset';
+        // No threshold by default, which IS "only when negative" - so the box
+        // starts ticked rather than the field starting blank with nothing
+        // saying what blank means.
+        el('basket-warn-negative-only').checked = true;
         // A sensible week rather than a blank grid: Mon-Fri, nine to five, with
         // an unpaid half hour. Every part is editable, and a blank grid would
         // silently mean "I never work", which no basket wants.
@@ -175,7 +181,9 @@
         el('basket-name').value = row.attr('data-name') || '';
         el('basket-type').value = row.attr('data-basket-type') || 'pto';
         el('basket-starting-hours').value = row.attr('data-starting-hours') || '0';
-        el('basket-low-balance-hours').value = row.attr('data-low-balance-hours') || '';
+        var warn = row.attr('data-low-balance-hours') || '';
+        el('basket-low-balance-hours').value = warn;
+        el('basket-warn-negative-only').checked = warn === '';
 
         // An empty figure IS "does not accrue" - that is what the NULL means -
         // so the box comes back ticked rather than the field coming back blank
@@ -244,7 +252,8 @@
             // No starting_date and no max_balance_hours: the server stamps the
             // first whenever the balance changes, and nothing sets the second
             // any more. See the note at the top of _basket_modal.html.
-            low_balance_hours: val('basket-low-balance-hours'),
+            low_balance_hours: el('basket-warn-negative-only').checked
+                ? '' : val('basket-low-balance-hours'),
             accrual_hours: el('basket-no-accrual').checked
                 ? '' : val('basket-accrual-hours'),
             grant_hours: el('basket-no-grant').checked
@@ -320,7 +329,8 @@
         el('basket-monthly-container').appendChild(monthlyDaySelect(null));
     });
 
-    $('#basket-no-accrual, #basket-no-grant').on('change', syncAmounts);
+    $('#basket-no-accrual, #basket-no-grant, #basket-warn-negative-only')
+        .on('change', syncAmounts);
     $('.loaf-schedule-off').on('change', function () {
         syncDay(this.id.replace('basket-', '').replace('-off', ''));
     });

@@ -65,12 +65,19 @@
 
                 <label for="basket-low-balance-hours">Warn me when hour balance goes below
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                        <span class="info-tip-text">Hours. The month view marks any day the balance
-                            drops under this. Empty warns only when it goes negative.</span>
+                        <span class="info-tip-text">Hours. The month view marks any day the
+                            balance drops under this - so you see it coming rather than
+                            finding out when it has already gone.</span>
                     </span>
                 </label>
-                <input type="number" id="basket-low-balance-hours" class="recurring-amount"
-                       step="0.01" min="0" placeholder="Only when negative">
+                <div class="loaf-amount-row">
+                    <input type="number" id="basket-low-balance-hours"
+                           class="recurring-amount" step="0.01" min="0">
+                    <label class="loaf-amount-none" for="basket-warn-negative-only">
+                        <input type="checkbox" id="basket-warn-negative-only">
+                        Only when negative
+                    </label>
+                </div>
 
                 <div class="loaf-form-divider"><span>How it fills</span></div>
 
