@@ -1,0 +1,215 @@
+{#
+  The add/edit basket form, shared by every page that offers one.
+
+  ONE modal for add and edit. recurring_i.html carries two near-identical
+  copies with edit- prefixed ids, which means two copies of the cadence widget
+  and two copies of its change handler; they have already drifted once. A
+  hidden basket id, empty for an add, is the whole difference.
+
+  And one copy across pages, for the same reason: Manage Baskets and the month
+  view both open this, and two copies would be the same trap one level up.
+
+  Behaviour lives in static/js/loaf_basket_modal.js, which a page loads and
+  then calls loafBasketModal.openAdd() or .openEdit(id) from whatever opened
+  it. The weekday lists ride on the element below so that file needs no Jinja.
+
+  A page including this must also render the two things the form depends on:
+  alert_modals.html, for showToast, and the stylesheet's .income-form-container
+  family, which it borrows from the recurring forms.
+#}
+    <div id="basket-modal" class="modal"
+         data-weekday-prefixes='{{ weekday_prefixes | list | tojson }}'
+         data-weekday-names='{{ weekday_names | list | tojson }}'>
+        <div class="income-form-container">
+            <h2 id="basket-modal-title">Add a Basket</h2>
+            <form id="basket-form" autocomplete="off">
+                <input type="hidden" id="basket-id" value="">
+
+                <label for="basket-name">Name</label>
+                <input type="text" id="basket-name" class="category-input" maxlength="255" required>
+
+                <label for="basket-type">Paid or unpaid
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">A basket is one or the other, never both.
+                            Unpaid hours still reduce what you accrue, in this basket and every other.</span>
+                    </span>
+                </label>
+                <select id="basket-type">
+                    <option value="pto">PTO - paid time off</option>
+                    <option value="uto">UTO - unpaid time off</option>
+                </select>
+
+                <div class="loaf-form-divider"><span>What it holds</span></div>
+
+                <label for="basket-starting-hours">Hours you have now
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">What is in the basket today. Every forecast is
+                            replayed from this figure, so it is also how you correct Loaf against
+                            the number your employer shows.</span>
+                    </span>
+                </label>
+                <input type="number" id="basket-starting-hours" class="recurring-amount"
+                       step="0.01" min="0" value="0.00">
+
+                <label for="basket-starting-date">As of</label>
+                <input type="date" id="basket-starting-date">
+
+                <label for="basket-max-balance-hours">Maximum balance
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Accrual stops once the balance reaches this.
+                            Leave it empty for no limit. Because it stops accrual, taking time off
+                            can make room and so increase what you earn over a year.</span>
+                    </span>
+                </label>
+                <input type="number" id="basket-max-balance-hours" class="recurring-amount"
+                       step="0.01" min="0" placeholder="Unlimited">
+
+                <label for="basket-low-balance-hours">Warn me below
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Hours. The month view marks any day the balance
+                            drops under this. Empty warns only when it goes negative.</span>
+                    </span>
+                </label>
+                <input type="number" id="basket-low-balance-hours" class="recurring-amount"
+                       step="0.01" min="0" placeholder="Only when negative">
+
+                <div class="loaf-form-divider"><span>How it fills</span></div>
+
+                <label for="basket-accrual-hours">Accrued each pay period
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Hours per full period. Loaf pro-rates it by the
+                            hours you actually worked, so time off in one period reduces the next
+                            accrual. Leave empty if this basket does not accrue.</span>
+                    </span>
+                </label>
+                <input type="number" id="basket-accrual-hours" class="recurring-amount"
+                       step="0.01" min="0" placeholder="Does not accrue">
+
+                <label for="basket-grant-hours">Granted at the start of the year
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">A flat amount handed over when the year turns.
+                            Not pro-rated, and not capped by the maximum balance. You can have this
+                            as well as an accrual.</span>
+                    </span>
+                </label>
+                <input type="number" id="basket-grant-hours" class="recurring-amount"
+                       step="0.01" min="0" placeholder="No grant">
+
+                <label for="basket-accrual-anchor-date">First pay date
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Which week a fortnightly cadence lands on.
+                            Every pay date is counted forward from here.</span>
+                    </span>
+                </label>
+                <input type="date" id="basket-accrual-anchor-date">
+
+                {# The cadence widget, in the markup the recurring forms use, so
+                   it inherits their CSS untouched. This is the PAY cadence -
+                   the work schedule is the grid further down, and the two must
+                   not be confused. #}
+                <label for="basket-cadence-interval">Pay lands every</label>
+                <div class="cadence-row">
+                    <input type="number" id="basket-cadence-interval" min="1" value="2">
+                    <select id="basket-cadence-unit">
+                        <option value="days">Day(s)</option>
+                        <option value="weeks" selected>Week(s)</option>
+                        <option value="months">Month(s)</option>
+                        <option value="years">Year(s)</option>
+                    </select>
+                </div>
+
+                <div id="basket-weekly" class="cadence-weekly" style="display:none;">
+                    <label>On:</label>
+                    {% for prefix in weekday_prefixes %}
+                    <div class="weekday">
+                        <input type="checkbox" class="basket-weekday"
+                               value="{{ weekday_names[loop.index0] }}">
+                        {{ weekday_names[loop.index0][:2]|capitalize }}
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <div id="basket-monthly" class="cadence-monthly" style="display:none;">
+                    <label>Days of the month:</label>
+                    <div id="basket-monthly-container" class="cadence-monthly-container"></div>
+                    <button type="button" id="basket-add-day" class="add-day-btn">+ Add Another Day</button>
+                </div>
+
+                <div id="basket-yearly" class="cadence-yearly" style="display:none;">
+                    <label for="basket-yearly-day">Day of the year:</label>
+                    <input type="number" id="basket-yearly-day" min="1" max="31">
+                    <label for="basket-yearly-month">Month of the year:</label>
+                    <select id="basket-yearly-month">
+                        {% for month in ['January','February','March','April','May','June',
+                                         'July','August','September','October','November','December'] %}
+                        <option value="{{ loop.index }}">{{ month }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="loaf-form-divider"><span>Your working week</span></div>
+
+                {# The one genuinely new form component. Times rather than a
+                   total per day, because "off Tuesday from 1pm" cannot be
+                   costed without them. Clearing both times marks a day not
+                   worked. The break is per day, since a short day usually has
+                   no lunch. #}
+                <div class="loaf-schedule-grid">
+                    <div class="loaf-schedule-head">
+                        <span></span><span>Start</span><span>End</span><span>Unpaid break</span>
+                    </div>
+                    {% for prefix in weekday_prefixes %}
+                    <div class="loaf-schedule-row" data-prefix="{{ prefix }}">
+                        <label class="loaf-schedule-day" for="basket-{{ prefix }}-start">
+                            {{ weekday_names[loop.index0][:3]|capitalize }}
+                        </label>
+                        <input type="time" id="basket-{{ prefix }}-start" class="loaf-schedule-time">
+                        <input type="time" id="basket-{{ prefix }}-end" class="loaf-schedule-time">
+                        <input type="number" id="basket-{{ prefix }}-break" class="loaf-schedule-break"
+                               min="0" step="5" value="0" aria-label="Unpaid break in minutes">
+                    </div>
+                    {% endfor %}
+                    <div class="loaf-schedule-tools">
+                        <button type="button" id="basket-copy-monday" class="add-day-btn">
+                            Copy Monday to Tue&ndash;Fri
+                        </button>
+                        <button type="button" id="basket-clear-week" class="remove-day-btn"
+                                title="Clear every day">Clear</button>
+                    </div>
+                </div>
+
+                <div class="loaf-form-divider"><span>When the year turns</span></div>
+
+                <label for="basket-year-start-month">The year starts on
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">A hire anniversary or a fiscal year, not
+                            necessarily 1 January.</span>
+                    </span>
+                </label>
+                <div class="cadence-row">
+                    <select id="basket-year-start-month">
+                        {% for month in ['January','February','March','April','May','June',
+                                         'July','August','September','October','November','December'] %}
+                        <option value="{{ loop.index }}">{{ month }}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="number" id="basket-year-start-day" min="1" max="31" value="1">
+                </div>
+
+                <label for="basket-carryover-mode">Whatever is left</label>
+                <select id="basket-carryover-mode">
+                    <option value="reset">is lost - the balance resets</option>
+                    <option value="all">carries over in full</option>
+                    <option value="capped">carries over up to a limit</option>
+                </select>
+
+                <div id="basket-carryover-cap-row" style="display:none;">
+                    <label for="basket-carryover-cap-hours">Carry over at most</label>
+                    <input type="number" id="basket-carryover-cap-hours" class="recurring-amount"
+                           step="0.01" min="0" placeholder="0.00">
+                </div>
+
+                <button type="submit" id="basket-submit">Add Basket</button>
+            </form>
+        </div>
+    </div>

@@ -179,6 +179,10 @@ def dashboard():
         baskets=loaf_data.get_baskets(current_user.id, include_hidden=False),
         basket=basket,
         today=today,
+        # _basket_modal.html carries these on the element for its script to
+        # read, so any page including that form has to pass them.
+        weekday_prefixes=loaf_data.WEEKDAY_PREFIXES,
+        weekday_names=loaf_data.WEEKDAY_NAMES,
         **_shell())
 
 

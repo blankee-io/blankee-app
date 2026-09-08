@@ -19528,6 +19528,28 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     gap: 8px;
 }
 
+/* The switcher and its add button, kept together on the left. The header
+   is space-between, so without this wrapper a third child would spread
+   the three evenly across the line. */
+.loaf-basket-pair {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Loaf's plus is the accent, like everything else it owns. .add-income-btn
+   is Blankee teal, which beside an accent basket name reads as a control
+   belonging to a different app. */
+#loaf-page .add-income-btn,
+#loaf-baskets-body .add-income-btn {
+    color: var(--accent);
+}
+
+#loaf-page .add-income-btn:hover,
+#loaf-baskets-body .add-income-btn:hover {
+    color: var(--accent-hover);
+}
+
 /* The switcher reads as the page's subject rather than as a control, which is
    why it takes the heading's own size and colour. */
 .loaf-basket-dropdown {

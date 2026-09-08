@@ -8,6 +8,7 @@
     {% include '_fontawesome.html' %}
     <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/loaf_basket_modal.js') }}" defer></script>
     {% include '_head_icons.html' %}
 </head>
 <body id="loaf-page" data-app="loaf">
@@ -65,14 +66,23 @@
            unlike .dashboard-m-month-year-header, whose margin: 0 50% centring
            would have to be undone first. #}
         <div id="loaf-period-header" class="month-year-header loaf-period-header">
-            <select id="loaf-basket-dropdown" class="loaf-basket-dropdown"
-                    aria-label="Which basket">
-                {% for option in baskets %}
-                <option value="{{ option.id }}" {{ 'selected' if option.id == basket.id }}>
-                    {{ option.name }}
-                </option>
-                {% endfor %}
-            </select>
+            {# Wrapped, because the header is space-between: a third child
+               would spread the three across the line instead of keeping the
+               switcher and its button together on the left. #}
+            <span class="loaf-basket-pair">
+                <select id="loaf-basket-dropdown" class="loaf-basket-dropdown"
+                        aria-label="Which basket">
+                    {% for option in baskets %}
+                    <option value="{{ option.id }}" {{ 'selected' if option.id == basket.id }}>
+                        {{ option.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <button id="loaf-add-basket" class="add-income-btn" type="button"
+                        title="Add Basket" aria-label="Add Basket">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
+            </span>
             <span class="loaf-period-pair">
                 <select id="loaf-month-dropdown" class="month-dropdown" aria-label="Month"></select>
                 <select id="loaf-year-dropdown" class="year-dropdown" aria-label="Year"></select>
@@ -169,6 +179,8 @@
         </div>
     </div>
     {% endif %}
+
+    {% if basket %}{% include 'loaf/_basket_modal.html' %}{% endif %}
 
     {% include 'loading_modals.html' %}
 
@@ -533,6 +545,10 @@
         state.year = parseInt(this.value, 10); load();
     });
 
+    // The same modal Manage Baskets opens, opened the same way. Saving
+    // reloads, which is what brings the new basket into the switcher.
+    $('#loaf-add-basket').on('click', function () { loafBasketModal.openAdd(); });
+
     $('#loaf-prev').on('click', function () { shiftMonth(-1); });
     $('#loaf-next').on('click', function () { shiftMonth(1); });
     $('#loaf-today').on('click', function () {
@@ -580,6 +596,8 @@
         // does too now, but a swipe behind an open dialog still reads as a
         // mis-touch rather than as navigation.
         if (el('loaf-entry-modal').style.display === 'flex') { return; }
+        // And the basket form, which is the same element Manage Baskets uses.
+        if (window.loafBasketModal && loafBasketModal.isOpen()) { return; }
 
         touchStartX = event.touches[0].screenX;
         touchStartY = event.touches[0].screenY;
