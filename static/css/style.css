@@ -10199,21 +10199,26 @@ transform: scale(1.2);
 .income-form-container input[type="number"],
 .income-form-container input[type="text"],
 .income-form-container input[type="date"],
+.income-form-container input[type="time"],
 .income-form-container select,
 .ca-form-container input[type="number"],
 .ca-form-container input[type="text"],
 .ca-form-container input[type="date"],
+.ca-form-container input[type="time"],
 .ca-form-container select,
 .expense-form-container input[type="number"],
 .expense-form-container input[type="text"],
 .expense-form-container input[type="date"],
+.expense-form-container input[type="time"],
 .expense-form-container select,
 .convert-recurring-form-container input[type="number"],
 .convert-recurring-form-container input[type="text"],
 .convert-recurring-form-container input[type="date"],
+.convert-recurring-form-container input[type="time"],
 .convert-recurring-form-container select,
 .cadence-form input[type="number"],
 .cadence-form input[type="date"],
+.cadence-form input[type="time"],
 .cadence-form select {
     width: 100%;
     margin-top: 5px;
@@ -19422,9 +19427,14 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 }
 
 /* Both inputs are sized by the grid, not by themselves - a time input left to
-   its intrinsic width is a different size in every browser. */
-.loaf-schedule-time,
-.loaf-schedule-break {
+   its intrinsic width is a different size in every browser.
+
+   Scoped by the modal's id because .income-form-container input[type="time"]
+   is (0,2,1) and outranks a bare class. That rule is new; the number one has
+   always been there, which is why the break field was rendering at the form's
+   10px padding while the times beside it used the grid's 4px. */
+#basket-modal .loaf-schedule-time,
+#basket-modal .loaf-schedule-break {
     width: 100%;
     min-width: 0;
     padding: 4px 6px;
@@ -19724,14 +19734,56 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     box-shadow: inset 3px 0 0 var(--accent);
 }
 
-/* The booking form. Times sit beside their date in a .cadence-row, so they are
-   sized by it; disabling rather than hiding them when whole days are ticked
-   keeps the form from jumping height as the box is toggled. */
-.loaf-entry-time {
-    flex: 0 0 110px;
+/* Single day or several. .graph-toggle-group and .graph-toggle-btn were in
+   this stylesheet already, written for a graph switcher nobody built - so this
+   revives them rather than adding a second toggle idiom. Two changes for a
+   form: equal halves across the field width, like every control around it,
+   and no hover scale, which on a half-width button overlaps its neighbour. */
+.loaf-span-toggle {
+    margin: 5px 0 10px;
 }
 
-.loaf-entry-time:disabled {
+.loaf-span-toggle .graph-toggle-btn {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.loaf-span-toggle .graph-toggle-btn:hover {
+    transform: none;
+}
+
+/* The day a single-day booking is for. Stated, not asked - the calendar cell
+   that opened the modal already decided it. */
+.loaf-entry-day {
+    margin: 5px 0 10px;
+    padding: 10px 12px;
+    background-color: var(--accent-lighter);
+    border: 1px solid var(--accent-hover);
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+}
+
+/* The booking form. Times sit beside their date in a .cadence-row, so they are
+   sized by it; disabling rather than hiding them when whole days are ticked
+   keeps the form from jumping height as the box is toggled.
+
+   The basis is measured, and it is close to the floor: at the form's 12px
+   padding a 12-hour value plus its picker needs 122.7px, and min-width auto
+   on a flex item will not let the control go under that however small a basis
+   is asked for. 125 is the smallest figure that is actually the one in force
+   rather than a number the layout quietly ignores. The rest of the row is the
+   date, which has more to show. */
+.loaf-entry-time {
+    flex: 0 0 125px;
+}
+
+/* The hours box joins them: in multi mode it sits behind "set the hours
+   myself" and is disabled, and it now opens holding a figure, so white-on-
+   white would read as an editable field that ignores you. */
+.loaf-entry-time:disabled,
+#loaf-entry-hours:disabled {
     background-color: var(--secondary-lighter);
     color: var(--secondary);
 }
