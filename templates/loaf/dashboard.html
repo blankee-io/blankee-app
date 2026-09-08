@@ -127,34 +127,87 @@
                     {% endfor %}
                 </select>
 
-                <div class="date-checkbox-row">
-                    <input type="checkbox" id="loaf-entry-all-day" checked>
-                    <label for="loaf-entry-all-day" class="date-checkbox-label">
-                        Whole days
+                {# One day or several. Nearly every booking is one day, and
+                   asking for a from-date, an until-date and two times to say
+                   "Tuesday off" is four controls for a fact the calendar
+                   already knows - the modal opened from that cell. So the
+                   toggle picks which set of fields the form even shows.
+
+                   .graph-toggle-* is the stylesheet's own pill toggle, written
+                   for a graph switcher that was never built. Reviving it beats
+                   inventing a second toggle idiom beside it. #}
+                <div class="loaf-span-toggle graph-toggle-group" role="radiogroup"
+                     aria-label="How long is this time off">
+                    <button type="button" id="loaf-entry-span-single"
+                            class="graph-toggle-btn active" role="radio"
+                            aria-checked="true" data-span="single">Single day</button>
+                    <button type="button" id="loaf-entry-span-multi"
+                            class="graph-toggle-btn" role="radio"
+                            aria-checked="false" data-span="multi">Multiple days</button>
+                </div>
+
+                {# Single day. The date is the cell that was clicked, so it is
+                   stated rather than asked for - the field holding it lives in
+                   the multi block below and keeps its value either way. #}
+                <p id="loaf-entry-day" class="loaf-entry-day"></p>
+
+                <div id="loaf-entry-multi">
+                    <div class="date-checkbox-row">
+                        <input type="checkbox" id="loaf-entry-all-day" checked>
+                        <label for="loaf-entry-all-day" class="date-checkbox-label">
+                            Whole days
+                            <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                                <span class="info-tip-text">Takes each day as your working week
+                                    has it, so a short Friday costs what a short Friday is worth.
+                                    Untick to give times instead.</span>
+                            </span>
+                        </label>
+                    </div>
+
+                    <label for="loaf-entry-start-date">From</label>
+                    <div class="cadence-row">
+                        <input type="date" id="loaf-entry-start-date">
+                        <input type="time" id="loaf-entry-start-time" class="loaf-entry-time">
+                    </div>
+
+                    <label for="loaf-entry-end-date">Until
                         <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                            <span class="info-tip-text">Takes each day as your working week
-                                has it, so a short Friday costs what a short Friday is worth.
-                                Untick to give times instead.</span>
+                            <span class="info-tip-text">Leave blank for a single day. The end date
+                                is included.</span>
                         </span>
                     </label>
+                    <div class="cadence-row">
+                        <input type="date" id="loaf-entry-end-date">
+                        <input type="time" id="loaf-entry-end-time" class="loaf-entry-time">
+                    </div>
+
+                    <div class="date-checkbox-row">
+                        <input type="checkbox" id="loaf-entry-override">
+                        <label for="loaf-entry-override" class="date-checkbox-label">
+                            Set the hours myself
+                            <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                                <span class="info-tip-text">Loaf works the hours out from your
+                                    working week. Tick this to type a figure instead, and editing
+                                    the working week later will leave it alone.</span>
+                            </span>
+                        </label>
+                    </div>
                 </div>
 
-                <label for="loaf-entry-start-date">From</label>
-                <div class="cadence-row">
-                    <input type="date" id="loaf-entry-start-date" required>
-                    <input type="time" id="loaf-entry-start-time" class="loaf-entry-time">
-                </div>
-
-                <label for="loaf-entry-end-date">Until
+                {# One hours field for both modes. In single day it is the only
+                   thing to fill in, so it gets a plain label and starts at what
+                   the working week says that day is worth; in multi it sits
+                   behind the checkbox above and is disabled until that is
+                   ticked. #}
+                <label for="loaf-entry-hours" id="loaf-entry-hours-label">Hours
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                        <span class="info-tip-text">Leave blank for a single day. The end date
-                            is included.</span>
+                        <span class="info-tip-text">Filled in from your working week. Change it
+                            and Loaf keeps your figure, leaving it alone if the working week is
+                            edited later.</span>
                     </span>
                 </label>
-                <div class="cadence-row">
-                    <input type="date" id="loaf-entry-end-date">
-                    <input type="time" id="loaf-entry-end-time" class="loaf-entry-time">
-                </div>
+                <input type="number" id="loaf-entry-hours" class="recurring-amount"
+                       step="0.01" min="0" placeholder="Worked out from your week">
 
                 <label for="loaf-entry-status">Status</label>
                 <select id="loaf-entry-status">
@@ -162,20 +215,6 @@
                     <option value="taken">Taken</option>
                     <option value="cancelled">Cancelled - costs nothing</option>
                 </select>
-
-                <div class="date-checkbox-row">
-                    <input type="checkbox" id="loaf-entry-override">
-                    <label for="loaf-entry-override" class="date-checkbox-label">
-                        Set the hours myself
-                        <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                            <span class="info-tip-text">Loaf works the hours out from your
-                                working week. Tick this to type a figure instead, and editing
-                                the working week later will leave it alone.</span>
-                        </span>
-                    </label>
-                </div>
-                <input type="number" id="loaf-entry-hours" class="recurring-amount"
-                       step="0.01" min="0" placeholder="Worked out from your week" disabled>
 
                 <label for="loaf-entry-note">Note</label>
                 <input type="text" id="loaf-entry-note" class="category-input" maxlength="255">
@@ -436,10 +475,52 @@
 
     // ------------------------------------------------------------ booking ----
 
+    // Which of the two field sets the form is showing. Held here rather
+    // than read off the DOM so the toggle, openEntry and collectEntry all
+    // agree on one answer.
+    var entrySpan = 'single';
+
+    // Did the person actually type in the hours box? hours_overridden cannot
+    // be derived by comparing the figure to the computed one - overriding
+    // 8.00 with 8.00 is still an override, and the column exists so a later
+    // edit to the working week knows to leave that row alone. A comparison
+    // cannot answer that; whether they touched the field can.
+    var hoursTouched = false;
+
+    function setEntrySpan(span) {
+        entrySpan = span === 'multi' ? 'multi' : 'single';
+        var multi = entrySpan === 'multi';
+
+        $('#loaf-entry-span-single').toggleClass('active', !multi)
+            .attr('aria-checked', String(!multi));
+        $('#loaf-entry-span-multi').toggleClass('active', multi)
+            .attr('aria-checked', String(multi));
+
+        el('loaf-entry-multi').style.display = multi ? '' : 'none';
+        el('loaf-entry-day').style.display = multi ? 'none' : '';
+        el('loaf-entry-hours-label').style.display = multi ? 'none' : '';
+
+        syncEntryFields();
+    }
+
     function syncEntryFields() {
         var allDay = el('loaf-entry-all-day').checked;
         $('.loaf-entry-time').prop('disabled', allDay);
-        el('loaf-entry-hours').disabled = !el('loaf-entry-override').checked;
+        // Single day has no override checkbox to sit behind - the hours box is
+        // the whole form, so it is always open.
+        el('loaf-entry-hours').disabled =
+            entrySpan === 'multi' && !el('loaf-entry-override').checked;
+    }
+
+    // "Monday, 14 September 2026", from the ISO date the cell carries. Built
+    // from a local Date rather than parsing the string, which UTC-shifts it.
+    function describeDay(iso) {
+        var bits = String(iso || '').split('-');
+        if (bits.length !== 3) { return ''; }
+        var when = new Date(+bits[0], +bits[1] - 1, +bits[2]);
+        return when.toLocaleDateString(undefined, {
+            weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+        });
     }
 
     function openEntry(row) {
@@ -454,6 +535,13 @@
         el('loaf-entry-override').checked = false;
         el('loaf-entry-start-date').value = row.date;
         el('loaf-entry-end-date').value = '';
+        el('loaf-entry-day').textContent = describeDay(row.date);
+
+        // What the working week says the day is worth, so the common case -
+        // a whole day off - is already filled in and needs no arithmetic.
+        hoursTouched = false;
+        el('loaf-entry-hours').value = row.scheduled ? row.scheduled : '';
+        var span = 'single';
 
         // A day that already has a booking opens that booking rather than
         // stacking another on top of it, which is what a second click on the
@@ -473,27 +561,55 @@
             el('loaf-entry-override').checked = !!entry.hours_overridden;
             el('loaf-entry-hours').value = entry.hours;
             el('loaf-entry-note').value = entry.note || '';
+            el('loaf-entry-day').textContent =
+                describeDay((entry.starts_at || '').substring(0, 10));
+
+            // A booking opens in the mode that can express it: one whole day
+            // is a single day, and anything with times or a second date is
+            // not. Opening a multi-day booking in single mode would offer to
+            // rewrite it as one day without saying so.
+            var starts = (entry.starts_at || '').substring(0, 10);
+            var ends = (entry.ends_at || '').substring(0, 10);
+            if (!entry.all_day || (ends && ends !== starts)) { span = 'multi'; }
+
+            // Their figure, so treat it as theirs from the outset.
+            hoursTouched = !!entry.hours_overridden;
         }
 
-        syncEntryFields();
+        setEntrySpan(span);
         el('loaf-entry-modal').style.display = 'flex';
     }
 
     function closeEntry() { el('loaf-entry-modal').style.display = 'none'; }
 
     function collectEntry() {
-        return {
+        var common = {
             basket_id: el('loaf-entry-basket').value,
-            all_day: el('loaf-entry-all-day').checked ? '1' : '',
             start_date: el('loaf-entry-start-date').value,
-            end_date: el('loaf-entry-end-date').value,
-            start_time: el('loaf-entry-start-time').value,
-            end_time: el('loaf-entry-end-time').value,
             status: el('loaf-entry-status').value,
-            hours_overridden: el('loaf-entry-override').checked ? '1' : '',
             hours: el('loaf-entry-hours').value,
             note: el('loaf-entry-note').value
         };
+
+        // Single day is one whole day, always: the server reads all_day and
+        // substitutes that weekday's scheduled hours, which is exactly what
+        // the box was seeded with. Sending no end date says so - clean_entry
+        // treats a blank end as the start date.
+        if (entrySpan === 'single') {
+            common.all_day = '1';
+            common.end_date = '';
+            common.start_time = '';
+            common.end_time = '';
+            common.hours_overridden = hoursTouched ? '1' : '';
+            return common;
+        }
+
+        common.all_day = el('loaf-entry-all-day').checked ? '1' : '';
+        common.end_date = el('loaf-entry-end-date').value;
+        common.start_time = el('loaf-entry-start-time').value;
+        common.end_time = el('loaf-entry-end-time').value;
+        common.hours_overridden = el('loaf-entry-override').checked ? '1' : '';
+        return common;
     }
 
     el('loaf-entry-form').addEventListener('submit', function (event) {
@@ -584,6 +700,13 @@
         if (event.target === this) { closeEntry(); }
     });
     $('#loaf-entry-all-day, #loaf-entry-override').on('change', syncEntryFields);
+    $('.loaf-span-toggle .graph-toggle-btn').on('click', function () {
+        setEntrySpan(this.getAttribute('data-span'));
+    });
+    // Typed in, so it is their figure - see hoursTouched.
+    el('loaf-entry-hours').addEventListener('input', function () {
+        hoursTouched = true;
+    });
     $(document).on('keydown', function (event) {
         if (event.key === 'Escape' && el('loaf-entry-modal').style.display === 'flex') {
             closeEntry();

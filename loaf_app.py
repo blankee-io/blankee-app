@@ -390,6 +390,9 @@ def _month_payload(user_id, basket, year, month, today):
             'in_month': first <= row['date'] <= last,
             'is_today': row['date'] == today,
             'non_working': row['non_working'],
+            # What the working week says the day is worth. The booking modal
+            # seeds its hours box with it, so a whole day off needs no sum.
+            'scheduled': row['scheduled'],
             'worked': row['worked'],
             'taken': row['taken'],
             'accrued': row['accrued'],
