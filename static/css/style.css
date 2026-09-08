@@ -19350,7 +19350,11 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     color: var(--secondary);
 }
 
-.loaf-amount-none {
+/* label.loaf-amount-none, not .loaf-amount-none: .income-form-container
+   label is (0,2,0) and sets display:block and font-weight:bold, so a bare
+   class loses to it - which stacked the words under the box and bolded
+   them. The tag on the end takes this to (0,2,1). */
+.loaf-amount-row label.loaf-amount-none {
     display: flex;
     flex: 1 1 50%;
     align-items: center;
@@ -19358,12 +19362,21 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     margin: 0 !important;
     color: var(--secondary-dark);
     font-size: 12px;
+    font-weight: 400;
     cursor: pointer;
 }
 
 .loaf-amount-none input {
     margin: 0;
     cursor: pointer;
+}
+
+/* Wider than the 350px the recurring forms use. The working week is seven
+   rows of two time inputs, and a 12-hour input has to fit "09:00 AM" and
+   its picker - at 350px each field came out about 98px and clipped the
+   AM/PM clean off. Only this modal: the recurring forms have no such row. */
+#basket-modal .income-form-container {
+    width: 450px;
 }
 
 .loaf-schedule-grid {
@@ -19383,7 +19396,7 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     display: grid;
     /* Day, start, end, off. The break moved out of the row and under the
        grid, because one figure covers the week now. */
-    grid-template-columns: 42px 1fr 1fr 34px;
+    grid-template-columns: 38px 1fr 1fr 26px;
     gap: 6px;
     align-items: center;
 }
@@ -19594,6 +19607,17 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     .loaf-schedule-row {
         grid-template-columns: 34px 1fr 1fr 28px;
         gap: 4px;
+    }
+
+    /* The picker button, not the AM/PM. Tapping the field opens the native
+       picker on a phone regardless, and the ~20px it occupies is exactly
+       what a 12-hour value needs to finish. */
+    .loaf-schedule-time::-webkit-calendar-picker-indicator {
+        display: none;
+    }
+
+    .loaf-schedule-time {
+        padding: 4px 2px;
     }
 }
 
