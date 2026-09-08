@@ -88,82 +88,87 @@
             </table>
         </div>
 
-        {# Booking. This is the only place time off is entered - a day click
-           opens it with that date already filled in. #}
-        <div id="loaf-entry-modal" class="modal">
-            <div class="income-form-container">
-                <h2 id="loaf-entry-title">Book Time Off</h2>
-                <form id="loaf-entry-form" autocomplete="off">
-                    <input type="hidden" id="loaf-entry-id" value="">
-
-                    <label for="loaf-entry-basket">Basket</label>
-                    <select id="loaf-entry-basket">
-                        {% for option in baskets %}
-                        <option value="{{ option.id }}">{{ option.name }}</option>
-                        {% endfor %}
-                    </select>
-
-                    <div class="date-checkbox-row">
-                        <input type="checkbox" id="loaf-entry-all-day" checked>
-                        <label for="loaf-entry-all-day" class="date-checkbox-label">
-                            Whole days
-                            <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                                <span class="info-tip-text">Takes each day as your working week
-                                    has it, so a short Friday costs what a short Friday is worth.
-                                    Untick to give times instead.</span>
-                            </span>
-                        </label>
-                    </div>
-
-                    <label for="loaf-entry-start-date">From</label>
-                    <div class="cadence-row">
-                        <input type="date" id="loaf-entry-start-date" required>
-                        <input type="time" id="loaf-entry-start-time" class="loaf-entry-time">
-                    </div>
-
-                    <label for="loaf-entry-end-date">Until
-                        <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                            <span class="info-tip-text">Leave blank for a single day. The end date
-                                is included.</span>
-                        </span>
-                    </label>
-                    <div class="cadence-row">
-                        <input type="date" id="loaf-entry-end-date">
-                        <input type="time" id="loaf-entry-end-time" class="loaf-entry-time">
-                    </div>
-
-                    <label for="loaf-entry-status">Status</label>
-                    <select id="loaf-entry-status">
-                        <option value="planned">Planned</option>
-                        <option value="taken">Taken</option>
-                        <option value="cancelled">Cancelled - costs nothing</option>
-                    </select>
-
-                    <div class="date-checkbox-row">
-                        <input type="checkbox" id="loaf-entry-override">
-                        <label for="loaf-entry-override" class="date-checkbox-label">
-                            Set the hours myself
-                            <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                                <span class="info-tip-text">Loaf works the hours out from your
-                                    working week. Tick this to type a figure instead, and editing
-                                    the working week later will leave it alone.</span>
-                            </span>
-                        </label>
-                    </div>
-                    <input type="number" id="loaf-entry-hours" class="recurring-amount"
-                           step="0.01" min="0" placeholder="Worked out from your week" disabled>
-
-                    <label for="loaf-entry-note">Note</label>
-                    <input type="text" id="loaf-entry-note" class="category-input" maxlength="255">
-
-                    <button type="submit" id="loaf-entry-submit">Book It</button>
-                    <button type="button" id="loaf-entry-delete" class="remove-day-btn"
-                            style="display:none;">Delete this booking</button>
-                </form>
-            </div>
-        </div>
     {% endif %}
     </div>
+
+    {# Booking. Outside #main-container on purpose: the swipe translates
+       that element, so a modal inside it slides away with the calendar
+       behind it. This is the only place time off is entered - a day click
+       opens it with that date already filled in. #}
+    {% if basket %}
+    <div id="loaf-entry-modal" class="modal">
+        <div class="income-form-container">
+            <h2 id="loaf-entry-title">Book Time Off</h2>
+            <form id="loaf-entry-form" autocomplete="off">
+                <input type="hidden" id="loaf-entry-id" value="">
+
+                <label for="loaf-entry-basket">Basket</label>
+                <select id="loaf-entry-basket">
+                    {% for option in baskets %}
+                    <option value="{{ option.id }}">{{ option.name }}</option>
+                    {% endfor %}
+                </select>
+
+                <div class="date-checkbox-row">
+                    <input type="checkbox" id="loaf-entry-all-day" checked>
+                    <label for="loaf-entry-all-day" class="date-checkbox-label">
+                        Whole days
+                        <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                            <span class="info-tip-text">Takes each day as your working week
+                                has it, so a short Friday costs what a short Friday is worth.
+                                Untick to give times instead.</span>
+                        </span>
+                    </label>
+                </div>
+
+                <label for="loaf-entry-start-date">From</label>
+                <div class="cadence-row">
+                    <input type="date" id="loaf-entry-start-date" required>
+                    <input type="time" id="loaf-entry-start-time" class="loaf-entry-time">
+                </div>
+
+                <label for="loaf-entry-end-date">Until
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Leave blank for a single day. The end date
+                            is included.</span>
+                    </span>
+                </label>
+                <div class="cadence-row">
+                    <input type="date" id="loaf-entry-end-date">
+                    <input type="time" id="loaf-entry-end-time" class="loaf-entry-time">
+                </div>
+
+                <label for="loaf-entry-status">Status</label>
+                <select id="loaf-entry-status">
+                    <option value="planned">Planned</option>
+                    <option value="taken">Taken</option>
+                    <option value="cancelled">Cancelled - costs nothing</option>
+                </select>
+
+                <div class="date-checkbox-row">
+                    <input type="checkbox" id="loaf-entry-override">
+                    <label for="loaf-entry-override" class="date-checkbox-label">
+                        Set the hours myself
+                        <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                            <span class="info-tip-text">Loaf works the hours out from your
+                                working week. Tick this to type a figure instead, and editing
+                                the working week later will leave it alone.</span>
+                        </span>
+                    </label>
+                </div>
+                <input type="number" id="loaf-entry-hours" class="recurring-amount"
+                       step="0.01" min="0" placeholder="Worked out from your week" disabled>
+
+                <label for="loaf-entry-note">Note</label>
+                <input type="text" id="loaf-entry-note" class="category-input" maxlength="255">
+
+                <button type="submit" id="loaf-entry-submit">Book It</button>
+                <button type="button" id="loaf-entry-delete" class="remove-day-btn"
+                        style="display:none;">Delete this booking</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
 
     {% include 'loading_modals.html' %}
 
@@ -190,6 +195,11 @@
     };
 
     function el(id) { return document.getElementById(id); }
+
+    // Looked up once. Both the arrow path and the swipe move this element, and
+    // it is the same #main-container Blankee's slide keyframes are written
+    // against.
+    var mainContainer = document.getElementById('main-container');
 
     // Hours, never money. formatCurrency and currencySymbol are wired through
     // every value path in Blankee's dashboards; this is the Loaf equivalent.
@@ -353,7 +363,9 @@
         });
     }
 
-    function shiftMonth(by) {
+    // Move the state on a month. No animation and no fetch - the two callers
+    // below decide when each of those happens.
+    function stepMonth(by) {
         var month = state.month + by;
         var year = state.year;
         while (month > 12) { month -= 12; year += 1; }
@@ -363,7 +375,31 @@
         el('loaf-month-dropdown').value = String(month);
         el('loaf-year-dropdown').value = String(year);
         resyncSelects();
-        load();
+    }
+
+    // The arrow path, copied from dashboard_m's previousMonth/nextMonth: add
+    // the slide class, move the month, and after a short delay drop the class
+    // and redraw. slideLeft and slideRight are Blankee's own keyframes on
+    // .main-container, which this page already is - so the animation needs no
+    // CSS of its own.
+    //
+    // The 50ms is dashboard_m's, and it is shorter than the 0.3s the keyframes
+    // run for: removing the class cancels the animation partway. Kept as it is
+    // because the ask was for the same animation Blankee shows, and that is
+    // what Blankee shows.
+    function shiftMonth(by) {
+        mainContainer.classList.remove('slide-left', 'slide-right');
+        mainContainer.classList.add(by > 0 ? 'slide-left' : 'slide-right');
+
+        var loading = el('loading-screen');
+        if (loading) { loading.style.display = 'none'; }
+
+        stepMonth(by);
+
+        setTimeout(function () {
+            mainContainer.classList.remove('slide-left', 'slide-right');
+            load();
+        }, 50);
     }
 
     // ------------------------------------------------------------ booking ----
@@ -518,26 +554,87 @@
         }
     });
 
-    // Swipe between months, the way dashboard_m does. Passive listeners, and a
-    // fifth of the width to commit, so a vertical scroll is not read as one.
-    (function () {
-        var startX = null, startY = null;
-        var container = el('main-container');
-        container.addEventListener('touchstart', function (event) {
-            startX = event.touches[0].clientX;
-            startY = event.touches[0].clientY;
-        }, {passive: true});
-        container.addEventListener('touchend', function (event) {
-            if (startX === null) { return; }
-            var dx = event.changedTouches[0].clientX - startX;
-            var dy = event.changedTouches[0].clientY - startY;
-            startX = startY = null;
-            if (Math.abs(dx) < window.innerWidth / 5 || Math.abs(dx) < Math.abs(dy)) {
-                return;
-            }
-            shiftMonth(dx < 0 ? 1 : -1);
-        }, {passive: true});
-    })();
+    // Swipe, copied from dashboard_m's handleTouchStart/Move/End and
+    // slideWithAnimation rather than approximated:
+    //
+    //   - the finger drags the container live, so the month follows the thumb
+    //     instead of jumping when it lifts
+    //   - horizontal only, decided by comparing the two deltas, and it calls
+    //     preventDefault once it has decided - which is why these listeners
+    //     cannot be passive
+    //   - a fifth of the container's width commits; anything less snaps back
+    //   - committing slides the rest of the way out over 0.3s, then swaps the
+    //     month and resets the transform with the transition off, so the new
+    //     month does not slide back in from where the old one left
+    var touchStartX = null;
+    var touchStartY = null;
+    var touchCurrentX = null;
+    var isHorizontalSwipe = false;
+    var isAnimating = false;
+    var containerWidth = null;
+
+    function handleTouchStart(event) {
+        if (isAnimating) { return; }
+        // Not while a dialog is up. dashboard_m has no equivalent because its
+        // modals sit outside the container it drags; this page's booking modal
+        // does too now, but a swipe behind an open dialog still reads as a
+        // mis-touch rather than as navigation.
+        if (el('loaf-entry-modal').style.display === 'flex') { return; }
+
+        touchStartX = event.touches[0].screenX;
+        touchStartY = event.touches[0].screenY;
+        containerWidth = mainContainer.offsetWidth;
+        isHorizontalSwipe = false;
+    }
+
+    function handleTouchMove(event) {
+        if (!touchStartX || isAnimating) { return; }
+
+        touchCurrentX = event.touches[0].screenX;
+        var swipeDistanceX = touchCurrentX - touchStartX;
+        var swipeDistanceY = event.touches[0].screenY - touchStartY;
+
+        if (Math.abs(swipeDistanceX) > Math.abs(swipeDistanceY)) {
+            isHorizontalSwipe = true;
+            event.preventDefault();
+            mainContainer.style.transform = 'translateX(' + swipeDistanceX + 'px)';
+        }
+    }
+
+    function handleTouchEnd() {
+        if (!touchStartX || !isHorizontalSwipe) { return; }
+
+        var swipeDistanceX = touchCurrentX - touchStartX;
+        var swipePercentage = Math.abs(swipeDistanceX) / containerWidth;
+
+        if (swipePercentage > 0.2) {
+            slideWithAnimation(swipeDistanceX > 0 ? 'right' : 'left');
+        } else {
+            mainContainer.style.transform = 'translateX(0)';
+        }
+
+        touchStartX = null;
+        touchCurrentX = null;
+        isHorizontalSwipe = false;
+    }
+
+    function slideWithAnimation(direction) {
+        isAnimating = true;
+        mainContainer.style.transition = 'transform 0.3s ease';
+        mainContainer.style.transform = 'translateX('
+            + (direction === 'left' ? '-' : '') + containerWidth + 'px)';
+
+        setTimeout(function () {
+            shiftMonth(direction === 'left' ? 1 : -1);
+            mainContainer.style.transition = 'none';
+            mainContainer.style.transform = 'translateX(0)';
+            isAnimating = false;
+        }, 300);
+    }
+
+    document.addEventListener('touchstart', handleTouchStart, {passive: false});
+    document.addEventListener('touchmove', handleTouchMove, {passive: false});
+    document.addEventListener('touchend', handleTouchEnd);
 })();
 </script>
 {% endif %}
