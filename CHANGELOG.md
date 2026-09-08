@@ -8,6 +8,23 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.25.1 — 2026-09-07
+
+### Fixed
+- **Editing a Loaf basket no longer clears a maximum balance.** The basket form
+  does not ask for one — how fast a basket fills is already the accrual — but
+  baskets can still carry a cap, and the forecast still stops accruing at it.
+  Saving any other change was wiping that figure, which quietly raised every
+  balance from that day on. A save that does not mention the cap now leaves it
+  alone.
+
+  Worth knowing what a cap is for, since nothing in the form explains it: an
+  accrual rate says how fast hours arrive, not when they stop. Those are the
+  same thing only when unused hours are lost at the year turn. Where hours
+  carry over in full, "you may bank at most 240" is a separate rule, and it is
+  the one that makes taking time off cost less than the hours booked — at the
+  cap you are forfeiting accrual, and time off makes room for it.
+
 ## 1.25.0 — 2026-09-07
 
 ### Added

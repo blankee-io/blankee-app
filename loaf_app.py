@@ -254,7 +254,8 @@ def api_update_basket(basket_id):
     if loaf_data.get_basket(current_user.id, basket_id) is None:
         return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
 
-    values, error = loaf_data.clean_basket(_flat(_payload()))
+    payload = _flat(_payload())
+    values, error = loaf_data.clean_basket(payload)
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
 
@@ -267,6 +268,20 @@ def api_update_basket(basket_id):
     # display_order is not in the form. Left out of the update so a save does
     # not quietly undo a drag-reorder.
     values.pop('display_order', None)
+
+    # Nor is max_balance_hours, which came off the form because the accrual
+    # already says how fast a basket fills. But the column is still there and
+    # the projection still clamps to it, and clean_basket reads a field that
+    # was never sent as "not set" - so saving a name change would wipe a cap
+    # and quietly raise every future balance from that day on.
+    #
+    # A payload that does not mention it therefore leaves it alone, the same
+    # treatment starting_date gets below. That is also what keeps the door
+    # open: "hours roll over, but you bank at most N" cannot be said with an
+    # accrual rate, and the walk already handles it - only the form does not
+    # ask. A payload that DOES send the field, empty or not, is still obeyed.
+    if 'max_balance_hours' not in payload:
+        values.pop('max_balance_hours', None)
 
     # The starting date moves only when the balance it describes moves. Editing
     # a name would otherwise re-date the figure and shift the whole projection;
