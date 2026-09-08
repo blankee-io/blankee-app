@@ -19788,9 +19788,17 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     color: var(--secondary);
 }
 
+/* Delete sits directly under Save at the same width, so it should be Save's
+   twin in every dimension but colour. .delete-from-edit-category-btn is built
+   for a row of buttons beside a Cancel, at a slightly different radius and a
+   larger font; this brings it into line with the submit above it. */
 #loaf-entry-delete {
     width: 100%;
     margin-top: 10px;
+    padding: 12px 24px;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 500;
 }
 
 @media (max-width: 600px) {

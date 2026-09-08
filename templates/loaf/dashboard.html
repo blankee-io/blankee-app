@@ -220,7 +220,13 @@
                 <input type="text" id="loaf-entry-note" class="category-input" maxlength="255">
 
                 <button type="submit" id="loaf-entry-submit">Book It</button>
-                <button type="button" id="loaf-entry-delete" class="remove-day-btn"
+                {# .delete-from-edit-category-btn is the house's destructive
+                   button inside an edit modal. It used to carry
+                   .remove-day-btn, which is the 32px round control that takes
+                   a day off a monthly cadence - at full width a 50% radius is
+                   an ellipse. #}
+                <button type="button" id="loaf-entry-delete"
+                        class="delete-from-edit-category-btn"
                         style="display:none;">Delete this booking</button>
             </form>
         </div>
