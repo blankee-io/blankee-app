@@ -802,8 +802,14 @@ body {
     transition: opacity 0.16s ease;
 }
 
+/* pointer-events with the opacity, the same pair .side-menu-backdrop.open
+   uses. Without it the backdrop dimmed the page but did not stand in front of
+   it: a click while the dropdown was open reached whatever was underneath and
+   acted on it, and only then bubbled to window and closed the menu. Catching
+   the click here means the one thing an outside click does is close. */
 .profile-backdrop.open {
     opacity: 1;
+    pointer-events: auto;
 }
 
 /* Custom bell shake animation */
@@ -6956,7 +6962,15 @@ td:has(.bucket-progress-container) {
     font-size: 14px;
     font-weight: bold;
     box-sizing: border-box;
-    z-index: 100;
+
+    /* 2, matching .dashboard-m-today::after, and NOT 100. This is a flex item
+       - .dashboard-m-date is display:flex - and z-index applies to a flex item
+       even when it is position:static, so the figure was live rather than the
+       no-op it looks like. At 100 it outranked the profile backdrop's 99 and
+       the word "Today" went on showing through the blur with the dropdown
+       open. Nothing here needs to stack above the page: the label is a sibling
+       laid out beside its cell's other rows, not over them. */
+    z-index: 2;
 }
 
 /* Outline for today's dashboard-d-container */

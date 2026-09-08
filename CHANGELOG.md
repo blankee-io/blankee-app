@@ -8,6 +8,18 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.25.2 — 2026-09-07
+
+### Fixed
+- **Clicking away from the profile menu now only closes it.** The dimmed
+  backdrop behind the menu was not catching clicks, so a click meant to dismiss
+  it reached the page underneath and acted on it as well — dismissing the menu
+  over a calendar could open that day's entry at the same time.
+
+- **"Today" no longer shows through the dimmed page** on the month view and on
+  Loaf's month view, where it was painting over the profile menu's backdrop
+  instead of behind it.
+
 ## 1.25.1 — 2026-09-07
 
 ### Fixed
