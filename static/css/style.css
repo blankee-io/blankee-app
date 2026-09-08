@@ -740,6 +740,13 @@ body {
     max-height: 240px;
 }
 
+/* Loaf's Dashboards row opens two entries, not Blankee's six. Its own id for
+   exactly this reason - the collapse animates max-height, so borrowing a
+   height set for six rows would make a two-row list appear to snap open. */
+#loaf-dashboards-sections.expanded {
+    max-height: 80px;
+}
+
 .side-menu-backdrop {
     position: fixed;
     top: 0;
@@ -1186,6 +1193,18 @@ body {
 /* A shade up from the panel behind it, so an open sub-list reads as one block
    sitting inside the menu rather than as loose rows. The panel itself is
    --primary; these were set to the same value, which made them invisible. */
+/* An app is named by its own outline mark in these rows rather than by a
+   stock icon, so the entry and the app read as the same thing.
+
+   Shown exactly as drawn. The marks carry their own colours and are made for
+   this ground; recolouring them would throw that away, and an app's mark is
+   the one thing on the row that is meant to look like itself. */
+.dropdown-app-mark {
+    width: 17px;
+    height: 17px;
+    object-fit: contain;
+}
+
 .dropdown-sublink {
     padding-left: 30px;
     background-color: var(--primary-mid);
@@ -3318,7 +3337,8 @@ tr[data-category-id] td.before-member-since {
 }
 
 /* Dim cells before member_since in dashboard_m */
-#dashboard-m-calendar td.before-member-since {
+#dashboard-m-calendar td.before-member-since,
+#loaf-calendar td.before-member-since {
     opacity: 0.5;
 }
 
@@ -6357,7 +6377,8 @@ td:has(.bucket-progress-container) {
 
 /* /////////////////////////// Dashboard Month //////////////////////////////////// */
 
-#dashboard-m-body {
+#dashboard-m-body,
+#loaf-page {
     display: flex;
     flex-direction: column;
 }
@@ -6442,7 +6463,8 @@ td:has(.bucket-progress-container) {
     box-sizing: border-box;
 }
 
-#dashboard-m-calendar {
+#dashboard-m-calendar,
+#loaf-calendar {
     justify-content: center;
     align-items: center;
     width: 100%;
@@ -6457,19 +6479,22 @@ td:has(.bucket-progress-container) {
 }
 
 @media (max-width: 875px) {
-    #dashboard-m-calendar {
+    #dashboard-m-calendar,
+    #loaf-calendar {
         max-width: 100%;
     }
 }
 
 @media (max-width: 450px) {
-    #dashboard-m-calendar {
+    #dashboard-m-calendar,
+    #loaf-calendar {
         min-width: unset;
         width: 100%;
         table-layout: fixed;
     }
     
-    #dashboard-m-calendar td {
+    #dashboard-m-calendar td,
+    #loaf-calendar td {
         overflow: visible;
     }
     
@@ -6550,7 +6575,8 @@ td:has(.bucket-progress-container) {
     }
 }
 
-#dashboard-m-calendar td {
+#dashboard-m-calendar td,
+#loaf-calendar td {
     width: 14.2857%;
     margin: 0;
     padding: 0;
@@ -6859,9 +6885,20 @@ td:has(.bucket-progress-container) {
     justify-self: flex-end;
 }
 
-#dashboard-m-calendar .dashboard-m-day-label {
+#dashboard-m-calendar .dashboard-m-day-label,
+#loaf-calendar .dashboard-m-day-label {
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
+}
+
+/* The other two corners. dashboard_m puts them on .dashboard-m-savings,
+   which is the last section in its cell; Loaf's last section is the
+   remainder, so the radius has to move with it. Without this Loaf days
+   are square at the bottom while Blankee's are rounded - the one place
+   the two calendars would visibly disagree. */
+#loaf-calendar .dashboard-m-remainder {
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
 }
 
 .dashboard-m-other-month {
@@ -8488,16 +8525,16 @@ transform: scale(1.2);
        token there is exactly what would push a fixed-layout cell over. */
 }
 
-/* Status line inside the create-user modal. Errors are the common case here -
-   duplicate address, weak password - so it needs to read against the modal's
-/* ===== Updates panel (admin console) =====
-   Same panel treatment as .admin-users-section, with its own label. The third
-   near-copy of these rules in this file; the alternative is a shared class the
-   ::before content would have to be layered onto, which reads worse than the
-   repetition. */
+/* ===== Labelled panels (admin console) =====
+   The panel and its tab, for the sections that carry a title: Updates, Logs and
+   Other Apps. Same treatment as .admin-users-section, one word apiece. The
+   third near-copy of these rules in this file; the alternative is a shared
+   class the ::before content would have to be layered onto, which reads worse
+   than the repetition. */
 
 .updates-section,
-.logs-section {
+.logs-section,
+.other-apps-section {
     position: relative;
     margin: 30px 0 35px;
     padding: 16px;
@@ -8510,7 +8547,8 @@ transform: scale(1.2);
 }
 
 .updates-section::before,
-.logs-section::before {
+.logs-section::before,
+.other-apps-section::before {
     content: "Updates";
     position: absolute;
     top: -25px;
@@ -8525,9 +8563,13 @@ transform: scale(1.2);
     letter-spacing: 0.5px;
 }
 
-/* Same tab, different word. */
+/* Same tab, different word each. */
 .logs-section::before {
     content: "Logs";
+}
+
+.other-apps-section::before {
+    content: "Other Apps";
 }
 
 /* Boxed to the same metrics as .profile-form .input-group, so help text and
@@ -8570,7 +8612,8 @@ transform: scale(1.2);
    as .profile-form label - the row itself is a plain .input-group, which is what
    also gives the toggle its size and colour. */
 .update-line-name,
-.logs-line-name {
+.logs-line-name,
+.other-app-name {
     flex-shrink: 0;
     width: 30%;
     min-width: 40px;
@@ -10156,21 +10199,26 @@ transform: scale(1.2);
 .income-form-container input[type="number"],
 .income-form-container input[type="text"],
 .income-form-container input[type="date"],
+.income-form-container input[type="time"],
 .income-form-container select,
 .ca-form-container input[type="number"],
 .ca-form-container input[type="text"],
 .ca-form-container input[type="date"],
+.ca-form-container input[type="time"],
 .ca-form-container select,
 .expense-form-container input[type="number"],
 .expense-form-container input[type="text"],
 .expense-form-container input[type="date"],
+.expense-form-container input[type="time"],
 .expense-form-container select,
 .convert-recurring-form-container input[type="number"],
 .convert-recurring-form-container input[type="text"],
 .convert-recurring-form-container input[type="date"],
+.convert-recurring-form-container input[type="time"],
 .convert-recurring-form-container select,
 .cadence-form input[type="number"],
 .cadence-form input[type="date"],
+.cadence-form input[type="time"],
 .cadence-form select {
     width: 100%;
     margin-top: 5px;
@@ -17541,6 +17589,173 @@ tr[data-collapsed] {
     background-color: var(--primary-hover);
 }
 
+/* A sibling app's lockup -------------------------------------------------------
+
+   Its own name where Blankee puts its wordmark, and Blankee's wordmark
+   underneath as a maker's credit - deliberately much smaller, so the two are
+   not competing to be the brand. The app is the name; Blankee is who made it.
+
+   .app-lockup is the nav-bar size; .app-lockup-large is for a page that is
+   introducing the app rather than carrying it. Both use the same ratio between
+   the two lines, so the credit stays a credit at either size. */
+.app-lockup {
+    display: inline-flex;
+    flex-direction: row;
+    /* Sat on the same line as the wordmark rather than centred against it, so
+       the credit reads as a footnote to the name instead of a second title
+       floating beside it. */
+    align-items: flex-end;
+    gap: 7px;
+    line-height: 1;
+
+    /* The wordmark size, declared once so the credit below can be placed
+       from it. A variant sets this and nothing else has to follow. */
+    --wordmark-height: 26px;
+
+    --credit-height: 11px;
+
+    /* Empty space under the letters, as a fraction of each mark's own
+       box. BOTH marks have some - they are drawn to the same grid, which
+       is why these are so close - and it is the difference between them
+       that decides where the credit sits. Measured from the art: loaf's
+       letters bottom out at 0.7228 of its box, blankee's at 0.7160.
+       An app proportioned differently overrides the first. */
+    --wordmark-floor: 0.2772;
+    --credit-floor: 0.2840;
+}
+
+/* The app's name is drawn, not set: each app ships a wordmark the way Blankee
+   does, so the two sit together as marks rather than one being type beside a
+   logo. Height alone sizes it - a width would squash whatever proportions the
+   file was drawn at. */
+.app-wordmark-img {
+    display: block;
+    width: auto;
+    height: var(--wordmark-height);
+}
+
+/* Kept for anything that still sets the name as text. */
+.app-wordmark {
+    color: var(--primary);
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+}
+
+/* Smaller than the name but not small enough to squint at - it sits beside it
+   on the same line rather than under it, so it has to hold its own. The image
+   is sized off the text next to it. */
+.app-by {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--secondary-dark);
+    font-size: 9px;
+    letter-spacing: 0.2px;
+
+    /* Line the two sets of LETTERS up, not the two boxes.
+       flex-end aligns the boxes, which left the credit 5.1px low, because
+       the loaf mark has more empty space under its word than the credit
+       does. Lifting the credit's box onto the loaf letters overshoots the
+       other way - 5.4px high - because the credit has dead space of its
+       own. The difference between the two is what is wanted. */
+    margin-bottom: calc(var(--wordmark-height) * var(--wordmark-floor)
+                        - var(--credit-height) * var(--credit-floor));
+}
+
+.app-by img {
+    display: block;
+    width: auto;
+    height: var(--credit-height);
+}
+
+.app-lockup-large {
+    --wordmark-height: 54px;
+    --credit-height: 34px;
+}
+
+.app-lockup-large .app-wordmark {
+    font-size: 54px;
+}
+
+.app-lockup-large .app-by {
+    font-size: 20px;
+    gap: 7px;
+}
+
+/* On the nav bar and in the menu header, where the ground is teal. The name
+   goes white like the logo it replaces, and the credit stays quieter without
+   going so quiet it disappears against the bar. */
+.app-lockup-nav {
+    text-decoration: none;
+
+    /* Exactly .nav-logo's height. An app's wordmark stands where Blankee's
+       does, so it has to be the same size as it - anything else reads as a
+       different rank rather than a different app. Keep the two in step. */
+    --wordmark-height: 38px;
+
+    /* Sized against the "by" beside it, not to a round number. The footer
+       works this out in full: "blankee" is 0.434 of its 500-unit box,
+       Nunito's cap height is near 0.705em, and matching the two puts the
+       image at about 1.7x the text - 22px against 12px there. Same ratio. */
+    --credit-height: 19px;
+}
+
+.app-lockup-nav .app-wordmark {
+    color: white;
+    font-size: 22px;
+}
+
+.app-lockup-nav .app-by {
+    /* White, like the wordmark beside it. The grey it was reads as disabled
+       against the teal rather than as quiet. */
+    color: white;
+    font-size: 11px;
+}
+
+/* The wordmark is the row's label, so it takes the row's full height rather
+   than a size matched to the text beside it. Matching cap height is right for
+   a mark sitting next to words - the footer's "by blankee" - but here there
+   are no words to match, and at label size a lockup reads as an icon.
+
+   Out of flow, and that part is not optional. The row's height comes from its
+   contents, so an in-flow image asked for 100% of it is circular - Chrome
+   resolves that by falling back to the image's own width, which took the
+   column to 243px and the row to 163. Absolute takes the image out of the
+   height calculation entirely: the row is then sized by the spacer and the
+   toggle, exactly as every other row is, and the image is 100% of the result.
+
+   The stretch is the other half - the row centres its items, so without it the
+   column is only as tall as its contents and there is nothing to be 100% of. */
+.other-app-name {
+    position: relative;
+    align-self: stretch;
+}
+
+.other-app-wordmark {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: auto;
+    /* Loaf's is 57.6px wide in a column that never falls below 120, so this is
+       for the next app rather than this one. object-fit with it, because the
+       cap alone would squash a wider wordmark instead of fitting it. */
+    max-width: 100%;
+    object-fit: contain;
+}
+
+/* A menu that has nothing in it yet says so, rather than being empty or full
+   of rows that go nowhere. */
+.side-menu-note {
+    padding: 4px 20px 12px;
+    color: var(--secondary-hover);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+/* The placeholder page, until there is an application behind the name. */
+
 /* The widget ships its own floating button. Hidden so there is one way in,
    rather than two controls for the same overlay, one of them covering the page.
    !important because the widget sets its own inline styles. */
@@ -18906,13 +19121,800 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 
 #dashboard .paid::after,
 #dashboard-m-body .paid::after,
+#loaf-page .paid::after,
 #dashboard .partially-paid::after,
 #dashboard-m-body .partially-paid::after,
+#loaf-page .partially-paid::after,
 #dashboard .negative::before,
 #dashboard-m-body .negative::before,
+#loaf-page .negative::before,
 #dashboard .below-threshold::before,
 #dashboard-m-body .below-threshold::before,
+#loaf-page .below-threshold::before,
 #dashboard .bucket-late-badge,
-#dashboard-m-body .bucket-late-badge {
+#dashboard-m-body .bucket-late-badge,
+#loaf-page .bucket-late-badge {
     right: -5px;
+}
+
+/* ===== LOAF: BASKETS =====
+   The management page, built on recurring_i.html's shape: the same container
+   metrics, the same table skeleton, the same row-action buttons, and the same
+   mobile trick of hiding a merged value in the primary cell and swapping
+   display at the breakpoint.
+
+   Column names are Loaf's own rather than aliases onto .income-*-col, so a
+   change to Blankee's recurring pages cannot move this one.
+
+   Colour: the --accent family. Loaf's wordmark is #E45F25 and Blankee's accent
+   is #E45F1C - close enough that a parallel palette would be two names for one
+   colour, and one of them would drift. */
+
+#loaf-baskets-body {
+    min-width: 340px !important;
+}
+
+.loaf-baskets-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-width: 300px;
+    max-width: 875px;
+    margin: 0 auto;
+    background-color: transparent;
+    border-radius: 10px;
+    text-overflow: ellipsis;
+}
+
+.recurring-header.baskets {
+    color: var(--accent);
+}
+
+.recurring-header.baskets span {
+    color: var(--accent);
+}
+
+.loaf-baskets-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: clamp(11px, calc(7.5px + 0.5vw), 14px);
+    text-align: left;
+}
+
+.loaf-baskets-table th,
+.loaf-baskets-table td {
+    height: 35px;
+    padding: 4px 12px;
+    box-sizing: border-box;
+}
+
+.loaf-baskets-table thead {
+    background-color: var(--accent);
+    color: var(--text-light);
+}
+
+.loaf-baskets-table th:first-child {
+    border-top-left-radius: 10px;
+}
+
+.loaf-baskets-table th:last-child {
+    border-top-right-radius: 10px;
+}
+
+.loaf-baskets-table tfoot tr {
+    background-color: var(--secondary);
+}
+
+.loaf-baskets-table tfoot tr:last-child td:first-child {
+    border-bottom-left-radius: 10px;
+}
+
+.loaf-baskets-table tfoot tr:last-child td:last-child {
+    border-bottom-right-radius: 10px;
+}
+
+.loaf-baskets-table tbody tr:nth-child(even) {
+    background-color: var(--accent-lighter);
+}
+
+.loaf-baskets-table tbody tr:nth-child(odd) {
+    background-color: var(--accent-hover);
+}
+
+/* Column widths. Fills takes the most because it is the only cell holding a
+   sentence; everything else is a figure or a short label. */
+.loaf-baskets-table th.basket-handle-col,
+.loaf-baskets-table td.basket-handle-col { width: 4%; }
+.loaf-baskets-table th.basket-name-col,
+.loaf-baskets-table td.basket-name-col { width: 20%; }
+.loaf-baskets-table th.basket-type-col,
+.loaf-baskets-table td.basket-type-col { width: 7%; }
+.loaf-baskets-table th.basket-start-col,
+.loaf-baskets-table td.basket-start-col { width: 10%; }
+.loaf-baskets-table th.basket-fill-col,
+.loaf-baskets-table td.basket-fill-col { width: 26%; }
+.loaf-baskets-table th.basket-max-col,
+.loaf-baskets-table td.basket-max-col { width: 10%; }
+.loaf-baskets-table th.basket-carry-col,
+.loaf-baskets-table td.basket-carry-col { width: 13%; }
+.loaf-baskets-table th.basket-action-col,
+.loaf-baskets-table td.basket-action-col { width: 10%; }
+
+.loaf-baskets-table td.basket-start,
+.loaf-baskets-table td.basket-max {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.loaf-baskets-table td.basket-name,
+.loaf-baskets-table td.basket-fill,
+.loaf-baskets-table td.basket-carry {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.basket-name-text {
+    font-weight: 600;
+}
+
+.basket-handle {
+    padding-right: 0 !important;
+    text-align: center;
+}
+
+/* PTO and UTO read as a pair, so they differ by fill rather than by wording:
+   paid is solid, unpaid is outlined. */
+.basket-kind {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 0.85em;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+.basket-kind-pto {
+    background-color: var(--accent);
+    color: var(--text-light);
+}
+
+.basket-kind-uto {
+    background-color: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+}
+
+.basket-none,
+.basket-unlimited {
+    color: var(--secondary-dark);
+    font-style: italic;
+}
+
+/* The action cell, joined onto the same treatment .income-actions gets rather
+   than restated - see the group at the recurring tables above. */
+.basket-actions {
+    padding-right: 12px !important;
+    padding-left: 2px !important;
+    text-align: right !important;
+    vertical-align: middle;
+}
+
+/* ===== LOAF: THE BASKET FORM =====
+   The modal reuses .income-form-container and the whole cadence-form family.
+   Only the two things below are new. */
+
+/* A labelled rule, because this form has four distinct sections - what it
+   holds, how it fills, the working week, the year end - and without them it
+   reads as twenty unrelated fields. */
+.loaf-form-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    margin: 18px 0 6px;
+}
+
+.loaf-form-divider::before,
+.loaf-form-divider::after {
+    flex: 1;
+    height: 1px;
+    background-color: var(--secondary-hover);
+    content: "";
+}
+
+.loaf-form-divider span {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+/* The working week. A grid rather than seven rows of floated inputs so the
+   three columns line up without each row measuring itself, and it collapses to
+   the same shape on a narrow screen. */
+/* A figure and the box that says there is not one. Half the row each, so
+   the box reads as an alternative to the number rather than a note under
+   it - and a disabled field beside a ticked box says why it is empty. */
+.loaf-amount-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.loaf-amount-row .recurring-amount {
+    flex: 1 1 50%;
+    min-width: 0;
+}
+
+.loaf-amount-row .recurring-amount:disabled {
+    background-color: var(--secondary-lighter);
+    color: var(--secondary);
+}
+
+/* label.loaf-amount-none, not .loaf-amount-none: .income-form-container
+   label is (0,2,0) and sets display:block and font-weight:bold, so a bare
+   class loses to it - which stacked the words under the box and bolded
+   them. The tag on the end takes this to (0,2,1). */
+.loaf-amount-row label.loaf-amount-none {
+    display: flex;
+    flex: 1 1 50%;
+    align-items: center;
+    gap: 6px;
+    margin: 0 !important;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    font-weight: 400;
+    cursor: pointer;
+}
+
+.loaf-amount-none input {
+    margin: 0;
+    cursor: pointer;
+}
+
+/* Wider than the 350px the recurring forms use. The working week is seven
+   rows of two time inputs, and a 12-hour input has to fit "09:00 AM" and
+   its picker - at 350px each field came out about 94px and clipped the
+   AM/PM clean off. Only this modal: the recurring forms have no such row.
+   Measured, not guessed: the field wants 99.6px, and the modal width buys
+   two of them. 360px leaves it 99.5 and clips; 375 leaves 107, which puts
+   the picker just past the AM/PM with about 7px to spare - enough that a
+   machine metering the font a shade wider does not lose it. */
+#basket-modal .income-form-container {
+    width: 375px;
+}
+
+.loaf-schedule-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    padding: 10px;
+    background-color: var(--accent-lighter);
+    border: 1px solid var(--accent-hover);
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+
+.loaf-schedule-head,
+.loaf-schedule-row {
+    display: grid;
+    /* Day, start, end, off. The break moved out of the row and under the
+       grid, because one figure covers the week now. */
+    grid-template-columns: 38px 1fr 1fr 26px;
+    gap: 6px;
+    align-items: center;
+}
+
+.loaf-schedule-head span {
+    color: var(--secondary-dark);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+.loaf-schedule-day {
+    margin: 0 !important;
+    color: var(--text-dark);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Both inputs are sized by the grid, not by themselves - a time input left to
+   its intrinsic width is a different size in every browser.
+
+   Scoped by the modal's id because .income-form-container input[type="time"]
+   is (0,2,1) and outranks a bare class. That rule is new; the number one has
+   always been there, which is why the break field was rendering at the form's
+   10px padding while the times beside it used the grid's 4px. */
+#basket-modal .loaf-schedule-time,
+#basket-modal .loaf-schedule-break {
+    width: 100%;
+    min-width: 0;
+    padding: 4px 6px;
+    background-color: var(--white);
+    border: 1px solid var(--secondary-hover);
+    border-radius: 6px;
+    box-sizing: border-box;
+    font-size: 12px;
+}
+
+.loaf-schedule-time:focus,
+.loaf-schedule-break:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+/* A day with no times is a day not worked, which is easy to read as a mistake.
+   Dimming the empty pair says it was deliberate. */
+.loaf-schedule-time:placeholder-shown,
+.loaf-schedule-time:not(:valid) {
+    color: var(--secondary);
+}
+
+.loaf-schedule-off {
+    justify-self: center;
+    margin: 0;
+    cursor: pointer;
+}
+
+/* One break for the week, under the days rather than in them. Its own row
+   so it does not read as an eighth day. */
+.loaf-schedule-break-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--accent-hover);
+}
+
+.loaf-schedule-break-row label {
+    flex: 1 1 auto;
+    margin: 0 !important;
+    color: var(--text-dark);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.loaf-schedule-break-row .loaf-schedule-break {
+    flex: 0 0 74px;
+}
+
+.loaf-schedule-break-unit {
+    color: var(--secondary-dark);
+    font-size: 11px;
+}
+
+/* An icon where a word was. Same weight as the buttons beside it, so the
+   broom does not read as decoration. */
+.loaf-icon-btn {
+    padding: 4px 10px;
+    background: none;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 6px;
+    color: var(--secondary-dark);
+    font-size: 13px;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.loaf-icon-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* A day ticked off greys its times, the same way a ticked "does not
+   accrue" greys its figure. */
+.loaf-schedule-time:disabled {
+    background-color: var(--secondary-lighter);
+    color: var(--secondary);
+}
+
+.loaf-schedule-tools {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.loaf-schedule-tools .add-day-btn,
+.loaf-schedule-tools .remove-day-btn {
+    margin: 0;
+}
+
+/* ===== LOAF: BASKETS, NARROWER SCREENS ===== */
+
+@media (max-width: 900px) {
+    .loaf-baskets-table th,
+    .loaf-baskets-table td {
+        padding: 4px 6px;
+    }
+
+    .loaf-baskets-table th.basket-fill-col,
+    .loaf-baskets-table td.basket-fill-col { width: 24%; }
+    .loaf-baskets-table th.basket-carry-col,
+    .loaf-baskets-table td.basket-carry-col { width: 15%; }
+    .loaf-baskets-table th.basket-action-col,
+    .loaf-baskets-table td.basket-action-col {
+        width: 87px;
+        min-width: 87px;
+        max-width: 87px;
+    }
+}
+
+@media (max-width: 600px) {
+    .loaf-baskets-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .loaf-baskets-table {
+        min-width: 350px;
+    }
+
+    /* Type and Year End are dropped rather than shrunk. Type reappears inside
+       the name cell from the span already in the markup; Year End is a setting
+       rather than a figure, so it is left to the edit modal on a phone. */
+    .loaf-baskets-table th.basket-type-col,
+    .loaf-baskets-table td.basket-type,
+    .loaf-baskets-table th.basket-carry-col,
+    .loaf-baskets-table td.basket-carry {
+        display: none;
+    }
+
+    .mobile-type-label {
+        display: block;
+        color: var(--secondary-dark);
+        font-size: 0.8em;
+    }
+
+    .loaf-baskets-table th.basket-start-col .th-full,
+    .loaf-baskets-table th.basket-max-col .th-full {
+        display: none;
+    }
+
+    .loaf-baskets-table th.basket-start-col .th-mobile,
+    .loaf-baskets-table th.basket-max-col .th-mobile {
+        display: inline;
+    }
+
+    .loaf-baskets-table th.basket-handle-col,
+    .loaf-baskets-table td.basket-handle-col { width: 24px; }
+    .loaf-baskets-table th.basket-name-col,
+    .loaf-baskets-table td.basket-name-col { width: 26%; }
+    .loaf-baskets-table th.basket-start-col,
+    .loaf-baskets-table td.basket-start-col { width: 15%; }
+    .loaf-baskets-table th.basket-fill-col,
+    .loaf-baskets-table td.basket-fill-col { width: 34%; }
+    .loaf-baskets-table th.basket-max-col,
+    .loaf-baskets-table td.basket-max-col { width: 15%; }
+    .loaf-baskets-table th.basket-action-col,
+    .loaf-baskets-table td.basket-action-col {
+        width: 34px;
+        min-width: 34px;
+        max-width: 34px;
+    }
+
+    .loaf-baskets-table td.basket-name,
+    .loaf-baskets-table td.basket-fill {
+        white-space: normal;
+    }
+
+    /* Same as the recurring tables: three icons stack in a 34px column rather
+       than shrinking to nothing. */
+    .loaf-baskets-table .row-actions {
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    /* Narrower day column, and the last one is a checkbox rather than the
+       minutes field it used to be - the break is one figure under the grid
+       now, so nothing here needs room for two digits. */
+    .loaf-schedule-head,
+    .loaf-schedule-row {
+        grid-template-columns: 34px 1fr 1fr 28px;
+        gap: 4px;
+    }
+
+    /* The picker button, not the AM/PM. Tapping the field opens the native
+       picker on a phone regardless, and the ~20px it occupies is exactly
+       what a 12-hour value needs to finish. */
+    .loaf-schedule-time::-webkit-calendar-picker-indicator {
+        display: none;
+    }
+
+    .loaf-schedule-time {
+        padding: 4px 2px;
+    }
+}
+
+/* ===== LOAF: THE MONTH VIEW =====
+   The calendar is dashboard_m's, not a copy of it. Every cell uses the
+   .dashboard-m-* classes verbatim and the table and body ids are joined onto
+   dashboard_m's own selectors further up, so the two pages are drawn by one
+   set of rules and cannot drift apart. What changes is only what each line
+   means:
+
+       income     -> hours accrued that day
+       expense    -> hours taken
+       remainder  -> hours left to use
+
+   Only the three below are Loaf's own, because dashboard_m has no equivalent
+   of any of them. */
+
+/* The period line: switcher hard left, month and year hard right.
+   .month-year-header is already flex with space-between, so this only has to
+   drop its left padding and let the pair sit at the end. */
+.loaf-period-header {
+    max-width: 875px;
+    margin: 10px auto 12px;
+    padding-left: 0;
+}
+
+.loaf-period-pair {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* The switcher and its add button, kept together on the left. The header
+   is space-between, so without this wrapper a third child would spread
+   the three evenly across the line. */
+.loaf-basket-pair {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* .basket-kind is sized at 0.85em, which is right in the baskets table but
+   not here: .month-year-header runs to clamp(15px, 4.5vw, 25px), so the
+   badge would come out at 21px beside a 25px name. Fixed, like the summary
+   sections set their own. Its own line-height too, or the badge's padding
+   stretches the header row and shifts the month and year down with it. */
+.loaf-basket-pair .basket-kind {
+    flex: 0 0 auto;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+/* Loaf's plus is the accent, like everything else it owns. .add-income-btn
+   is Blankee teal, which beside an accent basket name reads as a control
+   belonging to a different app. */
+#loaf-page .add-income-btn,
+#loaf-baskets-body .add-income-btn {
+    color: var(--accent);
+}
+
+#loaf-page .add-income-btn:hover,
+#loaf-baskets-body .add-income-btn:hover {
+    color: var(--accent-hover);
+}
+
+/* The switcher reads as the page's subject rather than as a control, which is
+   why it takes the heading's own size and colour. */
+.loaf-basket-dropdown {
+    max-width: 45vw;
+    color: var(--accent);
+    font-size: inherit;
+    font-weight: bold;
+}
+
+/* Only the basket switcher. This was written as
+   .loaf-period-header .styled-dropdown:first-of-type, which reads as "the
+   first dropdown in the header" and is not: :first-of-type matches by tag,
+   and enhanceSelectAsDropdown wraps every select in a div - so the month
+   was first-of-type inside .loaf-period-pair and took the accent too,
+   leaving the month orange and the year teal. */
+.loaf-basket-pair .styled-dropdown-trigger {
+    color: var(--accent);
+}
+
+/* A day this basket's week does not work. Not called "weekend": a Tuesday off
+   is as non-working as a Sunday, and the schedule is per basket. dashboard_m
+   has nothing like it because every day is a day money can move. */
+.dashboard-m-date.loaf-nonworking {
+    background-color: var(--secondary-lighter);
+}
+
+.dashboard-m-date.loaf-nonworking .dashboard-m-date-number,
+.dashboard-m-date.loaf-nonworking .dashboard-m-day-label {
+    color: var(--secondary);
+}
+
+/* A day with something booked against it. A left edge rather than a fill, so
+   it survives on top of the non-working and out-of-month treatments. */
+.dashboard-m-date.loaf-booked {
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* Single day or several. .graph-toggle-group and .graph-toggle-btn were in
+   this stylesheet already, written for a graph switcher nobody built - so this
+   revives them rather than adding a second toggle idiom. Two changes for a
+   form: equal halves across the field width, like every control around it,
+   and no hover scale, which on a half-width button overlaps its neighbour. */
+.loaf-span-toggle {
+    margin: 5px 0 10px;
+}
+
+.loaf-span-toggle .graph-toggle-btn {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.loaf-span-toggle .graph-toggle-btn:hover {
+    transform: none;
+}
+
+/* The day a single-day booking is for. Stated, not asked - the calendar cell
+   that opened the modal already decided it. */
+.loaf-entry-day {
+    margin: 5px 0 10px;
+    padding: 10px 12px;
+    background-color: var(--accent-lighter);
+    border: 1px solid var(--accent-hover);
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+}
+
+/* The booking form. Times sit beside their date in a .cadence-row, so they are
+   sized by it; disabling rather than hiding them when whole days are ticked
+   keeps the form from jumping height as the box is toggled.
+
+   The basis is measured, and it is close to the floor: at the form's 12px
+   padding a 12-hour value plus its picker needs 122.7px, and min-width auto
+   on a flex item will not let the control go under that however small a basis
+   is asked for. 125 is the smallest figure that is actually the one in force
+   rather than a number the layout quietly ignores. The rest of the row is the
+   date, which has more to show. */
+.loaf-entry-time {
+    flex: 0 0 125px;
+}
+
+/* The hours box joins them: in multi mode it sits behind "set the hours
+   myself" and is disabled, and it now opens holding a figure, so white-on-
+   white would read as an editable field that ignores you. */
+.loaf-entry-time:disabled,
+#loaf-entry-hours:disabled {
+    background-color: var(--secondary-lighter);
+    color: var(--secondary);
+}
+
+/* Delete sits directly under Save at the same width, so it should be Save's
+   twin in every dimension but colour. .delete-from-edit-category-btn is built
+   for a row of buttons beside a Cancel, at a slightly different radius and a
+   larger font; this brings it into line with the submit above it. */
+#loaf-entry-delete {
+    width: 100%;
+    margin-top: 10px;
+    padding: 12px 24px;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 500;
+}
+
+@media (max-width: 600px) {
+    .loaf-period-header {
+        padding: 0 6px;
+        box-sizing: border-box;
+    }
+}
+
+/* ===== LOAF: THE SUMMARY =====
+   dashboard_summary's page, re-pointed at hours. The layout, the card, the
+   section headers, the progress bars and the test modal are all its classes
+   unchanged - .summary-page-layout, .summary-left-column (the narrow 33% one,
+   despite the name reading like the main column), .summary-right-column,
+   .buffer-card, .summary-section, .bucket-bar-container, .test-purchase-*.
+   Only the handful below are Loaf's own. */
+
+#loaf-summary-body {
+    background-color: var(--secondary-lighter);
+    min-height: 100vh;
+}
+
+/* The light-background wordmark, on the one page with a white card to put it
+   on. Sized against the card's own heading rather than the nav bar's. */
+.loaf-summary-mark {
+    display: block;
+    width: auto;
+    height: 26px;
+    margin: 0 0 14px;
+}
+
+.loaf-basket-section {
+    overflow: visible;
+}
+
+/* Loaf's sections are the accent, where Blankee's balance and savings graphs
+   are the primary teal - so a Loaf page never reads as a Blankee one at a
+   glance. */
+.loaf-basket-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background-color: var(--accent);
+}
+
+.loaf-basket-header .basket-kind {
+    margin-left: auto;
+    font-size: 10px;
+}
+
+/* The badge is on the accent bar here rather than on white, so the paid one
+   inverts and the unpaid one outlines in white instead of in accent. */
+.loaf-basket-header .basket-kind-pto {
+    background-color: var(--text-light);
+    color: var(--accent);
+}
+
+.loaf-basket-header .basket-kind-uto {
+    border-color: var(--text-light);
+    color: var(--text-light);
+}
+
+/* .summary-row is a fixed 50px built for one line of figures. This one holds a
+   heading and a bar, so it releases the height and stacks on narrow screens
+   the way the original does only under its own breakpoint. */
+.loaf-summary-row {
+    height: auto;
+    padding: 12px 14px;
+    background-color: var(--white);
+}
+
+.loaf-summary-row .summary-category-name {
+    flex: 0 0 auto;
+    min-width: 96px;
+    color: var(--text-dark);
+    font-size: 16px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.loaf-basket-warning {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background-color: var(--accent-lighter);
+    color: var(--danger);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Shorter than Blankee's 200px graphs, because there is one per basket and
+   three of them stacked at that height is a page of nothing but charts. No
+   overflow-x either: 53 weekly points fit, which is the reason this page does
+   not need the scrolling machinery the balance chart has. */
+.loaf-basket-graph {
+    height: 150px;
+    padding: 10px 12px 12px;
+    overflow: hidden;
+    cursor: default;
+}
+
+@media (max-width: 600px) {
+    .loaf-summary-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    .loaf-basket-graph {
+        height: 130px;
+        padding: 8px;
+    }
+
+    .loaf-summary-mark {
+        height: 22px;
+    }
 }

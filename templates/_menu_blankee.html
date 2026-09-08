@@ -1,0 +1,92 @@
+{#
+  Blankee's own menu - the rows that belong to this application rather than
+  to the shell around it. nav.html picks the file by current_app_id, so a
+  sibling app gets its own list here without touching the nav.
+
+  What is NOT here, because it is shared by every app: the header wordmark,
+  the divider under it, and the footer at the bottom.
+#}
+    <div class="dropdown-menu-section">
+        {# The same views the calendar bar switches between, for the pages that
+           do not carry that bar. Collapsed like Manage Recurring below it. #}
+        <div class="dropdown-link">
+            <a href="javascript:void(0);" id="toggle-dashboards-btn" data-menu-collapse="dashboards-sections">Dashboards</a>
+            <i class="fa-light fa-gauge"></i>
+        </div>
+        <div id="dashboards-sections" class="menu-collapse">
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_summary') }}">Summary View</a>
+                <i class="fa-light fa-bars-progress"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_d') }}">Day View</a>
+                <i class="fa-light fa-calendar-day"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard') }}">Week View</a>
+                <i class="fa-light fa-calendar-week"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_3m') }}">Month View</a>
+                <i class="fa-light fa-calendar-days"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_m') }}">Month Overview</a>
+                <i class="fa-light fa-calendar-exclamation"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('dashboard_y') }}">Year Overview</a>
+                <i class="fa-light fa-calendars"></i>
+            </div>
+        </div>
+        <div class="dropdown-link"><a href="{{ url_for('manage_categories') }}">Manage Categories</a><i class="fa-light fa-folder-tree"></i></div>
+        <div class="dropdown-link">
+            <a href="javascript:void(0);" id="toggle-recurring-btn" data-menu-collapse="recurring-sections">Manage Recurring</a>
+            <i class="fa-light fa-arrows-repeat"></i>
+        </div>
+        <div id="recurring-sections" class="menu-collapse">
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('recurring_income') }}">Income</a>
+                <i class="fa-light fa-plus-large"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('recurring_expense') }}">Expenses</a>
+                <i class="fa-light fa-minus"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('recurring_ca_expense') }}">Credit Expenses</a>
+                <i class="fa-kit fa-light-credit-card-circle-minus"></i>
+            </div>
+        </div>
+        <div class="dropdown-link"><a href="{{ url_for('credit_accounts') }}">Manage Credit Accounts</a><i class="fa-light fa-credit-card"></i></div>
+        <div class="dropdown-link"><a href="{{ url_for('bundles') }}">Manage Bundles</a><i class="fa-light fa-boxes-stacked"></i></div>
+        <div class="dropdown-link"><a href="{{ url_for('settings') }}">Settings</a><i class="fa-light fa-sliders"></i></div>
+        {# Only means anything inside the iOS app, which injects window.nativeApp
+           before this page runs. Rendered hidden and revealed by script.js
+           rather than gated server-side: the server cannot tell which client
+           is asking, and sniffing the user agent would charge every page
+           render for a check only the app needs. #}
+        <div class="dropdown-link mobile-options-hidden" id="mobile-options-link">
+            <a href="javascript:void(0);" id="mobile-options-btn">Mobile Options</a>
+            <i class="fa-light fa-mobile-screen-button"></i>
+        </div>
+    </div>
+
+    {# Bank Accounts is hidden until there is a provider behind it.
+       BANK_PROVIDER defaults to 'null', so on a stock install this
+       section offered a page that could not connect anything.
+
+       Still shown to anyone who already has a connection or an account,
+       so an installation that does have a provider configured does not
+       lose its way in. Hidden rather than removed: the page, its routes
+       and the pending-transactions flow all still work. #}
+    {% if has_bank_connections or has_bank_accounts %}
+    <div class="dropdown-divider"></div>
+    <div class="dropdown-menu-section">
+        <div class="dropdown-profile-label"><span>Bank Accounts</span></div>
+        <div class="dropdown-link"><a href="{{ url_for('bank_accounts') }}">{% if has_bank_connections %}Manage Connections{% else %}Connect Accounts{% endif %}</a><i class="fa-light fa-building-columns"></i></div>
+        {% if has_bank_accounts %}
+        <div class="dropdown-link"><a href="{{ url_for('pending_transactions') }}">Pending Transactions{% if pending_transactions_count > 0 %}<span class="pending-txn-badge">{{ pending_transactions_count }}</span>{% endif %}</a><i class="fa-kit fa-light-money-bill-circle-question"></i></div>
+        {% endif %}
+    </div>
+    {% endif %}

@@ -47,6 +47,9 @@ These keys are hydrated from MySQL when a user becomes active, and flushed back 
 | `recurring_mismatches:v1:{user_id}` | STRING (JSON array) | Detected recurring bill/wage mismatches from provider enrichment |
 | `recurring_suggestions:v1:{user_id}` | STRING (JSON array) | Suggested recurring entries based on enriched transaction patterns |
 | `setup_state:v1:{user_id}` | STRING (JSON object) | Profile setup wizard state |
+| `loaf_baskets:v1:{user_id}` | STRING (JSON array) | Loaf: PTO/UTO baskets. Hydrate-only - written MySQL-first by loaf_data.py, never flushed |
+| `loaf_entries:v1:{user_id}` | STRING (JSON array) | Loaf: booked time off. Hydrate-only, as above |
+| `loaf_projection:v1:{user_id}` | STRING (JSON object) | Loaf: the computed hours-left series, per basket. Not a table - dropped on any Loaf write |
 
 ---
 

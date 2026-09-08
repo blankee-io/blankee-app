@@ -58,6 +58,37 @@
                             </form>
                         </div>
                     </div>
+                    {# Which sibling apps this instance offers. Off is the default
+                       for anything new, so an app appearing in the code does not
+                       appear for users until someone here says so. Blankee is not
+                       listed: it is the application serving this page. #}
+                    <div class="other-apps-section">
+                        <div class="section-liner">
+                            <form class="profile-form">
+                                {% for other in switchable_apps %}
+                                <div class="input-group">
+                                    <span class="other-app-name">
+                                        {# The app's own wordmark, in the version drawn for
+                                           a light background - it names itself better than
+                                           its name set in the row's font does, and this is
+                                           the same lockup the app shows in its own bar. The
+                                           alt carries the name for a reader that gets no
+                                           image. #}
+                                        <img class="other-app-wordmark"
+                                             src="{{ url_for('static', filename=other.wordmark_light) }}"
+                                             alt="{{ other.name }}">
+                                    </span>
+                                    <input type="text" disabled class="hidden-spacer">
+                                    <button type="button" class="toggle-switch other-app-toggle"
+                                            data-app-id="{{ other.id }}"
+                                            title="{{ other.name }} for everyone on this instance">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if other.id not in enabled_apps %}toggle-off{% endif %}"></i>
+                                    </button>
+                                </div>
+                                {% endfor %}
+                            </form>
+                        </div>
+                    </div>
                     <div class="logs-section">
                         <div class="section-liner">
                             <form class="profile-form">
@@ -1117,6 +1148,36 @@
         }
 
         // The generic .toggle-switch handler above flips the icon; this saves it.
+        // Other Apps: one handler for every switch in the section, so adding an
+        // app to apps_registry.py needs nothing here.
+        $('.other-app-toggle').on('click', function() {
+            const $btn = $(this);
+            const $icon = $btn.find('.toggle-icon');
+            const appId = $btn.data('app-id');
+            const on = $icon.hasClass('toggle-off');   // off now means turn on
+
+            $icon.toggleClass('toggle-off', !on);      // move first, correct on failure
+            $.ajax({
+                url: "{{ url_for('admin_set_app') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ app_id: appId, enabled: on }),
+                success: function() {
+                    const name = $btn.attr('title') || appId;
+                    showToast(on ? 'Switched on for everyone on this instance.'
+                                 : 'Switched off for everyone on this instance.',
+                              on ? 'success' : 'info', 4000);
+                },
+                error: function(xhr) {
+                    const res = xhr.responseJSON || {};
+                    // Put it back. A switch showing a setting that was not
+                    // saved is worse than the failure it is hiding.
+                    $icon.toggleClass('toggle-off', on);
+                    showToast(res.message || 'Could not change that app.', 'error', 8000);
+                }
+            });
+        });
+
         $('#auto-update-toggle').on('click', function() {
             const on = !$('#auto_update_enabled').is(':checked');
             $.ajax({

@@ -1,0 +1,20 @@
+{#
+  The icons a browser shows for whichever app the page belongs to: the tab
+  favicon, and the name a phone puts under a saved shortcut.
+
+  One include rather than four lines repeated per page, because these change
+  with the app and a page that hardcodes Blankee's is a Loaf tab wearing the
+  wrong face. current_app comes from inject_current_app, so a page gets the
+  right ones by being in the right blueprint - see CLAUDE.md 5b.
+
+  The apple-touch-icon stays Blankee's: it is a PNG at a fixed size and there
+  is one of those, not one per app. A sibling app that wants its own ships a
+  mobileicon and this picks it up the same way the favicon does.
+#}
+<link rel="icon" type="image/svg+xml"
+      href="{{ url_for('static', filename=current_app.favicon if current_app else 'favicon.svg') }}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="{{ current_app.name if current_app else 'Blankee' }}">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon"
+      href="{{ url_for('static', filename=(current_app.mobile_icon if current_app and current_app.mobile_icon else 'mobileicon.png')) }}">
