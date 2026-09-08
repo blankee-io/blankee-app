@@ -19373,10 +19373,14 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 
 /* Wider than the 350px the recurring forms use. The working week is seven
    rows of two time inputs, and a 12-hour input has to fit "09:00 AM" and
-   its picker - at 350px each field came out about 98px and clipped the
-   AM/PM clean off. Only this modal: the recurring forms have no such row. */
+   its picker - at 350px each field came out about 94px and clipped the
+   AM/PM clean off. Only this modal: the recurring forms have no such row.
+   Measured, not guessed: the field wants 99.6px, and the modal width buys
+   two of them. 360px leaves it 99.5 and clips; 375 leaves 107, which puts
+   the picker just past the AM/PM with about 7px to spare - enough that a
+   machine metering the font a shade wider does not lose it. */
 #basket-modal .income-form-container {
-    width: 450px;
+    width: 375px;
 }
 
 .loaf-schedule-grid {
