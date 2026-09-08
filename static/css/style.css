@@ -6891,6 +6891,16 @@ td:has(.bucket-progress-container) {
     border-top-right-radius: 10px;
 }
 
+/* The other two corners. dashboard_m puts them on .dashboard-m-savings,
+   which is the last section in its cell; Loaf's last section is the
+   remainder, so the radius has to move with it. Without this Loaf days
+   are square at the bottom while Blankee's are rounded - the one place
+   the two calendars would visibly disagree. */
+#loaf-calendar .dashboard-m-remainder {
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
 .dashboard-m-other-month {
     position: relative;
 }
@@ -19533,61 +19543,6 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     box-shadow: inset 3px 0 0 var(--accent);
 }
 
-/* The strip under the grid. Left today is the headline; the other two are the
-   figures that disagree with each other, and both are worth showing because a
-   plan can end the year comfortably and still go negative in July. */
-.loaf-summary-strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    max-width: 875px;
-    margin: 14px auto 30px;
-}
-
-.loaf-summary-item {
-    display: flex;
-    flex: 1 1 0;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 120px;
-    padding: 10px 14px;
-    background-color: var(--white);
-    border-radius: 10px;
-    box-shadow: 0 -4px 8px var(--shadow-sm);
-}
-
-.loaf-summary-label {
-    color: var(--secondary-dark);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
-}
-
-.loaf-summary-value {
-    color: var(--text-dark);
-    font-size: 22px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-}
-
-.loaf-summary-value.negative {
-    color: var(--danger);
-}
-
-.loaf-summary-value.below-threshold {
-    color: var(--accent);
-}
-
-.loaf-summary-warn {
-    background-color: var(--accent-lighter);
-}
-
-.loaf-summary-warn .loaf-summary-value {
-    color: var(--danger);
-    font-size: 16px;
-}
-
 /* The booking form. Times sit beside their date in a .cadence-row, so they are
    sized by it; disabling rather than hiding them when whole days are ticked
    keeps the form from jumping height as the box is toggled. */
@@ -19609,20 +19564,6 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     .loaf-period-header {
         padding: 0 6px;
         box-sizing: border-box;
-    }
-
-    .loaf-summary-strip {
-        padding: 0 6px;
-        box-sizing: border-box;
-    }
-
-    .loaf-summary-value {
-        font-size: 17px;
-    }
-
-    .loaf-summary-item {
-        min-width: 96px;
-        padding: 8px 10px;
     }
 }
 

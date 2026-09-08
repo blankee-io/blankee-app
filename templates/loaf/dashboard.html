@@ -88,28 +88,6 @@
             </table>
         </div>
 
-        {# The two figures that differ: what is left at the end of the accrual
-           year, and the lowest the balance ever gets. They diverge whenever a
-           big booking sits before later accruals. #}
-        <div class="loaf-summary-strip" id="loaf-summary">
-            <div class="loaf-summary-item">
-                <span class="loaf-summary-label">Left today</span>
-                <span class="loaf-summary-value" id="loaf-today-balance">--</span>
-            </div>
-            <div class="loaf-summary-item">
-                <span class="loaf-summary-label">At year end <span id="loaf-year-end-date"></span></span>
-                <span class="loaf-summary-value" id="loaf-year-end">--</span>
-            </div>
-            <div class="loaf-summary-item">
-                <span class="loaf-summary-label">Lowest it gets</span>
-                <span class="loaf-summary-value" id="loaf-lowest">--</span>
-            </div>
-            <div class="loaf-summary-item loaf-summary-warn" id="loaf-negative-item" style="display:none;">
-                <span class="loaf-summary-label">Runs out</span>
-                <span class="loaf-summary-value" id="loaf-negative">--</span>
-            </div>
-        </div>
-
         {# Booking. This is the only place time off is entered - a day click
            opens it with that date already filled in. #}
         <div id="loaf-entry-modal" class="modal">
@@ -355,25 +333,6 @@
         });
     }
 
-    function drawSummary(summary) {
-        el('loaf-today-balance').textContent = formatHours(summary.balance_today);
-        el('loaf-today-balance').className =
-            'loaf-summary-value ' + balanceClass(summary.balance_today);
-        el('loaf-year-end').textContent = formatHours(summary.balance_year_end);
-        el('loaf-year-end-date').textContent =
-            summary.year_end_date ? '(' + summary.year_end_date + ')' : '';
-        el('loaf-lowest').textContent = formatHours(summary.lowest);
-        el('loaf-lowest').className = 'loaf-summary-value ' + balanceClass(summary.lowest);
-
-        var item = el('loaf-negative-item');
-        if (summary.first_negative) {
-            el('loaf-negative').textContent = summary.first_negative;
-            item.style.display = '';
-        } else {
-            item.style.display = 'none';
-        }
-    }
-
     function load() {
         $.ajax({
             url: '/loaf/api/month',
@@ -386,7 +345,6 @@
                 state.threshold = response.basket.low_balance_hours;
                 drawHead();
                 drawGrid(response.rows);
-                drawSummary(response.summary);
             },
             error: function (xhr) {
                 var body = xhr.responseJSON || {};
