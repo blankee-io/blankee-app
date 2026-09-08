@@ -86,6 +86,21 @@ USER_TABLES = [
     'setup_state',
     'recurring_mismatches',
     'recurring_suggestions',
+    # Loaf's tables are HYDRATE-ONLY. They are read from here and written
+    # MySQL-first by loaf_data.py, which refreshes the cache with
+    # mark_dirty=False - so they are deliberately absent from the three
+    # tables_to_flush lists and have no _flush_table_to_mysql branch.
+    #
+    # That is safe only while nothing marks them dirty. The first Redis-first
+    # write to either one will report success and lose the row: the unknown
+    # table falls through to `return 0` and the caller clears the dirty flag
+    # anyway. Before writing one, add both names to all three tables_to_flush
+    # lists and give them a flush branch.
+    #
+    # Neither needs a _hydrate_table branch - both carry a direct user_id, so
+    # the default branch covers them.
+    'loaf_baskets',
+    'loaf_entries',
 ]
 
 
@@ -98,6 +113,19 @@ class DecimalEncoder(json.JSONEncoder):
             return obj.isoformat()
         if isinstance(obj, date):
             return obj.isoformat()
+        # A TIME column arrives from mysql-connector as a timedelta, not a
+        # time. Without this branch the first table to hold one cannot be
+        # hydrated at all: _hydrate_table json.dumps()es whole rows, the dump
+        # raises TypeError, and the key is simply absent on every pass - the
+        # same silent failure the bundle_items hydrate comment records,
+        # reached by a different door. Rendered the way MySQL renders it, so a
+        # value read back from Redis and one read straight from MySQL agree.
+        if isinstance(obj, timedelta):
+            total = int(obj.total_seconds())
+            sign = '-' if total < 0 else ''
+            total = abs(total)
+            return '%s%02d:%02d:%02d' % (sign, total // 3600,
+                                         (total % 3600) // 60, total % 60)
         return super(DecimalEncoder, self).default(obj)
 
 

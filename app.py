@@ -680,6 +680,30 @@ def _urlencode_page(args, page):
 
 
 @app.context_processor
+def inject_current_app():
+    """Tell every template which app it is part of, and what else is on offer.
+
+    The nav bar and the menu are shared markup that has to render differently
+    depending on which application the request belongs to - Blankee's wordmark
+    and sections, or a sibling's. Working that out here rather than in each
+    route means a new app needs no change to any route that already exists.
+
+    An endpoint no app has claimed belongs to the host, which is Blankee. That
+    is deliberate: it makes adding an app additive, and it means a route added
+    without a thought about apps behaves the way it always did.
+    """
+    import apps_registry
+
+    endpoint = request.endpoint if request else None
+    current_id = apps_registry.app_for_endpoint(endpoint)
+    return {
+        'current_app_id': current_id,
+        'current_app': apps_registry.get(current_id),
+        'other_apps': apps_registry.menu_apps(current_id),
+    }
+
+
+@app.context_processor
 def inject_unread_notifications():
     """Inject unread notification count and user info into all templates for the nav"""
     unread_count = 0
@@ -16364,6 +16388,33 @@ def _admin_user_rows():
         return cursor.fetchall()
 
 
+@app.route('/admin/apps', methods=['POST'])
+@login_required
+@admin_required
+def admin_set_app():
+    """Turn a sibling app on or off for everyone on this instance.
+
+    Instance-wide rather than per user, which is what was asked for and also
+    the only thing that can be reasoned about: an app half switched on is a
+    support question waiting to happen.
+
+    The registry refuses to switch the host off, so there is no request that
+    can take Blankee away from the console that sent it.
+    """
+    import apps_registry
+
+    data = request.get_json(silent=True) or {}
+    app_id = data.get('app_id')
+    enabled = bool(data.get('enabled'))
+
+    if not apps_registry.set_enabled(app_id, enabled):
+        return jsonify({'status': 'error', 'message': 'Unknown app.'}), 400
+
+    log_info(app.logger, 'ADMIN_APPS',
+             f"{'Enabled' if enabled else 'Disabled'} app {app_id} instance-wide")
+    return jsonify({'status': 'success', 'app_id': app_id, 'enabled': enabled})
+
+
 @app.route('/admin', methods=['GET'])
 @admin_required
 def admin_console():
@@ -16386,11 +16437,17 @@ def admin_console():
     except Exception:
         pass
 
+    import apps_registry
+
     return render_template(
         'admin.html',
         landing_page=landing_page,
         users=_admin_user_rows(),
         smtp=get_smtp_config_for_display(),
+        # force: the console is where someone comes to change these, so it is
+        # the one place that must not show a cached answer.
+        switchable_apps=apps_registry.all_switchable(),
+        enabled_apps=apps_registry.enabled_ids(force=True),
         # No network on page load - check_remote defaults to False. Opening the
         # console must not make this instance contact GitHub; only the button
         # does. The local answers and any run in progress still appear, so a
@@ -28434,6 +28491,21 @@ def support_request():
     log_error(logger, 'SUPPORT', 'Failed to send support request email', user_id=current_user.id, account_email=account_email)
     flash('Failed to send support request. Please try again in a moment.')
     return redirect(url_for('support_page'))
+
+
+##############################################################################
+############################### SIBLING APPS #################################
+##############################################################################
+
+# Each sibling app is a blueprint with its own url_prefix and its own endpoint
+# namespace, registered here. Registration is all that is needed - the app is
+# still invisible to users until an administrator switches it on, which the
+# blueprint enforces for itself.
+#
+# Registered last so a blueprint importing anything from this module finds it
+# defined. See CLAUDE.md 5b.
+from loaf_app import loaf as loaf_blueprint
+app.register_blueprint(loaf_blueprint)
 
 
 ##############################################################################

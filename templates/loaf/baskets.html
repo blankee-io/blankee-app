@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Baskets &middot; {{ current_app.name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    {# The local 3.7.1, like every page except dashboard_summary - which pulls
+       3.6.0 off a CDN. Matching the majority rather than the exception. #}
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery.ui.touch-punch.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/loaf_basket_modal.js') }}" defer></script>
+    {% include '_head_icons.html' %}
+</head>
+<body id="loaf-baskets-body" data-app="loaf">
+    {% include 'nav.html' %}
+    {# showToast and showConfirmModal. Never hand-rolled - CLAUDE.md 5a. #}
+    {% include 'alert_modals.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">
+            {# Back and nothing else, exactly as manage_categories does it -
+               a settings page is not one of the views, so it does not carry the
+               view switcher. Loaf's landing is its month view, which is what
+               apps_registry declares as this app's start. #}
+            <div class="nav-buttons">
+                <a href="{{ url_for('loaf.dashboard') }}" class="nav-button">
+                    <i class="fa-solid fa-turn-left"></i>
+                    <span class="nav-tooltip">Back</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+        <div class="loaf-baskets-container">
+            <div class="recurring-header baskets">
+                <span>Baskets</span>
+                <button id="add-basket-btn" class="add-income-btn" type="button" title="Add Basket">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
+            </div>
+
+            {% if baskets %}
+            <table class="loaf-baskets-table">
+                <thead>
+                    <tr>
+                        <th class="basket-handle-col"></th>
+                        <th class="basket-name-col">Basket</th>
+                        <th class="basket-type-col">Type</th>
+                        <th class="basket-start-col"><span class="th-full">Starting<br>Balance</span><span class="th-mobile">Start</span></th>
+                        <th class="basket-fill-col">Fills</th>
+                        <th class="basket-max-col"><span class="th-full">Maximum<br>Balance</span><span class="th-mobile">Max</span></th>
+                        <th class="basket-carry-col">Year End</th>
+                        <th class="basket-action-col"></th>
+                    </tr>
+                </thead>
+                <tbody id="basket-rows">
+                    {% for basket in baskets %}
+                    {# Every value the edit form needs is a data attribute. The
+                       modal never scrapes a cell - the one thing most worth
+                       copying from recurring_i.html, because a cell holds a
+                       formatted string and a form needs the figure. #}
+                    <tr data-basket-id="{{ basket.id }}"
+                        data-name="{{ basket.name }}"
+                        data-basket-type="{{ basket.basket_type }}"
+                        data-starting-hours="{{ basket.starting_hours if basket.starting_hours is not none else '' }}"
+                        data-starting-date="{{ basket.starting_date or '' }}"
+                        data-max-balance-hours="{{ basket.max_balance_hours if basket.max_balance_hours is not none else '' }}"
+                        data-grant-hours="{{ basket.grant_hours if basket.grant_hours is not none else '' }}"
+                        data-accrual-hours="{{ basket.accrual_hours if basket.accrual_hours is not none else '' }}"
+                        data-cadence-interval="{{ basket.cadence_interval or 1 }}"
+                        data-cadence-unit="{{ basket.cadence_unit or 'weeks' }}"
+                        data-weekdays="{{ basket.weekdays or '' }}"
+                        data-monthly-days="{{ basket.monthly_days or '' }}"
+                        data-yearly-day="{{ basket.yearly_day if basket.yearly_day is not none else '' }}"
+                        data-yearly-month="{{ basket.yearly_month if basket.yearly_month is not none else '' }}"
+                        data-accrual-anchor-date="{{ basket.accrual_anchor_date or '' }}"
+                        data-year-start-month="{{ basket.year_start_month or 1 }}"
+                        data-year-start-day="{{ basket.year_start_day or 1 }}"
+                        data-carryover-mode="{{ basket.carryover_mode or 'reset' }}"
+                        data-carryover-cap-hours="{{ basket.carryover_cap_hours if basket.carryover_cap_hours is not none else '' }}"
+                        data-low-balance-hours="{{ basket.low_balance_hours if basket.low_balance_hours is not none else '' }}"
+                        {%- for prefix in weekday_prefixes %}
+                        data-{{ prefix }}-start="{{ basket[prefix ~ '_start'] or '' }}"
+                        data-{{ prefix }}-end="{{ basket[prefix ~ '_end'] or '' }}"
+                        data-{{ prefix }}-break-minutes="{{ basket[prefix ~ '_break_minutes'] or 0 }}"
+                        {%- endfor %}>
+                        <td class="basket-handle">
+                            <span class="sort-handle" title="Drag to reorder">
+                                <i class="fa-solid fa-grip-lines"></i>
+                            </span>
+                        </td>
+                        <td class="basket-name">
+                            <span class="basket-name-text">{{ basket.name }}</span>
+                            {# The mobile trick from recurring_i: the dropped
+                               column's value already sits here, hidden, and the
+                               breakpoint swaps display. No JS, no data-label. #}
+                            <span class="mobile-type-label">{{ 'PTO' if basket.basket_type == 'pto' else 'UTO' }}</span>
+                        </td>
+                        <td class="basket-type">
+                            <span class="basket-kind basket-kind-{{ basket.basket_type }}">
+                                {{ 'PTO' if basket.basket_type == 'pto' else 'UTO' }}
+                            </span>
+                        </td>
+                        <td class="basket-start">{{ '%.2f'|format(basket.starting_hours or 0) }}</td>
+                        <td class="basket-fill">
+                            {% set fill = describe_fill(basket) %}
+                            {% if fill %}{{ fill }}{% else %}<span class="basket-none">by hand</span>{% endif %}
+                        </td>
+                        <td class="basket-max">
+                            {% if basket.max_balance_hours is none %}
+                            <span class="basket-unlimited">Unlimited</span>
+                            {% else %}{{ '%.2f'|format(basket.max_balance_hours) }}{% endif %}
+                        </td>
+                        <td class="basket-carry">{{ describe_carryover(basket) }}</td>
+                        <td class="basket-actions">
+                            <div class="row-actions">
+                                <button class="edit-recurring-btn" type="button" title="Edit Basket"
+                                        data-basket-id="{{ basket.id }}">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                                <button class="delete-recurring-btn" type="button" title="Delete Basket"
+                                        data-basket-id="{{ basket.id }}" data-name="{{ basket.name }}">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr><td colspan="8" class="recurring-footer"></td></tr>
+                </tfoot>
+            </table>
+            {% else %}
+            <div class="recurring-income-empty-info">
+                <h2>No baskets yet</h2>
+                <p>
+                    A <strong>basket</strong> is a pool of hours - vacation, sick
+                    leave, unpaid time. Each one knows how it fills, what your
+                    working week looks like, and what happens to whatever is left
+                    when the year turns.
+                </p>
+                <p>Add one and Loaf can start forecasting what you will have left.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% include 'loaf/_basket_modal.html' %}
+
+    {% include 'loading_modals.html' %}
+
+<script>
+// The Manage Baskets table. The form itself is in _basket_modal.html and
+// static/js/loaf_basket_modal.js, because the month view opens the same one.
+(function () {
+    'use strict';
+
+    async function removeBasket(basketId, name) {
+        var ok = await showConfirmModal({
+            title: 'Delete this basket?',
+            message: 'Deleting "' + name + '" also deletes every hour booked ' +
+                     'against it. This cannot be undone.',
+            confirmText: 'Delete',
+            cancelText: 'Keep it',
+            danger: true
+        });
+        if (!ok) { return; }
+
+        $.ajax({
+            url: '/loaf/api/baskets/' + basketId + '/delete',
+            method: 'POST',
+            contentType: 'application/json',
+            success: function (response) {
+                if (response.status === 'success') {
+                    location.reload();
+                } else {
+                    showToast(response.message || 'Could not delete that basket.', 'error');
+                }
+            },
+            error: function (xhr) {
+                var body = xhr.responseJSON || {};
+                showToast(body.message || 'Could not delete that basket.', 'error');
+            }
+        });
+    }
+
+    // Delegated only. recurring_i.html binds its delete button with an inline
+    // onclick AND a delegated handler, so its confirm dialog fires twice.
+    $(document).on('click', '.edit-recurring-btn', function () {
+        loafBasketModal.openEdit($(this).attr('data-basket-id'));
+    });
+    $(document).on('click', '.delete-recurring-btn', function () {
+        removeBasket($(this).attr('data-basket-id'), $(this).attr('data-name') || 'this basket');
+    });
+
+    $('#add-basket-btn').on('click', function () { loafBasketModal.openAdd(); });
+
+    // Drag to reorder. jQuery UI sortable plus touch-punch, the pair
+    // manage_categories.html uses - the only drag-ordering in this codebase.
+    // The client sends the new order of ids and the server assigns the
+    // numbers, so the fractional scheme stays server-side.
+    if ($('#basket-rows').length && $.fn.sortable) {
+        $('#basket-rows').sortable({
+            handle: '.sort-handle',
+            axis: 'y',
+            containment: 'parent',
+            helper: function (event, row) {
+                // Without this the cells collapse while dragging, because a
+                // detached <tr> loses the table's column widths.
+                row.children().each(function () {
+                    $(this).width($(this).width());
+                });
+                return row;
+            },
+            update: function () {
+                var ids = $('#basket-rows tr').map(function () {
+                    return parseInt($(this).attr('data-basket-id'), 10);
+                }).get();
+                $.ajax({
+                    url: '/loaf/api/basket-order',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({basket_ids: ids}),
+                    error: function () {
+                        showToast('Could not save the new order.', 'error');
+                    }
+                });
+            }
+        });
+    }
+})();
+</script>
+
+{# The visible footer comes from nav.html, at the bottom of the menu. Only the
+   scripts belong here - see the note in footer.html. #}
+{% include 'footer.html' %}
+</body>
+</html>

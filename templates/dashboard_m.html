@@ -618,12 +618,14 @@
             document.getElementById('loading-screen').style.display = 'none';
             selectedDate.setMonth(selectedDate.getMonth() - 1); // Move to previous month
             
-            // Wait for animation to complete before regenerating calendar
-            setTimeout(() => {
-                mainContainer.classList.remove('slide-right');
-                updateMonthYearHeader(selectedDate);  // Update the dropdowns with the new selected month and year
-                generateCalendar(goofyWeekMode, selectedDate); // Regenerate the calendar
-            }, 50); // Small delay to ensure animation starts
+            // Class removed on its own timer, matching the 0.3s the keyframes run
+            // for - and the redraw happens now rather than inside it, so the new
+            // content is what slides in. Removing the class at 50ms cancelled the
+            // animation a sixth of the way through, which is what made this feel
+            // too quick. dashboard_3m has always done it this way.
+            setTimeout(() => mainContainer.classList.remove('slide-right'), 300);
+            updateMonthYearHeader(selectedDate);  // Update the dropdowns with the new selected month and year
+            generateCalendar(goofyWeekMode, selectedDate); // Regenerate the calendar
         }
 
         // Navigate to next month
@@ -635,12 +637,14 @@
             document.getElementById('loading-screen').style.display = 'none';
             selectedDate.setMonth(selectedDate.getMonth() + 1); // Move to next month
             
-            // Wait for animation to complete before regenerating calendar
-            setTimeout(() => {
-                mainContainer.classList.remove('slide-left');
-                updateMonthYearHeader(selectedDate);  // Update the dropdowns with the new selected month and year
-                generateCalendar(goofyWeekMode, selectedDate); // Regenerate the calendar
-            }, 50); // Small delay to ensure animation starts
+            // Class removed on its own timer, matching the 0.3s the keyframes run
+            // for - and the redraw happens now rather than inside it, so the new
+            // content is what slides in. Removing the class at 50ms cancelled the
+            // animation a sixth of the way through, which is what made this feel
+            // too quick. dashboard_3m has always done it this way.
+            setTimeout(() => mainContainer.classList.remove('slide-left'), 300);
+            updateMonthYearHeader(selectedDate);  // Update the dropdowns with the new selected month and year
+            generateCalendar(goofyWeekMode, selectedDate); // Regenerate the calendar
         }
 
         // Go to the current month

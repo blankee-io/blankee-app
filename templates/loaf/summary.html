@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Summary &middot; {{ current_app.name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    {# Pinned. dashboard_summary loads cdn.jsdelivr.net/npm/chart.js with no
+       version, so it silently follows upstream majors; a chart that changes
+       shape because someone else published is not a thing to inherit. #}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    {% include '_head_icons.html' %}
+</head>
+<body id="loaf-summary-body" data-app="loaf">
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">
+            {# The view switcher, in dashboard_summary's shape: the page you are
+               on is a div with nav-button-focus rather than a link, which is what
+               paints it accent. Summary sits outside #nav-inline-buttons and the
+               rest go in it, the same division Blankee makes.
+
+               Manage Baskets is not here. Blankee's dashboards do not carry a
+               Manage Categories button either - that lives in the side menu. #}
+            <div class="nav-dash-container" id="nav-dash-container">
+                <div class="nav-button nav-button-focus">
+                    <i class="fa-solid fa-bars-progress"></i>
+                    <span class="nav-tooltip">Summary View</span>
+                </div>
+                <div id="nav-inline-buttons">
+                    <a href="{{ url_for('loaf.dashboard') }}" class="nav-button">
+                        <i class="fa-solid fa-calendar-days"></i>
+                        <span class="nav-tooltip">Month View</span>
+                    </a>
+                </div>
+            </div>
+            {# Hidden rather than absent, so the container's space-between keeps
+               the switcher in the same place it sits on the month view. #}
+            <div class="calendarnavbuttons" style="visibility: hidden;">
+                <div class="nav-button"><i class="fa-solid fa-left"></i></div>
+                <div class="nav-button"><span class="nav-current-icon"><i class="fa-solid fa-calendar-day"></i></span></div>
+                <div class="nav-button"><i class="fa-solid fa-right"></i></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+    {% if not baskets %}
+        <div class="recurring-income-empty-info">
+            <h2>Nothing to summarise yet</h2>
+            <p>Add a <strong>basket</strong> and this page will show what is in it,
+               what has gone, and where it is heading.</p>
+            <p><a href="{{ url_for('loaf.baskets') }}">Add your first basket</a>.</p>
+        </div>
+    {% else %}
+        {# The same flex split dashboard_summary uses. Note which is which: the
+           narrow 33% column is on the LEFT and holds the card; the graphs are
+           the wide one on the right. #}
+        <div class="summary-page-layout">
+            <div class="summary-left-column">
+                <div class="buffer-card">
+                    {# The light-background wordmark, which until now was
+                       declared in the registry with no page drawing it. This is
+                       the page it belongs on: a white card, where the version
+                       drawn for the teal bar would vanish. #}
+                    <img class="loaf-summary-mark"
+                         src="{{ url_for('static', filename=current_app.wordmark_light) }}"
+                         alt="{{ current_app.name }}">
+
+                    <div class="buffer-subtitle">Hours left today</div>
+                    <div class="buffer-amount" id="loaf-total-today">--</div>
+                    <div class="projected-label" id="loaf-total-note">across every basket</div>
+
+                    <div class="buffer-divider"></div>
+
+                    <div class="buffer-subtitle">Lowest in the forecast</div>
+                    <div class="projected-amount" id="loaf-total-lowest">--</div>
+                    <div class="projected-label">
+                        <span id="loaf-lowest-which"></span>
+                    </div>
+
+                    <div class="payday-info">
+                        <span class="payday-item">
+                            <i class="fa-regular fa-calendar"></i>
+                            Next accrual: <strong id="loaf-next-accrual">--</strong>
+                        </span>
+                        <span class="payday-item">
+                            <i class="fa-regular fa-clock"></i>
+                            Booked ahead: <strong id="loaf-booked-ahead">--</strong>
+                        </span>
+                    </div>
+
+                    <div class="buffer-card-buttons">
+                        <button id="loaf-test-open" class="test-purchase-open-btn" type="button">
+                            <i class="fa-solid fa-umbrella-beach"></i> Test Time Off
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {# The wide column. One section per basket: the bar, the figures,
+               and that basket's own chart across its own accrual year. #}
+            <div class="summary-right-column">
+                <div class="summary-container" id="loaf-basket-sections"></div>
+            </div>
+        </div>
+
+        {# Test Time Off. Simulates and never saves - the form has no way to
+           commit, and the endpoint writes nothing. #}
+        <div id="loaf-test-modal" class="test-purchase-modal">
+            <div class="test-purchase-modal-content">
+                <div class="test-purchase-modal-header">
+                    <h3><i class="fa-solid fa-umbrella-beach"></i> Test Time Off</h3>
+                    <button id="loaf-test-close" class="test-purchase-modal-close">&times;</button>
+                </div>
+                <div class="test-purchase-modal-body">
+                    <p class="test-purchase-description">
+                        Try some time off without booking it. Nothing is saved -
+                        this only shows what it would do to the balance, including
+                        the accrual those hours would have earned.
+                    </p>
+                    <div class="cadence-form">
+                        <label for="loaf-test-basket">Basket</label>
+                        <select id="loaf-test-basket">
+                            {% for option in baskets %}
+                            <option value="{{ option.id }}">{{ option.name }}</option>
+                            {% endfor %}
+                        </select>
+
+                        <div class="date-checkbox-row">
+                            <input type="checkbox" id="loaf-test-all-day" checked>
+                            <label for="loaf-test-all-day" class="date-checkbox-label">Whole days</label>
+                        </div>
+
+                        <label for="loaf-test-start">From</label>
+                        <div class="cadence-row">
+                            <input type="date" id="loaf-test-start">
+                            <input type="time" id="loaf-test-start-time" class="loaf-entry-time" disabled>
+                        </div>
+
+                        <label for="loaf-test-end">Until</label>
+                        <div class="cadence-row">
+                            <input type="date" id="loaf-test-end">
+                            <input type="time" id="loaf-test-end-time" class="loaf-entry-time" disabled>
+                        </div>
+
+                        <button type="button" id="loaf-test-run" class="test-run-btn">Test</button>
+                    </div>
+                    <div id="loaf-test-result" class="test-purchase-result" style="display:none;"></div>
+
+                    <div id="loaf-test-chart-wrap" style="display:none;">
+                        {# A DOM legend, not Chart.js's, for the same reason
+                           dashboard_summary uses one: the canvas is inside a
+                           modal and its own legend crowds the plot. #}
+                        <div class="test-result-legend">
+                            <span class="test-result-key">
+                                <span class="test-result-swatch test-result-swatch-now"></span>As it stands
+                            </span>
+                            <span class="test-result-key">
+                                <span class="test-result-swatch test-result-swatch-projected"></span>With this
+                            </span>
+                        </div>
+                        <div class="graph-container test-result-graph">
+                            <canvas id="loaf-test-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+    </div>
+
+    {% include 'loading_modals.html' %}
+
+{% if baskets %}
+<script>
+// ---------------------------------------------------------------------------
+// Loaf's summary. One section per basket, each with its own chart across its
+// own accrual year, plus a simulator that writes nothing.
+// ---------------------------------------------------------------------------
+(function () {
+    'use strict';
+
+    var TEAL = '#2AAAA8';
+    var ACCENT = '#E45F1C';
+    var GREY = '#8C9BA5';
+    var DANGER = '#F94449';
+
+    var charts = {};
+    var latest = [];
+
+    function el(id) { return document.getElementById(id); }
+    function hours(value) {
+        var number = parseFloat(value);
+        return isNaN(number) ? '--' : number.toFixed(2);
+    }
+    function pretty(iso) {
+        if (!iso) { return ''; }
+        var parts = iso.split('-');
+        return parts[2].replace(/^0/, '') + ' ' +
+            ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
+             'Oct', 'Nov', 'Dec'][parseInt(parts[1], 10) - 1] + ' ' + parts[0];
+    }
+
+    // A small chart rather than a copy of renderScrollableChart. Most of that
+    // function - drag-to-scroll, the zero-split gradient, reducing a month to
+    // its worst day, a 16,000px width cap - exists because it plots 3,650
+    // daily points. A basket's accrual year is 53 weekly points, which fit in
+    // the card without scrolling at all. The conventions are kept: teal, no
+    // legend, tension 0.3, maintainAspectRatio off, x gridlines hidden.
+    function draw(canvas, series, options) {
+        options = options || {};
+        var labels = series.map(function (point) { return pretty(point.date); });
+        var values = series.map(function (point) { return point.balance; });
+
+        var datasets = [{
+            label: options.label || 'Hours',
+            data: values,
+            borderColor: options.colour || TEAL,
+            backgroundColor: (options.colour || TEAL) + '1a',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+            pointHoverRadius: 5
+        }];
+
+        if (options.compare) {
+            // Unshifted so it draws behind, dashed so the two never read as
+            // one line - the same treatment the Test a Bill result uses.
+            datasets.unshift({
+                label: 'As it stands',
+                data: options.compare.map(function (point) { return point.balance; }),
+                borderColor: GREY,
+                borderWidth: 2,
+                borderDash: [5, 4],
+                fill: false,
+                tension: 0.3,
+                pointRadius: 0,
+                pointHoverRadius: 5
+            });
+        }
+
+        // A dashed rule at zero, drawn only when the line actually goes below
+        // it - a zero line on a chart that never approaches zero is noise.
+        var zeroRule = {
+            id: 'loafZero',
+            beforeDatasetsDraw: function (chart) {
+                var scale = chart.scales.y;
+                if (scale.min >= 0) { return; }
+                var ctx = chart.ctx;
+                var y = scale.getPixelForValue(0);
+                ctx.save();
+                ctx.strokeStyle = DANGER;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(chart.chartArea.left, y);
+                ctx.lineTo(chart.chartArea.right, y);
+                ctx.stroke();
+                ctx.restore();
+            }
+        };
+
+        if (charts[canvas.id]) { charts[canvas.id].destroy(); }
+        charts[canvas.id] = new Chart(canvas, {
+            type: 'line',
+            data: {labels: labels, datasets: datasets},
+            plugins: [zeroRule],
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {intersect: false, mode: 'index'},
+                plugins: {
+                    legend: {display: false},
+                    tooltip: {
+                        callbacks: {
+                            label: function (context) {
+                                return context.dataset.label + ': ' +
+                                    hours(context.parsed.y) + ' h';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {grid: {display: false},
+                        ticks: {font: {size: 9}, maxTicksLimit: 6, maxRotation: 0}},
+                    y: {grid: {color: 'rgba(0, 0, 0, 0.05)'},
+                        ticks: {font: {size: 9},
+                                callback: function (value) { return value + 'h'; }}}
+                }
+            }
+        });
+    }
+
+    function section(basket) {
+        var wrap = document.createElement('div');
+        wrap.className = 'summary-section loaf-basket-section';
+
+        var header = document.createElement('div');
+        header.className = 'summary-section-header loaf-basket-header';
+        header.innerHTML =
+            '<i class="fa-solid fa-basket-shopping"></i>' +
+            '<span>' + basket.name + '</span>' +
+            '<span class="basket-kind basket-kind-' + basket.basket_type + '">' +
+            (basket.basket_type === 'pto' ? 'PTO' : 'UTO') + '</span>';
+        wrap.appendChild(header);
+
+        // The live bar classes. .summary-progress-bar and the .progress-*
+        // colours in the stylesheet are dead - no markup has emitted them
+        // since dashboard_summary was rewritten.
+        var used = basket.used_total || 0;
+        var left = basket.balance_today || 0;
+        var span = used + Math.max(left, 0);
+        var pct = span > 0 ? Math.min((used / span) * 100, 100) : 0;
+
+        var row = document.createElement('div');
+        row.className = 'summary-row loaf-summary-row';
+        row.innerHTML =
+            '<div class="summary-category-name">' + hours(left) + ' h left</div>' +
+            '<div class="summary-progress-container">' +
+            '  <div class="bucket-status">' +
+            '    <div class="bucket-bar-container">' +
+            '      <div class="bucket-bar ' + (left < 0 ? 'bucket-bar-over' : 'bucket-bar-ok') +
+            '" style="width: ' + pct + '%"></div>' +
+            '    </div>' +
+            '    <div class="summary-amounts">' +
+            '      <span class="spent-amount">' + hours(used) + ' h taken</span>' +
+            '      <span class="remaining-amount' + (left < 0 ? ' overspent' : '') + '">' +
+            hours(basket.balance_year_end) + ' h at ' + pretty(basket.year_end) + '</span>' +
+            '    </div>' +
+            '  </div>' +
+            '</div>';
+        wrap.appendChild(row);
+
+        if (basket.first_negative) {
+            var warn = document.createElement('div');
+            warn.className = 'loaf-basket-warning';
+            warn.innerHTML = '<i class="fa-solid fa-circle-exclamation"></i> Runs out on <strong>' +
+                pretty(basket.first_negative) + '</strong>';
+            wrap.appendChild(warn);
+        }
+
+        var graph = document.createElement('div');
+        graph.className = 'graph-container loaf-basket-graph';
+        var canvas = document.createElement('canvas');
+        canvas.id = 'loaf-chart-' + basket.id;
+        graph.appendChild(canvas);
+        wrap.appendChild(graph);
+
+        return {node: wrap, canvas: canvas};
+    }
+
+    function paint(data) {
+        latest = data.baskets;
+        var host = el('loaf-basket-sections');
+        host.innerHTML = '';
+
+        var total = 0;
+        var lowest = null;
+        var lowestName = '';
+        var booked = 0;
+
+        data.baskets.forEach(function (basket) {
+            total += basket.balance_today || 0;
+            booked += basket.used_total || 0;
+            if (lowest === null || basket.lowest < lowest) {
+                lowest = basket.lowest;
+                lowestName = basket.name + ' on ' + pretty(basket.lowest_date);
+            }
+            var built = section(basket);
+            host.appendChild(built.node);
+            // After the node is in the document: inside a detached parent every
+            // Chart.js measurement is zero, which is the same reason
+            // dashboard_summary renders its modal chart after display:flex.
+            draw(built.canvas, basket.series, {label: basket.name});
+        });
+
+        el('loaf-total-today').textContent = hours(total);
+        el('loaf-total-today').className =
+            'buffer-amount ' + (total < 0 ? 'summary_negative' : 'positive');
+        el('loaf-total-note').textContent =
+            data.baskets.length === 1 ? 'in one basket'
+                                      : 'across ' + data.baskets.length + ' baskets';
+        el('loaf-total-lowest').textContent = hours(lowest);
+        el('loaf-total-lowest').className =
+            'projected-amount ' + (lowest < 0 ? 'summary_negative' : 'positive');
+        el('loaf-lowest-which').textContent = lowestName;
+        el('loaf-booked-ahead').textContent = hours(booked) + ' h';
+
+        // The next accrual is the first point where the balance rises, which is
+        // cheaper to read off the series than to ask the server for again.
+        var next = null;
+        data.baskets.forEach(function (basket) {
+            var points = basket.series || [];
+            for (var i = 1; i < points.length; i++) {
+                if (points[i].balance > points[i - 1].balance) {
+                    if (!next || points[i].date < next) { next = points[i].date; }
+                    break;
+                }
+            }
+        });
+        el('loaf-next-accrual').textContent = next ? pretty(next) : 'none scheduled';
+    }
+
+    function load() {
+        $.ajax({
+            url: '/loaf/api/summary',
+            success: function (response) {
+                if (response.status !== 'success') {
+                    showToast(response.message || 'Could not load your baskets.', 'error');
+                    return;
+                }
+                paint(response);
+            },
+            error: function () { showToast('Could not load your baskets.', 'error'); }
+        });
+    }
+
+    // ------------------------------------------------------- the simulator ----
+
+    function openTest() {
+        el('loaf-test-result').style.display = 'none';
+        el('loaf-test-chart-wrap').style.display = 'none';
+        el('loaf-test-modal').style.display = 'flex';
+    }
+
+    function closeTest() { el('loaf-test-modal').style.display = 'none'; }
+
+    function runTest() {
+        var payload = {
+            basket_id: el('loaf-test-basket').value,
+            all_day: el('loaf-test-all-day').checked ? '1' : '',
+            start_date: el('loaf-test-start').value,
+            end_date: el('loaf-test-end').value,
+            start_time: el('loaf-test-start-time').value,
+            end_time: el('loaf-test-end-time').value
+        };
+
+        $.ajax({
+            url: '/loaf/api/test-time-off',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(payload),
+            success: function (response) {
+                var box = el('loaf-test-result');
+                var safe = !response.goes_negative;
+                box.className = 'test-purchase-result ' + (safe ? 'success' : 'danger');
+                box.style.display = '';
+
+                var lines =
+                    '<div class="test-result-balance">That is <strong>' +
+                    hours(response.cost) + ' hours</strong> out of ' +
+                    response.basket.name + '.</div>';
+                if (response.accrual_lost > 0) {
+                    lines += '<div class="test-result-balance">It also costs <strong>' +
+                        hours(response.accrual_lost) +
+                        ' hours</strong> of accrual you would otherwise have earned, ' +
+                        'because accrual follows the hours you work.</div>';
+                }
+                lines += '<div class="test-result-balance">Lowest after it: <strong>' +
+                    hours(response.lowest) + ' h</strong> on ' +
+                    pretty(response.lowest_date) + '.</div>';
+
+                box.innerHTML = safe
+                    ? '<i class="fa-solid fa-circle-check"></i>' +
+                      '<div class="test-result-message"><strong>That works.</strong> ' +
+                      'It never takes this basket below zero.</div>' + lines
+                    : '<i class="fa-solid fa-circle-exclamation"></i>' +
+                      '<div class="test-result-message"><strong>Careful:</strong> this ' +
+                      'takes the basket below zero on <strong>' +
+                      pretty(response.goes_negative) + '</strong>.</div>' + lines;
+
+                // Shown before drawing, because a canvas in a display:none
+                // parent measures zero in every direction.
+                el('loaf-test-chart-wrap').style.display = '';
+                draw(el('loaf-test-chart'), response.then.series, {
+                    label: 'With this',
+                    colour: safe ? TEAL : ACCENT,
+                    compare: response.now.series
+                });
+            },
+            error: function (xhr) {
+                var body = xhr.responseJSON || {};
+                var box = el('loaf-test-result');
+                box.className = 'test-purchase-result warning';
+                box.style.display = '';
+                box.textContent = body.message || 'Could not work that out.';
+                el('loaf-test-chart-wrap').style.display = 'none';
+            }
+        });
+    }
+
+    load();
+
+    $('#loaf-test-open').on('click', openTest);
+    $('#loaf-test-close').on('click', closeTest);
+    $('#loaf-test-modal').on('click', function (event) {
+        if (event.target === this) { closeTest(); }
+    });
+    $('#loaf-test-run').on('click', runTest);
+    $('#loaf-test-all-day').on('change', function () {
+        $('#loaf-test-start-time, #loaf-test-end-time').prop('disabled', this.checked);
+    });
+    $(document).on('keydown', function (event) {
+        if (event.key === 'Escape' && el('loaf-test-modal').style.display === 'flex') {
+            closeTest();
+        }
+    });
+})();
+</script>
+{% endif %}
+
+{% include 'footer.html' %}
+</body>
+</html>
