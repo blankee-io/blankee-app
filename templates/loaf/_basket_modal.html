@@ -15,7 +15,18 @@
 
   A page including this must also render the two things the form depends on:
   alert_modals.html, for showToast, and the stylesheet's .income-form-container
-  family, which it borrows from the recurring forms.
+  family, which it borrows from the recurring forms. It must pass `today`, for
+  the pay date's lower bound.
+
+  TWO FIELDS ARE GONE AND THE COLUMNS ARE NOT.
+
+  `as of` - the hours you have are the hours you have now, so the server
+  stamps starting_date itself whenever that figure changes.
+
+  `maximum balance` - max_balance_hours still exists and the projection still
+  honours it, so a basket that has one keeps behaving as it did. Nothing sets
+  one any more, which means the ceiling effect (accrual stopping at a cap, and
+  time off making room for it) is out of reach from the UI.
 #}
     <div id="basket-modal" class="modal"
          data-weekday-prefixes='{{ weekday_prefixes | list | tojson }}'
@@ -43,28 +54,16 @@
 
                 <label for="basket-starting-hours">Hours you have now
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                        <span class="info-tip-text">What is in the basket today. Every forecast is
+                        <span class="info-tip-text">What is in the basket today - every forecast is
                             replayed from this figure, so it is also how you correct Loaf against
-                            the number your employer shows.</span>
+                            the number your employer shows. Loaf records the date for you, so
+                            changing this always means "as of today".</span>
                     </span>
                 </label>
                 <input type="number" id="basket-starting-hours" class="recurring-amount"
                        step="0.01" min="0" value="0.00">
 
-                <label for="basket-starting-date">As of</label>
-                <input type="date" id="basket-starting-date">
-
-                <label for="basket-max-balance-hours">Maximum balance
-                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                        <span class="info-tip-text">Accrual stops once the balance reaches this.
-                            Leave it empty for no limit. Because it stops accrual, taking time off
-                            can make room and so increase what you earn over a year.</span>
-                    </span>
-                </label>
-                <input type="number" id="basket-max-balance-hours" class="recurring-amount"
-                       step="0.01" min="0" placeholder="Unlimited">
-
-                <label for="basket-low-balance-hours">Warn me below
+                <label for="basket-low-balance-hours">Warn me when hour balance goes below
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
                         <span class="info-tip-text">Hours. The month view marks any day the balance
                             drops under this. Empty warns only when it goes negative.</span>
@@ -75,33 +74,52 @@
 
                 <div class="loaf-form-divider"><span>How it fills</span></div>
 
+                {# Half a field and a checkbox, rather than an empty box meaning
+                   "none". A blank number input is ambiguous - it reads as
+                   unfinished - where a ticked box is a statement. Ticking it
+                   greys the figure out and sends nothing, which is the NULL the
+                   column wants. #}
                 <label for="basket-accrual-hours">Accrued each pay period
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
                         <span class="info-tip-text">Hours per full period. Loaf pro-rates it by the
                             hours you actually worked, so time off in one period reduces the next
-                            accrual. Leave empty if this basket does not accrue.</span>
+                            accrual.</span>
                     </span>
                 </label>
-                <input type="number" id="basket-accrual-hours" class="recurring-amount"
-                       step="0.01" min="0" placeholder="Does not accrue">
+                <div class="loaf-amount-row">
+                    <input type="number" id="basket-accrual-hours" class="recurring-amount"
+                           step="0.01" min="0">
+                    <label class="loaf-amount-none" for="basket-no-accrual">
+                        <input type="checkbox" id="basket-no-accrual">
+                        Does not accrue
+                    </label>
+                </div>
 
                 <label for="basket-grant-hours">Granted at the start of the year
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
                         <span class="info-tip-text">A flat amount handed over when the year turns.
-                            Not pro-rated, and not capped by the maximum balance. You can have this
-                            as well as an accrual.</span>
+                            Not pro-rated. You can have this as well as an accrual.</span>
                     </span>
                 </label>
-                <input type="number" id="basket-grant-hours" class="recurring-amount"
-                       step="0.01" min="0" placeholder="No grant">
+                <div class="loaf-amount-row">
+                    <input type="number" id="basket-grant-hours" class="recurring-amount"
+                           step="0.01" min="0">
+                    <label class="loaf-amount-none" for="basket-no-grant">
+                        <input type="checkbox" id="basket-no-grant">
+                        No grant
+                    </label>
+                </div>
 
-                <label for="basket-accrual-anchor-date">First pay date
+                <label for="basket-accrual-anchor-date">Next pay date
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                        <span class="info-tip-text">Which week a fortnightly cadence lands on.
-                            Every pay date is counted forward from here.</span>
+                        <span class="info-tip-text">The next one coming, which is what fixes the
+                            rhythm - every pay date after it is counted forward from here.</span>
                     </span>
                 </label>
-                <input type="date" id="basket-accrual-anchor-date">
+                {# Future only. A date already gone is not a next one, and an
+                   anchor in the past silently changes which week a fortnightly
+                   cadence lands on. #}
+                <input type="date" id="basket-accrual-anchor-date" min="{{ today.isoformat() }}">
 
                 {# The cadence widget, in the markup the recurring forms use, so
                    it inherits their CSS untouched. This is the PAY cadence -
@@ -149,14 +167,19 @@
 
                 <div class="loaf-form-divider"><span>Your working week</span></div>
 
-                {# The one genuinely new form component. Times rather than a
-                   total per day, because "off Tuesday from 1pm" cannot be
-                   costed without them. Clearing both times marks a day not
-                   worked. The break is per day, since a short day usually has
-                   no lunch. #}
+                {# Times rather than a total per day, because "off Tuesday from
+                   1pm" cannot be costed without them. Off is a checkbox rather
+                   than "clear both boxes": two empty fields read as unfinished,
+                   and the engine treats them as a day not worked either way -
+                   so the box says out loud what the blanks only implied.
+
+                   One unpaid break for the whole week. The columns are still
+                   per day, and the projection still reads them per day, so a
+                   week with genuinely different breaks stays expressible - this
+                   form just writes the same figure to all seven. #}
                 <div class="loaf-schedule-grid">
                     <div class="loaf-schedule-head">
-                        <span></span><span>Start</span><span>End</span><span>Unpaid break</span>
+                        <span></span><span>Start</span><span>End</span><span>Off</span>
                     </div>
                     {% for prefix in weekday_prefixes %}
                     <div class="loaf-schedule-row" data-prefix="{{ prefix }}">
@@ -165,16 +188,34 @@
                         </label>
                         <input type="time" id="basket-{{ prefix }}-start" class="loaf-schedule-time">
                         <input type="time" id="basket-{{ prefix }}-end" class="loaf-schedule-time">
-                        <input type="number" id="basket-{{ prefix }}-break" class="loaf-schedule-break"
-                               min="0" step="5" value="0" aria-label="Unpaid break in minutes">
+                        <input type="checkbox" id="basket-{{ prefix }}-off"
+                               class="loaf-schedule-off"
+                               aria-label="{{ weekday_names[loop.index0]|capitalize }} off">
                     </div>
                     {% endfor %}
+
+                    <div class="loaf-schedule-break-row">
+                        <label for="basket-break">Unpaid break
+                            <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                                <span class="info-tip-text">Minutes, off every working day. Taken
+                                    off a whole day booked as time off, and left on a part day -
+                                    subtracting a lunch from a two-hour afternoon would be wrong
+                                    more often than right.</span>
+                            </span>
+                        </label>
+                        <input type="number" id="basket-break" class="loaf-schedule-break"
+                               min="0" step="5" value="0">
+                        <span class="loaf-schedule-break-unit">min</span>
+                    </div>
+
                     <div class="loaf-schedule-tools">
                         <button type="button" id="basket-copy-monday" class="add-day-btn">
                             Copy Monday to Tue&ndash;Fri
                         </button>
-                        <button type="button" id="basket-clear-week" class="remove-day-btn"
-                                title="Clear every day">Clear</button>
+                        <button type="button" id="basket-clear-week" class="loaf-icon-btn"
+                                title="Clear every day" aria-label="Clear every day">
+                            <i class="fa-solid fa-broom"></i>
+                        </button>
                     </div>
                 </div>
 
@@ -196,11 +237,11 @@
                     <input type="number" id="basket-year-start-day" min="1" max="31" value="1">
                 </div>
 
-                <label for="basket-carryover-mode">Whatever is left</label>
+                <label for="basket-carryover-mode">Unused hours</label>
                 <select id="basket-carryover-mode">
-                    <option value="reset">is lost - the balance resets</option>
-                    <option value="all">carries over in full</option>
-                    <option value="capped">carries over up to a limit</option>
+                    <option value="reset">are lost when the year turns</option>
+                    <option value="all">carry over in full</option>
+                    <option value="capped">carry over up to a limit</option>
                 </select>
 
                 <div id="basket-carryover-cap-row" style="display:none;">

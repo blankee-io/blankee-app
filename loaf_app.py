@@ -198,6 +198,7 @@ def baskets():
     return render_template(
         'loaf/baskets.html',
         baskets=loaf_data.get_baskets(current_user.id),
+        today=_today(),
         weekday_prefixes=loaf_data.WEEKDAY_PREFIXES,
         weekday_names=loaf_data.WEEKDAY_NAMES,
         # Passed in rather than registered as template filters: they are only
@@ -229,6 +230,16 @@ def api_create_basket():
     highest = max([float(b.get('display_order') or 0) for b in existing] or [0.0])
     values['display_order'] = highest + 1.0
 
+    # "Hours you have now" means now, so the form no longer asks when. Stamped
+    # here instead, because the projection replays from this date and a figure
+    # entered today against a date from months ago would replay wrongly.
+    #
+    # Only when nothing was given, though. The form sends nothing; a caller
+    # that does say when means it, and overwriting that silently would make the
+    # endpoint unable to express a basket that started earlier.
+    if not values.get('starting_date'):
+        values['starting_date'] = _today().isoformat()
+
     basket_id = loaf_data.create_basket(current_user.id, values)
     if basket_id is None:
         return jsonify({'status': 'error',
@@ -256,6 +267,18 @@ def api_update_basket(basket_id):
     # display_order is not in the form. Left out of the update so a save does
     # not quietly undo a drag-reorder.
     values.pop('display_order', None)
+
+    # The starting date moves only when the balance it describes moves. Editing
+    # a name would otherwise re-date the figure and shift the whole projection;
+    # leaving it alone forever would date a new figure to an old day.
+    was = loaf_data.get_basket(current_user.id, basket_id) or {}
+    if values.get('starting_date'):
+        pass                      # the caller said when; take them at their word
+    elif abs(float(values.get('starting_hours') or 0)
+             - float(was.get('starting_hours') or 0)) > 0.005:
+        values['starting_date'] = _today().isoformat()
+    else:
+        values.pop('starting_date', None)
 
     if not loaf_data.update_basket(current_user.id, basket_id, values):
         return jsonify({'status': 'error',

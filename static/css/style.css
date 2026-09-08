@@ -19330,6 +19330,42 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 /* The working week. A grid rather than seven rows of floated inputs so the
    three columns line up without each row measuring itself, and it collapses to
    the same shape on a narrow screen. */
+/* A figure and the box that says there is not one. Half the row each, so
+   the box reads as an alternative to the number rather than a note under
+   it - and a disabled field beside a ticked box says why it is empty. */
+.loaf-amount-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.loaf-amount-row .recurring-amount {
+    flex: 1 1 50%;
+    min-width: 0;
+}
+
+.loaf-amount-row .recurring-amount:disabled {
+    background-color: var(--secondary-lighter);
+    color: var(--secondary);
+}
+
+.loaf-amount-none {
+    display: flex;
+    flex: 1 1 50%;
+    align-items: center;
+    gap: 6px;
+    margin: 0 !important;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.loaf-amount-none input {
+    margin: 0;
+    cursor: pointer;
+}
+
 .loaf-schedule-grid {
     display: flex;
     flex-direction: column;
@@ -19345,7 +19381,9 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 .loaf-schedule-head,
 .loaf-schedule-row {
     display: grid;
-    grid-template-columns: 42px 1fr 1fr 74px;
+    /* Day, start, end, off. The break moved out of the row and under the
+       grid, because one figure covers the week now. */
+    grid-template-columns: 42px 1fr 1fr 34px;
     gap: 6px;
     align-items: center;
 }
@@ -19390,6 +19428,65 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
    Dimming the empty pair says it was deliberate. */
 .loaf-schedule-time:placeholder-shown,
 .loaf-schedule-time:not(:valid) {
+    color: var(--secondary);
+}
+
+.loaf-schedule-off {
+    justify-self: center;
+    margin: 0;
+    cursor: pointer;
+}
+
+/* One break for the week, under the days rather than in them. Its own row
+   so it does not read as an eighth day. */
+.loaf-schedule-break-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--accent-hover);
+}
+
+.loaf-schedule-break-row label {
+    flex: 1 1 auto;
+    margin: 0 !important;
+    color: var(--text-dark);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.loaf-schedule-break-row .loaf-schedule-break {
+    flex: 0 0 74px;
+}
+
+.loaf-schedule-break-unit {
+    color: var(--secondary-dark);
+    font-size: 11px;
+}
+
+/* An icon where a word was. Same weight as the buttons beside it, so the
+   broom does not read as decoration. */
+.loaf-icon-btn {
+    padding: 4px 10px;
+    background: none;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 6px;
+    color: var(--secondary-dark);
+    font-size: 13px;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.loaf-icon-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* A day ticked off greys its times, the same way a ticked "does not
+   accrue" greys its figure. */
+.loaf-schedule-time:disabled {
+    background-color: var(--secondary-lighter);
     color: var(--secondary);
 }
 
@@ -19490,11 +19587,12 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
         gap: 6px;
     }
 
-    /* The break column loses its own header word and keeps its width, because
-       a minutes field narrower than this shows two digits and an ellipsis. */
+    /* Narrower day column, and the last one is a checkbox rather than the
+       minutes field it used to be - the break is one figure under the grid
+       now, so nothing here needs room for two digits. */
     .loaf-schedule-head,
     .loaf-schedule-row {
-        grid-template-columns: 34px 1fr 1fr 60px;
+        grid-template-columns: 34px 1fr 1fr 28px;
         gap: 4px;
     }
 }

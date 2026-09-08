@@ -84,16 +84,52 @@
             val('basket-carryover-mode') === 'capped' ? 'block' : 'none';
     }
 
+    // A ticked box greys its figure out and clears it, so what is submitted is
+    // empty - which clean_basket turns into NULL. Disabled rather than hidden,
+    // so the form does not change height as the box is toggled.
+    function syncNone(boxId, fieldId) {
+        var off = el(boxId).checked;
+        var field = el(fieldId);
+        field.disabled = off;
+        if (off) { field.value = ''; }
+    }
+
+    function syncAmounts() {
+        syncNone('basket-no-accrual', 'basket-accrual-hours');
+        syncNone('basket-no-grant', 'basket-grant-hours');
+    }
+
+    // Off is the same idea for a day: the engine reads a missing start as a day
+    // not worked, and the box says so rather than leaving two blanks that read
+    // as unfinished.
+    function syncDay(prefix) {
+        var off = el('basket-' + prefix + '-off').checked;
+        ['start', 'end'].forEach(function (part) {
+            var field = el('basket-' + prefix + '-' + part);
+            field.disabled = off;
+            if (off) { field.value = ''; }
+        });
+    }
+
+    function syncWeek() {
+        WEEKDAY_PREFIXES.forEach(syncDay);
+    }
+
     function clearForm() {
         form.reset();
         el('basket-id').value = '';
         el('basket-monthly-container').innerHTML = '';
         $('.basket-weekday').prop('checked', false);
+        el('basket-no-accrual').checked = false;
+        el('basket-no-grant').checked = false;
+        el('basket-break').value = '0';
         WEEKDAY_PREFIXES.forEach(function (prefix) {
             el('basket-' + prefix + '-start').value = '';
             el('basket-' + prefix + '-end').value = '';
-            el('basket-' + prefix + '-break').value = '0';
+            el('basket-' + prefix + '-off').checked = false;
         });
+        syncAmounts();
+        syncWeek();
     }
 
     function openAdd() {
@@ -112,11 +148,16 @@
         ['mon', 'tue', 'wed', 'thu', 'fri'].forEach(function (prefix) {
             el('basket-' + prefix + '-start').value = '09:00';
             el('basket-' + prefix + '-end').value = '17:00';
-            el('basket-' + prefix + '-break').value = '30';
         });
+        ['sat', 'sun'].forEach(function (prefix) {
+            el('basket-' + prefix + '-off').checked = true;
+        });
+        el('basket-break').value = '30';
         $('.basket-weekday[value="friday"]').prop('checked', true);
         syncCadence();
         syncCarryover();
+        syncAmounts();
+        syncWeek();
         modal.style.display = 'flex';
     }
 
@@ -134,11 +175,17 @@
         el('basket-name').value = row.attr('data-name') || '';
         el('basket-type').value = row.attr('data-basket-type') || 'pto';
         el('basket-starting-hours').value = row.attr('data-starting-hours') || '0';
-        el('basket-starting-date').value = row.attr('data-starting-date') || '';
-        el('basket-max-balance-hours').value = row.attr('data-max-balance-hours') || '';
         el('basket-low-balance-hours').value = row.attr('data-low-balance-hours') || '';
-        el('basket-accrual-hours').value = row.attr('data-accrual-hours') || '';
-        el('basket-grant-hours').value = row.attr('data-grant-hours') || '';
+
+        // An empty figure IS "does not accrue" - that is what the NULL means -
+        // so the box comes back ticked rather than the field coming back blank
+        // with nothing saying why.
+        var accrual = row.attr('data-accrual-hours') || '';
+        var grant = row.attr('data-grant-hours') || '';
+        el('basket-accrual-hours').value = accrual;
+        el('basket-grant-hours').value = grant;
+        el('basket-no-accrual').checked = accrual === '';
+        el('basket-no-grant').checked = grant === '';
         el('basket-accrual-anchor-date').value = row.attr('data-accrual-anchor-date') || '';
         el('basket-cadence-interval').value = row.attr('data-cadence-interval') || '1';
         el('basket-cadence-unit').value = row.attr('data-cadence-unit') || 'weeks';
@@ -154,18 +201,26 @@
             this.checked = days.indexOf(this.value) !== -1;
         });
 
+        // One break for the week now, so the largest of the seven is shown -
+        // a basket saved before this form existed may genuinely differ per day,
+        // and reading the biggest is closer than reading Monday's.
+        var longest = 0;
         WEEKDAY_PREFIXES.forEach(function (prefix) {
             // Stored as HH:MM:SS; an input[type=time] wants HH:MM.
             var start = row.attr('data-' + prefix + '-start') || '';
             var end = row.attr('data-' + prefix + '-end') || '';
             el('basket-' + prefix + '-start').value = start ? start.substring(0, 5) : '';
             el('basket-' + prefix + '-end').value = end ? end.substring(0, 5) : '';
-            el('basket-' + prefix + '-break').value =
-                row.attr('data-' + prefix + '-break-minutes') || '0';
+            el('basket-' + prefix + '-off').checked = !start;
+            longest = Math.max(longest,
+                parseInt(row.attr('data-' + prefix + '-break-minutes') || '0', 10) || 0);
         });
+        el('basket-break').value = String(longest);
 
         syncCadence();
         syncCarryover();
+        syncAmounts();
+        syncWeek();
 
         var monthly = (row.attr('data-monthly-days') || '').split(',').filter(Boolean);
         if (val('basket-cadence-unit') === 'months') {
@@ -186,11 +241,14 @@
             name: val('basket-name'),
             basket_type: val('basket-type'),
             starting_hours: val('basket-starting-hours'),
-            starting_date: val('basket-starting-date'),
-            max_balance_hours: val('basket-max-balance-hours'),
+            // No starting_date and no max_balance_hours: the server stamps the
+            // first whenever the balance changes, and nothing sets the second
+            // any more. See the note at the top of _basket_modal.html.
             low_balance_hours: val('basket-low-balance-hours'),
-            accrual_hours: val('basket-accrual-hours'),
-            grant_hours: val('basket-grant-hours'),
+            accrual_hours: el('basket-no-accrual').checked
+                ? '' : val('basket-accrual-hours'),
+            grant_hours: el('basket-no-grant').checked
+                ? '' : val('basket-grant-hours'),
             accrual_anchor_date: val('basket-accrual-anchor-date'),
             cadence_interval: val('basket-cadence-interval'),
             cadence_unit: val('basket-cadence-unit'),
@@ -215,10 +273,15 @@
             payload.yearly_month = val('basket-yearly-month');
         }
 
+        // One break, written to all seven columns. They stay per day in the
+        // schema and the projection still reads them per day; this form simply
+        // does not offer that.
+        var brk = val('basket-break') || '0';
         WEEKDAY_PREFIXES.forEach(function (prefix) {
-            payload[prefix + '_start'] = val('basket-' + prefix + '-start');
-            payload[prefix + '_end'] = val('basket-' + prefix + '-end');
-            payload[prefix + '_break_minutes'] = val('basket-' + prefix + '-break');
+            var off = el('basket-' + prefix + '-off').checked;
+            payload[prefix + '_start'] = off ? '' : val('basket-' + prefix + '-start');
+            payload[prefix + '_end'] = off ? '' : val('basket-' + prefix + '-end');
+            payload[prefix + '_break_minutes'] = off ? '0' : brk;
         });
 
         return payload;
@@ -257,23 +320,33 @@
         el('basket-monthly-container').appendChild(monthlyDaySelect(null));
     });
 
+    $('#basket-no-accrual, #basket-no-grant').on('change', syncAmounts);
+    $('.loaf-schedule-off').on('change', function () {
+        syncDay(this.id.replace('basket-', '').replace('-off', ''));
+    });
+
     $('#basket-copy-monday').on('click', function () {
         var start = val('basket-mon-start');
         var end = val('basket-mon-end');
-        var pause = val('basket-mon-break');
+        var off = el('basket-mon-off').checked;
         ['tue', 'wed', 'thu', 'fri'].forEach(function (prefix) {
-            el('basket-' + prefix + '-start').value = start;
-            el('basket-' + prefix + '-end').value = end;
-            el('basket-' + prefix + '-break').value = pause;
+            el('basket-' + prefix + '-off').checked = off;
+            syncDay(prefix);
+            if (!off) {
+                el('basket-' + prefix + '-start').value = start;
+                el('basket-' + prefix + '-end').value = end;
+            }
         });
     });
 
     $('#basket-clear-week').on('click', function () {
         WEEKDAY_PREFIXES.forEach(function (prefix) {
+            el('basket-' + prefix + '-off').checked = false;
             el('basket-' + prefix + '-start').value = '';
             el('basket-' + prefix + '-end').value = '';
-            el('basket-' + prefix + '-break').value = '0';
+            syncDay(prefix);
         });
+        el('basket-break').value = '0';
     });
 
     // Backdrop and Escape, the way every other modal on the site closes.
