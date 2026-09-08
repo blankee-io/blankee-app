@@ -19537,6 +19537,17 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     gap: 6px;
 }
 
+/* .basket-kind is sized at 0.85em, which is right in the baskets table but
+   not here: .month-year-header runs to clamp(15px, 4.5vw, 25px), so the
+   badge would come out at 21px beside a 25px name. Fixed, like the summary
+   sections set their own. Its own line-height too, or the badge's padding
+   stretches the header row and shifts the month and year down with it. */
+.loaf-basket-pair .basket-kind {
+    flex: 0 0 auto;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
 /* Loaf's plus is the accent, like everything else it owns. .add-income-btn
    is Blankee teal, which beside an accent basket name reads as a control
    belonging to a different app. */

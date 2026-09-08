@@ -78,6 +78,14 @@
                     </option>
                     {% endfor %}
                 </select>
+                {# The same badge the baskets table and the summary sections
+                   carry, so a basket is labelled the same wherever it appears.
+                   Rewritten by the JS when the switcher changes, because that
+                   swaps basket over a fetch rather than a page load. #}
+                <span id="loaf-basket-kind"
+                      class="basket-kind basket-kind-{{ basket.basket_type }}">
+                    {{ 'PTO' if basket.basket_type == 'pto' else 'UTO' }}
+                </span>
                 <button id="loaf-add-basket" class="add-income-btn" type="button"
                         title="Add Basket" aria-label="Add Basket">
                     <i class="fa-solid fa-plus"></i>
@@ -252,6 +260,16 @@
             .forEach(function (id) { enhanceSelectAsDropdown(el(id)); });
     }
 
+    // The badge belongs to whichever basket is being shown, and the switcher
+    // changes that without reloading - so it is repainted from the response
+    // rather than left as the one Jinja rendered.
+    function paintKind(kind) {
+        var badge = el('loaf-basket-kind');
+        if (!badge) { return; }
+        badge.textContent = kind === 'uto' ? 'UTO' : 'PTO';
+        badge.className = 'basket-kind basket-kind-' + (kind === 'uto' ? 'uto' : 'pto');
+    }
+
     function drawHead() {
         var head = el('loaf-calendar-head');
         head.innerHTML = '';
@@ -365,6 +383,7 @@
                     return;
                 }
                 state.threshold = response.basket.low_balance_hours;
+                paintKind(response.basket.basket_type);
                 drawHead();
                 drawGrid(response.rows);
             },
