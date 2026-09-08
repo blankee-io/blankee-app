@@ -10,7 +10,7 @@
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
     {% include '_head_icons.html' %}
 </head>
-<body id="loaf-page">
+<body id="loaf-page" data-app="loaf">
     {% include 'nav.html' %}
     {% include 'alert_modals.html' %}
 
@@ -79,7 +79,7 @@
             </span>
         </div>
 
-        <div class="loaf-calendar-container">
+        <div class="dashboard-m-calendar-container">
             <table id="loaf-calendar">
                 <thead id="loaf-calendar-head"></thead>
                 {# Filled by JS from /api/month, the way dashboard_m fills its
@@ -272,53 +272,73 @@
         return 'above-threshold';
     }
 
-    function line(className, label, value) {
+    // One line of a cell, in dashboard_m's shape: a single-letter tag that is
+    // in the DOM but not drawn, and the figure. The tag names the line for
+    // anyone reading the markup - .dashboard-m-label is display:none, and at
+    // this size four labelled figures would be unreadable anyway.
+    function line(className, tag, value, extra) {
         var wrap = document.createElement('div');
-        wrap.className = className;
-        var text = document.createElement('span');
-        text.className = 'loaf-cal-value';
-        text.textContent = value;
-        if (label) {
-            var tag = document.createElement('span');
-            tag.className = 'loaf-cal-label';
-            tag.textContent = label;
-            wrap.appendChild(tag);
-        }
-        wrap.appendChild(text);
+        wrap.className = className + (extra ? ' ' + extra : '');
+        wrap.innerHTML =
+            '<span class="dashboard-m-label">' + tag + '</span> ' +
+            '<span class="dashboard-m-value">' + value + '</span>';
         return wrap;
     }
 
+    // The cell dashboard_m builds, with three of its four lines meaning
+    // something else:
+    //     income    -> accrued that day
+    //     expense   -> taken that day
+    //     remainder -> hours left
+    // Same classes, so the two pages are drawn by one set of rules.
     function drawCell(row) {
         var cell = document.createElement('td');
-        cell.className = 'loaf-cal-cell';
-        cell.setAttribute('data-date', row.date);
         if (!row.in_month) { cell.classList.add('dashboard-m-other-month'); }
         if (row.is_today) { cell.classList.add('dashboard-m-today'); }
-        if (row.non_working) { cell.classList.add('loaf-cal-nonworking'); }
 
-        var inner = document.createElement('div');
-        inner.className = 'loaf-cal-inner';
+        var day = document.createElement('div');
+        day.className = 'dashboard-m-date';
+        day.setAttribute('data-date', row.date);
+        day.style.cursor = 'pointer';
+        day.title = 'Click to book time off on this day';
+        if (row.non_working) { day.classList.add('loaf-nonworking'); }
+        if (row.entries.length) { day.classList.add('loaf-booked'); }
+
+        var todayTag = document.createElement('div');
+        todayTag.className = 'dashboard-d-today-container';
+        if (row.is_today) { todayTag.textContent = 'Today'; }
+        day.appendChild(todayTag);
+
+        // The wrapper the out-of-month overlay covers. Without it the dimming
+        // sits over nothing and those cells read as fully lit.
+        var sections = document.createElement('div');
+        sections.className = 'dashboard-m-main-sections';
+
+        var label = document.createElement('div');
+        label.className = 'dashboard-m-day-label';
+        label.textContent = DAY_LABELS[(row.weekday - 5 + 7) % 7];
+        sections.appendChild(label);
 
         var number = document.createElement('div');
-        number.className = 'loaf-cal-date-number';
+        number.className = 'dashboard-m-date-number';
         number.textContent = row.day;
-        inner.appendChild(number);
+        sections.appendChild(number);
 
-        if (row.worked) { inner.appendChild(line('loaf-cal-worked', 'W', formatHours(row.worked))); }
-        if (row.taken) { inner.appendChild(line('loaf-cal-taken', 'T', '-' + formatHours(row.taken))); }
-        if (row.accrued) { inner.appendChild(line('loaf-cal-accrual', 'A', '+' + formatHours(row.accrued))); }
-        if (row.granted) { inner.appendChild(line('loaf-cal-accrual', 'G', '+' + formatHours(row.granted))); }
+        // zero-value is how dashboard_m greys a line that has nothing on it,
+        // rather than leaving the cell ragged by omitting the line entirely.
+        sections.appendChild(line('dashboard-m-income-total', 'A',
+                                  formatHours(row.accrued + row.granted),
+                                  (row.accrued + row.granted) ? '' : 'zero-value'));
+        sections.appendChild(line('dashboard-m-expense-total', 'U',
+                                  formatHours(row.taken),
+                                  row.taken ? '' : 'zero-value'));
+        sections.appendChild(line('dashboard-m-remainder', 'L',
+                                  formatHours(row.balance),
+                                  balanceClass(row.balance)));
 
-        // The balance is always drawn, because "what is left" is the number
-        // the page exists for. It takes the same threshold classes Blankee's
-        // remainder row uses.
-        var left = line('loaf-cal-left ' + balanceClass(row.balance), 'L', formatHours(row.balance));
-        inner.appendChild(left);
-
-        if (row.entries.length) { cell.classList.add('loaf-cal-booked'); }
-
-        cell.appendChild(inner);
-        cell.addEventListener('click', function () { openEntry(row); });
+        day.appendChild(sections);
+        cell.appendChild(day);
+        day.addEventListener('click', function () { openEntry(row); });
         return cell;
     }
 
