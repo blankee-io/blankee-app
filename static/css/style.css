@@ -17607,12 +17607,16 @@ tr[data-collapsed] {
        from it. A variant sets this and nothing else has to follow. */
     --wordmark-height: 26px;
 
-    /* How much of the wordmark image is empty space under the word.
-       flex-end aligns the credit to the bottom of the IMAGE, and Loaf s
-       art bottoms its text out at 361.4 of a 500-unit box - so the credit
-       sat 0.2772 of the height too low, which is 10.5px at the nav size.
-       A future app whose art is proportioned differently overrides this. */
+    --credit-height: 11px;
+
+    /* Empty space under the letters, as a fraction of each mark's own
+       box. BOTH marks have some - they are drawn to the same grid, which
+       is why these are so close - and it is the difference between them
+       that decides where the credit sits. Measured from the art: loaf's
+       letters bottom out at 0.7228 of its box, blankee's at 0.7160.
+       An app proportioned differently overrides the first. */
     --wordmark-floor: 0.2772;
+    --credit-floor: 0.2840;
 }
 
 /* The app's name is drawn, not set: each app ships a wordmark the way Blankee
@@ -17644,20 +17648,25 @@ tr[data-collapsed] {
     font-size: 9px;
     letter-spacing: 0.2px;
 
-    /* Up onto the word's own baseline. Without this the credit lines up
-       with the bottom of the image, which for Loaf is well below the
-       letters - see --wordmark-floor. */
-    margin-bottom: calc(var(--wordmark-height) * var(--wordmark-floor));
+    /* Line the two sets of LETTERS up, not the two boxes.
+       flex-end aligns the boxes, which left the credit 5.1px low, because
+       the loaf mark has more empty space under its word than the credit
+       does. Lifting the credit's box onto the loaf letters overshoots the
+       other way - 5.4px high - because the credit has dead space of its
+       own. The difference between the two is what is wanted. */
+    margin-bottom: calc(var(--wordmark-height) * var(--wordmark-floor)
+                        - var(--credit-height) * var(--credit-floor));
 }
 
 .app-by img {
     display: block;
     width: auto;
-    height: 11px;
+    height: var(--credit-height);
 }
 
 .app-lockup-large {
     --wordmark-height: 54px;
+    --credit-height: 34px;
 }
 
 .app-lockup-large .app-wordmark {
@@ -17667,11 +17676,6 @@ tr[data-collapsed] {
 .app-lockup-large .app-by {
     font-size: 20px;
     gap: 7px;
-}
-
-.app-lockup-large .app-by img {
-    /* The same ratio to its own 20px "by" as the pair above. */
-    height: 34px;
 }
 
 /* On the nav bar and in the menu header, where the ground is teal. The name
@@ -17684,6 +17688,12 @@ tr[data-collapsed] {
        does, so it has to be the same size as it - anything else reads as a
        different rank rather than a different app. Keep the two in step. */
     --wordmark-height: 38px;
+
+    /* Sized against the "by" beside it, not to a round number. The footer
+       works this out in full: "blankee" is 0.434 of its 500-unit box,
+       Nunito's cap height is near 0.705em, and matching the two puts the
+       image at about 1.7x the text - 22px against 12px there. Same ratio. */
+    --credit-height: 19px;
 }
 
 .app-lockup-nav .app-wordmark {
@@ -17696,14 +17706,6 @@ tr[data-collapsed] {
        against the teal rather than as quiet. */
     color: white;
     font-size: 11px;
-}
-
-.app-lockup-nav .app-by img {
-    /* Sized against the "by" beside it, not to a round number. The footer
-       works this out in full: "blankee" is 0.434 of its 500-unit box, Nunito's
-       cap height is near 0.705em, and matching the two puts the image at about
-       1.7x the text - 22px against 12px there. The same ratio here. */
-    height: 19px;
 }
 
 /* The wordmark is the row's label, so it takes the row's full height rather
