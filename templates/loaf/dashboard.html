@@ -414,10 +414,11 @@
     // .main-container, which this page already is - so the animation needs no
     // CSS of its own.
     //
-    // The 50ms is dashboard_m's, and it is shorter than the 0.3s the keyframes
-    // run for: removing the class cancels the animation partway. Kept as it is
-    // because the ask was for the same animation Blankee shows, and that is
-    // what Blankee shows.
+    // The class comes off on its own 300ms timer, matching the keyframes, and
+    // the redraw happens now - so the new month is what slides in rather than
+    // the old one sliding for a sixth of a second and then being replaced.
+    // dashboard_m and dashboard_y took the 50ms route and have been changed to
+    // this too; dashboard_3m always did it this way.
     function shiftMonth(by) {
         mainContainer.classList.remove('slide-left', 'slide-right');
         mainContainer.classList.add(by > 0 ? 'slide-left' : 'slide-right');
@@ -425,12 +426,12 @@
         var loading = el('loading-screen');
         if (loading) { loading.style.display = 'none'; }
 
-        stepMonth(by);
-
         setTimeout(function () {
             mainContainer.classList.remove('slide-left', 'slide-right');
-            load();
-        }, 50);
+        }, 300);
+
+        stepMonth(by);
+        load();
     }
 
     // ------------------------------------------------------------ booking ----
