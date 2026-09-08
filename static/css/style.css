@@ -17602,6 +17602,17 @@ tr[data-collapsed] {
     align-items: flex-end;
     gap: 7px;
     line-height: 1;
+
+    /* The wordmark size, declared once so the credit below can be placed
+       from it. A variant sets this and nothing else has to follow. */
+    --wordmark-height: 26px;
+
+    /* How much of the wordmark image is empty space under the word.
+       flex-end aligns the credit to the bottom of the IMAGE, and Loaf s
+       art bottoms its text out at 361.4 of a 500-unit box - so the credit
+       sat 0.2772 of the height too low, which is 10.5px at the nav size.
+       A future app whose art is proportioned differently overrides this. */
+    --wordmark-floor: 0.2772;
 }
 
 /* The app's name is drawn, not set: each app ships a wordmark the way Blankee
@@ -17611,7 +17622,7 @@ tr[data-collapsed] {
 .app-wordmark-img {
     display: block;
     width: auto;
-    height: 26px;
+    height: var(--wordmark-height);
 }
 
 /* Kept for anything that still sets the name as text. */
@@ -17632,6 +17643,11 @@ tr[data-collapsed] {
     color: var(--secondary-dark);
     font-size: 9px;
     letter-spacing: 0.2px;
+
+    /* Up onto the word's own baseline. Without this the credit lines up
+       with the bottom of the image, which for Loaf is well below the
+       letters - see --wordmark-floor. */
+    margin-bottom: calc(var(--wordmark-height) * var(--wordmark-floor));
 }
 
 .app-by img {
@@ -17640,8 +17656,8 @@ tr[data-collapsed] {
     height: 11px;
 }
 
-.app-lockup-large .app-wordmark-img {
-    height: 54px;
+.app-lockup-large {
+    --wordmark-height: 54px;
 }
 
 .app-lockup-large .app-wordmark {
@@ -17663,13 +17679,11 @@ tr[data-collapsed] {
    going so quiet it disappears against the bar. */
 .app-lockup-nav {
     text-decoration: none;
-}
 
-.app-lockup-nav .app-wordmark-img {
     /* Exactly .nav-logo's height. An app's wordmark stands where Blankee's
        does, so it has to be the same size as it - anything else reads as a
        different rank rather than a different app. Keep the two in step. */
-    height: 38px;
+    --wordmark-height: 38px;
 }
 
 .app-lockup-nav .app-wordmark {
