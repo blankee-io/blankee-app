@@ -1,0 +1,38 @@
+{#
+  Loaf's own menu - the rows that belong to this application rather than
+  to the shell around it. nav.html picks the file by current_app_id, so a
+  sibling app gets its own list here without touching the nav.
+
+  What is NOT here, because it is shared by every app: the header wordmark,
+  the divider under it, and the footer at the bottom.
+#}
+    <div class="dropdown-menu-section">
+        {# The views the calendar bar switches between, collapsed under one row
+           the way Blankee groups its six. The row says what it opens with
+           data-menu-collapse and nav.html's generic handler does the rest, so
+           this needs no JS of its own.
+
+           Its own id rather than Blankee's `dashboards-sections`: the collapse
+           opens to a max-height set per id, and Blankee's is sized for six
+           rows. Only one menu is ever on a page, so sharing the id would have
+           worked - and would have opened a two-row list to a six-row height. #}
+        <div class="dropdown-link">
+            <a href="javascript:void(0);" id="toggle-loaf-dashboards-btn"
+               data-menu-collapse="loaf-dashboards-sections">Dashboards</a>
+            <i class="fa-light fa-gauge"></i>
+        </div>
+        <div id="loaf-dashboards-sections" class="menu-collapse">
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('loaf.summary') }}">Summary View</a>
+                <i class="fa-light fa-bars-progress"></i>
+            </div>
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('loaf.dashboard') }}">Month View</a>
+                <i class="fa-light fa-calendar-days"></i>
+            </div>
+        </div>
+        <div class="dropdown-link">
+            <a href="{{ url_for('loaf.baskets') }}">Manage Baskets</a>
+            <i class="fa-light fa-basket-shopping"></i>
+        </div>
+    </div>

@@ -40,6 +40,8 @@ MIGRATIONS = [
     'rename_buds_to_bundles.sql',
     'add_autobalance_target_categories.sql',
     'add_credit_account_statement_dates.sql',
+    'add_instance_apps.sql',
+    'add_loaf_tables.sql',
 ]
 
 # install/sql/ holds only what a fresh install applies. The rollback scripts and

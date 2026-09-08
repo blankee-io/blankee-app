@@ -49,7 +49,9 @@ EXPECTED_TABLES = (
     'bucket_prompts',
     'autobalance_settings',
     'widget_tokens',
+    'instance_apps',
     'bundles', 'bundle_items',
+    'loaf_baskets', 'loaf_entries',
 )
 EXPECTED_COLUMNS = (
     ('users', 'is_admin'),
@@ -57,6 +59,7 @@ EXPECTED_COLUMNS = (
     ('users', 'setup_step'),
     ('income_categories', 'is_savings'),
     ('expense_categories', 'is_savings'),
+    ('instance_apps', 'enabled'),
     ('instance_settings', 'smtp_password_encrypted'),
     ('instance_settings', 'verified_at'),
     ('instance_settings', 'verification_secret'),
@@ -74,6 +77,12 @@ EXPECTED_COLUMNS = (
     ('autobalance_settings', 'expense_category_id'),
     ('credit_accounts', 'statement_day'),
     ('credit_accounts', 'payment_due_day'),
+    # The interesting parts of the Loaf schema rather than proof the table
+    # exists: the ceiling that stops accrual, one end of the work week, and
+    # the figure an override is measured against.
+    ('loaf_baskets', 'max_balance_hours'),
+    ('loaf_baskets', 'mon_start'),
+    ('loaf_entries', 'computed_hours'),
 )
 EXPECTED_CONSTRAINTS = (
     ('totals_remainders_m', 'totals_remainders_m_ibfk_1'),
@@ -86,6 +95,9 @@ EXPECTED_CONSTRAINTS = (
     ('c_expense_entries', 'c_expense_entries_ibfk_bundle_item'),
     ('autobalance_settings', 'autobalance_settings_income_fk'),
     ('autobalance_settings', 'autobalance_settings_expense_fk'),
+    ('loaf_baskets', 'loaf_baskets_ibfk_1'),
+    ('loaf_entries', 'loaf_entries_ibfk_1'),
+    ('loaf_entries', 'loaf_entries_basket_fk'),
 )
 
 

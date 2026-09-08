@@ -2752,9 +2752,29 @@ document.addEventListener("click", function (e) {
 }, true);
 
 
+/* Which app this page belongs to.
+
+   script.js is shared by every app, so anything in it that is about money has
+   to ask. A page that says nothing is Blankee's - that is every existing
+   template, and reading a missing attribute as the host keeps them exactly as
+   they were. A sibling app declares itself with data-app on the body. */
+function currentAppId() {
+    try {
+        return (document.body && document.body.dataset.app) || "blankee";
+    } catch (e) {
+        return "blankee";
+    }
+}
+
 document.addEventListener("DOMContentLoaded", function () {
     try {
         if (typeof showConfirmModal !== "function") { return; }
+
+        // Both of these are about money: one reconciles against a bank
+        // balance, the other confirms forecast entries. Neither means anything
+        // in a sibling app, and Loaf was showing both because it loads this
+        // file for showToast and the shared modal.
+        if (currentAppId() !== "blankee") { return; }
 
         // The balance prompt goes first when one is waiting, and the bucket
         // prompt is skipped entirely for this load: balancing confirms every

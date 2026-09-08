@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>{{ basket.name ~ ' · ' if basket else '' }}{{ current_app.name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% include '_fontawesome.html' %}
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/loaf_basket_modal.js') }}" defer></script>
+    {% include '_head_icons.html' %}
+</head>
+<body id="loaf-page" data-app="loaf">
+    {% include 'nav.html' %}
+    {% include 'alert_modals.html' %}
+
+    <div class="calendarnav">
+        <div class="calendarnavbuttonscontainer">
+            {# Same switcher, other way round - see the note on the summary. #}
+            <div class="nav-dash-container" id="nav-dash-container">
+                <a href="{{ url_for('loaf.summary') }}" class="nav-button">
+                    <i class="fa-solid fa-bars-progress"></i>
+                    <span class="nav-tooltip">Summary View</span>
+                </a>
+                <div id="nav-inline-buttons">
+                    <div class="nav-button nav-button-focus">
+                        <i class="fa-solid fa-calendar-days"></i>
+                        <span class="nav-tooltip">Month View</span>
+                    </div>
+                </div>
+            </div>
+            {% if basket %}
+            <div class="calendarnavbuttons">
+                <a id="loaf-prev" class="nav-button" href="javascript:void(0);">
+                    <i class="fa-solid fa-left"></i>
+                    <span class="nav-tooltip">Previous Month</span>
+                </a>
+                <a id="loaf-today" class="nav-button" href="javascript:void(0);">
+                    <span class="nav-current-icon"><i class="fa-solid fa-calendar-day"></i></span>
+                    <span class="nav-tooltip">Go to This Month</span>
+                </a>
+                <a id="loaf-next" class="nav-button" href="javascript:void(0);">
+                    <i class="fa-solid fa-right"></i>
+                    <span class="nav-tooltip">Next Month</span>
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="main-container" id="main-container">
+    {% if not basket %}
+        <div class="recurring-income-empty-info">
+            <h2>Nothing to show yet</h2>
+            <p>
+                Loaf needs a <strong>basket</strong> before it can forecast anything -
+                a pool of hours, with a working week to measure time off against.
+            </p>
+            <p><a href="{{ url_for('loaf.baskets') }}">Add your first basket</a>.</p>
+        </div>
+    {% else %}
+        {# Switcher on the left, month and year hard right, all on one line.
+           .month-year-header is already display:flex with space-between, so
+           putting the basket first and the period last needs no new rule -
+           unlike .dashboard-m-month-year-header, whose margin: 0 50% centring
+           would have to be undone first. #}
+        <div id="loaf-period-header" class="month-year-header loaf-period-header">
+            {# Wrapped, because the header is space-between: a third child
+               would spread the three across the line instead of keeping the
+               switcher and its button together on the left. #}
+            <span class="loaf-basket-pair">
+                <select id="loaf-basket-dropdown" class="loaf-basket-dropdown"
+                        aria-label="Which basket">
+                    {% for option in baskets %}
+                    <option value="{{ option.id }}" {{ 'selected' if option.id == basket.id }}>
+                        {{ option.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+                {# The same badge the baskets table and the summary sections
+                   carry, so a basket is labelled the same wherever it appears.
+                   Rewritten by the JS when the switcher changes, because that
+                   swaps basket over a fetch rather than a page load. #}
+                <span id="loaf-basket-kind"
+                      class="basket-kind basket-kind-{{ basket.basket_type }}">
+                    {{ 'PTO' if basket.basket_type == 'pto' else 'UTO' }}
+                </span>
+                <button id="loaf-add-basket" class="add-income-btn" type="button"
+                        title="Add Basket" aria-label="Add Basket">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
+            </span>
+            <span class="loaf-period-pair">
+                <select id="loaf-month-dropdown" class="month-dropdown" aria-label="Month"></select>
+                <select id="loaf-year-dropdown" class="year-dropdown" aria-label="Year"></select>
+            </span>
+        </div>
+
+        <div class="dashboard-m-calendar-container">
+            <table id="loaf-calendar">
+                <thead id="loaf-calendar-head"></thead>
+                {# Filled by JS from /api/month, the way dashboard_m fills its
+                   calendar - so the cell markup lives in one place. #}
+                <tbody id="loaf-calendar-body"></tbody>
+            </table>
+        </div>
+
+    {% endif %}
+    </div>
+
+    {# Booking. Outside #main-container on purpose: the swipe translates
+       that element, so a modal inside it slides away with the calendar
+       behind it. This is the only place time off is entered - a day click
+       opens it with that date already filled in. #}
+    {% if basket %}
+    <div id="loaf-entry-modal" class="modal">
+        <div class="income-form-container">
+            <h2 id="loaf-entry-title">Book Time Off</h2>
+            <form id="loaf-entry-form" autocomplete="off">
+                <input type="hidden" id="loaf-entry-id" value="">
+
+                <label for="loaf-entry-basket">Basket</label>
+                <select id="loaf-entry-basket">
+                    {% for option in baskets %}
+                    <option value="{{ option.id }}">{{ option.name }}</option>
+                    {% endfor %}
+                </select>
+
+                {# One day or several. Nearly every booking is one day, and
+                   asking for a from-date, an until-date and two times to say
+                   "Tuesday off" is four controls for a fact the calendar
+                   already knows - the modal opened from that cell. So the
+                   toggle picks which set of fields the form even shows.
+
+                   .graph-toggle-* is the stylesheet's own pill toggle, written
+                   for a graph switcher that was never built. Reviving it beats
+                   inventing a second toggle idiom beside it. #}
+                <div class="loaf-span-toggle graph-toggle-group" role="radiogroup"
+                     aria-label="How long is this time off">
+                    <button type="button" id="loaf-entry-span-single"
+                            class="graph-toggle-btn active" role="radio"
+                            aria-checked="true" data-span="single">Single day</button>
+                    <button type="button" id="loaf-entry-span-multi"
+                            class="graph-toggle-btn" role="radio"
+                            aria-checked="false" data-span="multi">Multiple days</button>
+                </div>
+
+                {# Single day. The date is the cell that was clicked, so it is
+                   stated rather than asked for - the field holding it lives in
+                   the multi block below and keeps its value either way. #}
+                <p id="loaf-entry-day" class="loaf-entry-day"></p>
+
+                <div id="loaf-entry-multi">
+                    <div class="date-checkbox-row">
+                        <input type="checkbox" id="loaf-entry-all-day" checked>
+                        <label for="loaf-entry-all-day" class="date-checkbox-label">
+                            Whole days
+                            <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                                <span class="info-tip-text">Takes each day as your working week
+                                    has it, so a short Friday costs what a short Friday is worth.
+                                    Untick to give times instead.</span>
+                            </span>
+                        </label>
+                    </div>
+
+                    <label for="loaf-entry-start-date">From</label>
+                    <div class="cadence-row">
+                        <input type="date" id="loaf-entry-start-date">
+                        <input type="time" id="loaf-entry-start-time" class="loaf-entry-time">
+                    </div>
+
+                    <label for="loaf-entry-end-date">Until
+                        <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                            <span class="info-tip-text">Leave blank for a single day. The end date
+                                is included.</span>
+                        </span>
+                    </label>
+                    <div class="cadence-row">
+                        <input type="date" id="loaf-entry-end-date">
+                        <input type="time" id="loaf-entry-end-time" class="loaf-entry-time">
+                    </div>
+
+                    <div class="date-checkbox-row">
+                        <input type="checkbox" id="loaf-entry-override">
+                        <label for="loaf-entry-override" class="date-checkbox-label">
+                            Set the hours myself
+                            <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                                <span class="info-tip-text">Loaf works the hours out from your
+                                    working week. Tick this to type a figure instead, and editing
+                                    the working week later will leave it alone.</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                {# One hours field for both modes. In single day it is the only
+                   thing to fill in, so it gets a plain label and starts at what
+                   the working week says that day is worth; in multi it sits
+                   behind the checkbox above and is disabled until that is
+                   ticked. #}
+                <label for="loaf-entry-hours" id="loaf-entry-hours-label">Hours
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Filled in from your working week. Change it
+                            and Loaf keeps your figure, leaving it alone if the working week is
+                            edited later.</span>
+                    </span>
+                </label>
+                <input type="number" id="loaf-entry-hours" class="recurring-amount"
+                       step="0.01" min="0" placeholder="Worked out from your week">
+
+                <label for="loaf-entry-status">Status</label>
+                <select id="loaf-entry-status">
+                    <option value="planned">Planned</option>
+                    <option value="taken">Taken</option>
+                    <option value="cancelled">Cancelled - costs nothing</option>
+                </select>
+
+                <label for="loaf-entry-note">Note</label>
+                <input type="text" id="loaf-entry-note" class="category-input" maxlength="255">
+
+                <button type="submit" id="loaf-entry-submit">Book It</button>
+                {# .delete-from-edit-category-btn is the house's destructive
+                   button inside an edit modal. It used to carry
+                   .remove-day-btn, which is the 32px round control that takes
+                   a day off a monthly cadence - at full width a 50% radius is
+                   an ellipse. #}
+                <button type="button" id="loaf-entry-delete"
+                        class="delete-from-edit-category-btn"
+                        style="display:none;">Delete this booking</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if basket %}{% include 'loaf/_basket_modal.html' %}{% endif %}
+
+    {% include 'loading_modals.html' %}
+
+{% if basket %}
+<script>
+// ---------------------------------------------------------------------------
+// Loaf's month view. The grid is fetched and drawn here rather than rendered
+// by Jinja, so a month change is one request and the cell markup exists once.
+// ---------------------------------------------------------------------------
+(function () {
+    'use strict';
+
+    var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                  'August', 'September', 'October', 'November', 'December'];
+    // Saturday first, matching dashboard_m's default week.
+    var DAY_LABELS = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+
+    var TODAY = '{{ today.isoformat() }}';
+    var state = {
+        basketId: {{ basket.id }},
+        year: {{ today.year }},
+        month: {{ today.month }},
+        threshold: {{ basket.low_balance_hours if basket.low_balance_hours is not none else 'null' }}
+    };
+
+    function el(id) { return document.getElementById(id); }
+
+    // Looked up once. Both the arrow path and the swipe move this element, and
+    // it is the same #main-container Blankee's slide keyframes are written
+    // against.
+    var mainContainer = document.getElementById('main-container');
+
+    // Hours, never money. formatCurrency and currencySymbol are wired through
+    // every value path in Blankee's dashboards; this is the Loaf equivalent.
+    function formatHours(value) {
+        var number = parseFloat(value);
+        if (isNaN(number)) { return '--'; }
+        return number.toFixed(2);
+    }
+
+    function fillPeriodSelects() {
+        var monthSelect = el('loaf-month-dropdown');
+        var yearSelect = el('loaf-year-dropdown');
+        monthSelect.innerHTML = '';
+        MONTHS.forEach(function (name, index) {
+            monthSelect.appendChild(new Option(name, String(index + 1)));
+        });
+        yearSelect.innerHTML = '';
+        var thisYear = parseInt(TODAY.substring(0, 4), 10);
+        for (var year = thisYear - 2; year <= thisYear + 4; year++) {
+            yearSelect.appendChild(new Option(String(year), String(year)));
+        }
+        monthSelect.value = String(state.month);
+        yearSelect.value = String(state.year);
+    }
+
+    // The same custom dropdown Blankee's month and year pickers use, so the
+    // basket switcher is visually identical to them with no CSS of its own.
+    //
+    // Also the refresh. The native select stays the source of truth and the
+    // visible trigger is only updated when something dispatches a change;
+    // setting .value in code does not, so the label would keep showing the
+    // month we just left. Calling this again takes enhanceSelectAsDropdown's
+    // already-wrapped branch, which is a bare syncLabel() - so it both
+    // enhances and resyncs, and is safe to call as often as needed.
+    function resyncSelects() {
+        if (typeof enhanceSelectAsDropdown !== 'function') { return; }
+        ['loaf-basket-dropdown', 'loaf-month-dropdown', 'loaf-year-dropdown']
+            .forEach(function (id) { enhanceSelectAsDropdown(el(id)); });
+    }
+
+    // The badge belongs to whichever basket is being shown, and the switcher
+    // changes that without reloading - so it is repainted from the response
+    // rather than left as the one Jinja rendered.
+    function paintKind(kind) {
+        var badge = el('loaf-basket-kind');
+        if (!badge) { return; }
+        badge.textContent = kind === 'uto' ? 'UTO' : 'PTO';
+        badge.className = 'basket-kind basket-kind-' + (kind === 'uto' ? 'uto' : 'pto');
+    }
+
+    function drawHead() {
+        var head = el('loaf-calendar-head');
+        head.innerHTML = '';
+        var row = document.createElement('tr');
+        DAY_LABELS.forEach(function (label) {
+            var cell = document.createElement('th');
+            cell.textContent = label;
+            row.appendChild(cell);
+        });
+        head.appendChild(row);
+    }
+
+    function balanceClass(balance) {
+        if (balance < 0) { return 'negative'; }
+        if (state.threshold !== null && balance < state.threshold) {
+            return 'below-threshold';
+        }
+        return 'above-threshold';
+    }
+
+    // One line of a cell, in dashboard_m's shape: a single-letter tag that is
+    // in the DOM but not drawn, and the figure. The tag names the line for
+    // anyone reading the markup - .dashboard-m-label is display:none, and at
+    // this size four labelled figures would be unreadable anyway.
+    function line(className, tag, value, extra) {
+        var wrap = document.createElement('div');
+        wrap.className = className + (extra ? ' ' + extra : '');
+        wrap.innerHTML =
+            '<span class="dashboard-m-label">' + tag + '</span> ' +
+            '<span class="dashboard-m-value">' + value + '</span>';
+        return wrap;
+    }
+
+    // The cell dashboard_m builds, with three of its four lines meaning
+    // something else:
+    //     income    -> accrued that day
+    //     expense   -> taken that day
+    //     remainder -> hours left
+    // Same classes, so the two pages are drawn by one set of rules.
+    function drawCell(row) {
+        var cell = document.createElement('td');
+        if (!row.in_month) { cell.classList.add('dashboard-m-other-month'); }
+        if (row.is_today) { cell.classList.add('dashboard-m-today'); }
+
+        var day = document.createElement('div');
+        day.className = 'dashboard-m-date';
+        day.setAttribute('data-date', row.date);
+        day.style.cursor = 'pointer';
+        day.title = 'Click to book time off on this day';
+        if (row.non_working) { day.classList.add('loaf-nonworking'); }
+        if (row.entries.length) { day.classList.add('loaf-booked'); }
+
+        var todayTag = document.createElement('div');
+        todayTag.className = 'dashboard-d-today-container';
+        if (row.is_today) { todayTag.textContent = 'Today'; }
+        day.appendChild(todayTag);
+
+        // The wrapper the out-of-month overlay covers. Without it the dimming
+        // sits over nothing and those cells read as fully lit.
+        var sections = document.createElement('div');
+        sections.className = 'dashboard-m-main-sections';
+
+        var label = document.createElement('div');
+        label.className = 'dashboard-m-day-label';
+        label.textContent = DAY_LABELS[(row.weekday - 5 + 7) % 7];
+        sections.appendChild(label);
+
+        var number = document.createElement('div');
+        number.className = 'dashboard-m-date-number';
+        number.textContent = row.day;
+        sections.appendChild(number);
+
+        // zero-value is how dashboard_m greys a line that has nothing on it,
+        // rather than leaving the cell ragged by omitting the line entirely.
+        sections.appendChild(line('dashboard-m-income-total', 'A',
+                                  formatHours(row.accrued + row.granted),
+                                  (row.accrued + row.granted) ? '' : 'zero-value'));
+        sections.appendChild(line('dashboard-m-expense-total', 'U',
+                                  formatHours(row.taken),
+                                  row.taken ? '' : 'zero-value'));
+        sections.appendChild(line('dashboard-m-remainder', 'L',
+                                  formatHours(row.balance),
+                                  balanceClass(row.balance)));
+
+        day.appendChild(sections);
+        cell.appendChild(day);
+        day.addEventListener('click', function () { openEntry(row); });
+        return cell;
+    }
+
+    function drawGrid(rows) {
+        var body = el('loaf-calendar-body');
+        body.innerHTML = '';
+        var tr = null;
+        rows.forEach(function (row, index) {
+            if (index % 7 === 0) {
+                tr = document.createElement('tr');
+                body.appendChild(tr);
+            }
+            tr.appendChild(drawCell(row));
+        });
+    }
+
+    function load() {
+        $.ajax({
+            url: '/loaf/api/month',
+            data: {basket_id: state.basketId, year: state.year, month: state.month},
+            success: function (response) {
+                if (response.status !== 'success') {
+                    showToast(response.message || 'Could not load that month.', 'error');
+                    return;
+                }
+                state.threshold = response.basket.low_balance_hours;
+                paintKind(response.basket.basket_type);
+                drawHead();
+                drawGrid(response.rows);
+            },
+            error: function (xhr) {
+                var body = xhr.responseJSON || {};
+                showToast(body.message || 'Could not load that month.', 'error');
+            }
+        });
+    }
+
+    // Move the state on a month. No animation and no fetch - the two callers
+    // below decide when each of those happens.
+    function stepMonth(by) {
+        var month = state.month + by;
+        var year = state.year;
+        while (month > 12) { month -= 12; year += 1; }
+        while (month < 1) { month += 12; year -= 1; }
+        state.month = month;
+        state.year = year;
+        el('loaf-month-dropdown').value = String(month);
+        el('loaf-year-dropdown').value = String(year);
+        resyncSelects();
+    }
+
+    // The arrow path, copied from dashboard_m's previousMonth/nextMonth: add
+    // the slide class, move the month, and after a short delay drop the class
+    // and redraw. slideLeft and slideRight are Blankee's own keyframes on
+    // .main-container, which this page already is - so the animation needs no
+    // CSS of its own.
+    //
+    // The class comes off on its own 300ms timer, matching the keyframes, and
+    // the redraw happens now - so the new month is what slides in rather than
+    // the old one sliding for a sixth of a second and then being replaced.
+    // dashboard_m and dashboard_y took the 50ms route and have been changed to
+    // this too; dashboard_3m always did it this way.
+    function shiftMonth(by) {
+        mainContainer.classList.remove('slide-left', 'slide-right');
+        mainContainer.classList.add(by > 0 ? 'slide-left' : 'slide-right');
+
+        var loading = el('loading-screen');
+        if (loading) { loading.style.display = 'none'; }
+
+        setTimeout(function () {
+            mainContainer.classList.remove('slide-left', 'slide-right');
+        }, 300);
+
+        stepMonth(by);
+        load();
+    }
+
+    // ------------------------------------------------------------ booking ----
+
+    // Which of the two field sets the form is showing. Held here rather
+    // than read off the DOM so the toggle, openEntry and collectEntry all
+    // agree on one answer.
+    var entrySpan = 'single';
+
+    // Did the person actually type in the hours box? hours_overridden cannot
+    // be derived by comparing the figure to the computed one - overriding
+    // 8.00 with 8.00 is still an override, and the column exists so a later
+    // edit to the working week knows to leave that row alone. A comparison
+    // cannot answer that; whether they touched the field can.
+    var hoursTouched = false;
+
+    function setEntrySpan(span) {
+        entrySpan = span === 'multi' ? 'multi' : 'single';
+        var multi = entrySpan === 'multi';
+
+        $('#loaf-entry-span-single').toggleClass('active', !multi)
+            .attr('aria-checked', String(!multi));
+        $('#loaf-entry-span-multi').toggleClass('active', multi)
+            .attr('aria-checked', String(multi));
+
+        el('loaf-entry-multi').style.display = multi ? '' : 'none';
+        el('loaf-entry-day').style.display = multi ? 'none' : '';
+        el('loaf-entry-hours-label').style.display = multi ? 'none' : '';
+
+        syncEntryFields();
+    }
+
+    function syncEntryFields() {
+        var allDay = el('loaf-entry-all-day').checked;
+        $('.loaf-entry-time').prop('disabled', allDay);
+        // Single day has no override checkbox to sit behind - the hours box is
+        // the whole form, so it is always open.
+        el('loaf-entry-hours').disabled =
+            entrySpan === 'multi' && !el('loaf-entry-override').checked;
+    }
+
+    // "Monday, 14 September 2026", from the ISO date the cell carries. Built
+    // from a local Date rather than parsing the string, which UTC-shifts it.
+    function describeDay(iso) {
+        var bits = String(iso || '').split('-');
+        if (bits.length !== 3) { return ''; }
+        var when = new Date(+bits[0], +bits[1] - 1, +bits[2]);
+        return when.toLocaleDateString(undefined, {
+            weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+        });
+    }
+
+    function openEntry(row) {
+        var form = el('loaf-entry-form');
+        form.reset();
+        el('loaf-entry-id').value = '';
+        el('loaf-entry-basket').value = String(state.basketId);
+        el('loaf-entry-title').textContent = 'Book Time Off';
+        el('loaf-entry-submit').textContent = 'Book It';
+        el('loaf-entry-delete').style.display = 'none';
+        el('loaf-entry-all-day').checked = true;
+        el('loaf-entry-override').checked = false;
+        el('loaf-entry-start-date').value = row.date;
+        el('loaf-entry-end-date').value = '';
+        el('loaf-entry-day').textContent = describeDay(row.date);
+
+        // What the working week says the day is worth, so the common case -
+        // a whole day off - is already filled in and needs no arithmetic.
+        hoursTouched = false;
+        el('loaf-entry-hours').value = row.scheduled ? row.scheduled : '';
+        var span = 'single';
+
+        // A day that already has a booking opens that booking rather than
+        // stacking another on top of it, which is what a second click on the
+        // same cell almost always means.
+        if (row.entries.length) {
+            var entry = row.entries[0];
+            el('loaf-entry-id').value = entry.id;
+            el('loaf-entry-title').textContent = 'Edit Time Off';
+            el('loaf-entry-submit').textContent = 'Save';
+            el('loaf-entry-delete').style.display = '';
+            el('loaf-entry-all-day').checked = !!entry.all_day;
+            el('loaf-entry-start-date').value = (entry.starts_at || '').substring(0, 10);
+            el('loaf-entry-end-date').value = (entry.ends_at || '').substring(0, 10);
+            el('loaf-entry-start-time').value = (entry.starts_at || '').substring(11, 16);
+            el('loaf-entry-end-time').value = (entry.ends_at || '').substring(11, 16);
+            el('loaf-entry-status').value = entry.status || 'planned';
+            el('loaf-entry-override').checked = !!entry.hours_overridden;
+            el('loaf-entry-hours').value = entry.hours;
+            el('loaf-entry-note').value = entry.note || '';
+            el('loaf-entry-day').textContent =
+                describeDay((entry.starts_at || '').substring(0, 10));
+
+            // A booking opens in the mode that can express it: one whole day
+            // is a single day, and anything with times or a second date is
+            // not. Opening a multi-day booking in single mode would offer to
+            // rewrite it as one day without saying so.
+            var starts = (entry.starts_at || '').substring(0, 10);
+            var ends = (entry.ends_at || '').substring(0, 10);
+            if (!entry.all_day || (ends && ends !== starts)) { span = 'multi'; }
+
+            // Their figure, so treat it as theirs from the outset.
+            hoursTouched = !!entry.hours_overridden;
+        }
+
+        setEntrySpan(span);
+        el('loaf-entry-modal').style.display = 'flex';
+    }
+
+    function closeEntry() { el('loaf-entry-modal').style.display = 'none'; }
+
+    function collectEntry() {
+        var common = {
+            basket_id: el('loaf-entry-basket').value,
+            start_date: el('loaf-entry-start-date').value,
+            status: el('loaf-entry-status').value,
+            hours: el('loaf-entry-hours').value,
+            note: el('loaf-entry-note').value
+        };
+
+        // Single day is one whole day, always: the server reads all_day and
+        // substitutes that weekday's scheduled hours, which is exactly what
+        // the box was seeded with. Sending no end date says so - clean_entry
+        // treats a blank end as the start date.
+        if (entrySpan === 'single') {
+            common.all_day = '1';
+            common.end_date = '';
+            common.start_time = '';
+            common.end_time = '';
+            common.hours_overridden = hoursTouched ? '1' : '';
+            return common;
+        }
+
+        common.all_day = el('loaf-entry-all-day').checked ? '1' : '';
+        common.end_date = el('loaf-entry-end-date').value;
+        common.start_time = el('loaf-entry-start-time').value;
+        common.end_time = el('loaf-entry-end-time').value;
+        common.hours_overridden = el('loaf-entry-override').checked ? '1' : '';
+        return common;
+    }
+
+    el('loaf-entry-form').addEventListener('submit', function (event) {
+        event.preventDefault();
+        var entryId = el('loaf-entry-id').value;
+        var url = entryId ? '/loaf/api/entries/' + entryId : '/loaf/api/entries';
+        el('loaf-entry-submit').disabled = true;
+        $.ajax({
+            url: url, method: 'POST', contentType: 'application/json',
+            data: JSON.stringify(collectEntry()),
+            success: function (response) {
+                el('loaf-entry-submit').disabled = false;
+                if (response.status === 'success') {
+                    closeEntry();
+                    showToast(formatHours(response.hours) + ' hours booked.', 'success');
+                    load();
+                } else {
+                    showToast(response.message || 'Could not save that.', 'error');
+                }
+            },
+            error: function (xhr) {
+                el('loaf-entry-submit').disabled = false;
+                var body = xhr.responseJSON || {};
+                showToast(body.message || 'Could not save that.', 'error');
+            }
+        });
+    });
+
+    el('loaf-entry-delete').addEventListener('click', async function () {
+        var entryId = el('loaf-entry-id').value;
+        if (!entryId) { return; }
+        var ok = await showConfirmModal({
+            title: 'Delete this booking?',
+            message: 'The hours go back into the basket.',
+            confirmText: 'Delete', cancelText: 'Keep it', danger: true
+        });
+        if (!ok) { return; }
+        $.ajax({
+            url: '/loaf/api/entries/' + entryId + '/delete',
+            method: 'POST', contentType: 'application/json',
+            success: function () { closeEntry(); load(); },
+            error: function (xhr) {
+                var body = xhr.responseJSON || {};
+                showToast(body.message || 'Could not delete that.', 'error');
+            }
+        });
+    });
+
+    // ------------------------------------------------------------ wiring ----
+
+    fillPeriodSelects();
+    resyncSelects();
+    drawHead();
+    load();
+
+    $('#loaf-basket-dropdown').on('change', function () {
+        state.basketId = parseInt(this.value, 10);
+        // In the URL as well, so a reload and a shared link both come back to
+        // the basket being looked at.
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, '', '/loaf/dashboard?basket=' + state.basketId);
+        }
+        load();
+    });
+    $('#loaf-month-dropdown').on('change', function () {
+        state.month = parseInt(this.value, 10); load();
+    });
+    $('#loaf-year-dropdown').on('change', function () {
+        state.year = parseInt(this.value, 10); load();
+    });
+
+    // The same modal Manage Baskets opens, opened the same way. Saving
+    // reloads, which is what brings the new basket into the switcher.
+    $('#loaf-add-basket').on('click', function () { loafBasketModal.openAdd(); });
+
+    $('#loaf-prev').on('click', function () { shiftMonth(-1); });
+    $('#loaf-next').on('click', function () { shiftMonth(1); });
+    $('#loaf-today').on('click', function () {
+        state.year = parseInt(TODAY.substring(0, 4), 10);
+        state.month = parseInt(TODAY.substring(5, 7), 10);
+        el('loaf-month-dropdown').value = String(state.month);
+        el('loaf-year-dropdown').value = String(state.year);
+        resyncSelects();
+        load();
+    });
+
+    $('#loaf-entry-modal').on('click', function (event) {
+        if (event.target === this) { closeEntry(); }
+    });
+    $('#loaf-entry-all-day, #loaf-entry-override').on('change', syncEntryFields);
+    $('.loaf-span-toggle .graph-toggle-btn').on('click', function () {
+        setEntrySpan(this.getAttribute('data-span'));
+    });
+    // Typed in, so it is their figure - see hoursTouched.
+    el('loaf-entry-hours').addEventListener('input', function () {
+        hoursTouched = true;
+    });
+    $(document).on('keydown', function (event) {
+        if (event.key === 'Escape' && el('loaf-entry-modal').style.display === 'flex') {
+            closeEntry();
+        }
+    });
+
+    // Swipe, copied from dashboard_m's handleTouchStart/Move/End and
+    // slideWithAnimation rather than approximated:
+    //
+    //   - the finger drags the container live, so the month follows the thumb
+    //     instead of jumping when it lifts
+    //   - horizontal only, decided by comparing the two deltas, and it calls
+    //     preventDefault once it has decided - which is why these listeners
+    //     cannot be passive
+    //   - a fifth of the container's width commits; anything less snaps back
+    //   - committing slides the rest of the way out over 0.3s, then swaps the
+    //     month and resets the transform with the transition off, so the new
+    //     month does not slide back in from where the old one left
+    var touchStartX = null;
+    var touchStartY = null;
+    var touchCurrentX = null;
+    var isHorizontalSwipe = false;
+    var isAnimating = false;
+    var containerWidth = null;
+
+    function handleTouchStart(event) {
+        if (isAnimating) { return; }
+        // Not while a dialog is up. dashboard_m has no equivalent because its
+        // modals sit outside the container it drags; this page's booking modal
+        // does too now, but a swipe behind an open dialog still reads as a
+        // mis-touch rather than as navigation.
+        if (el('loaf-entry-modal').style.display === 'flex') { return; }
+        // And the basket form, which is the same element Manage Baskets uses.
+        if (window.loafBasketModal && loafBasketModal.isOpen()) { return; }
+
+        touchStartX = event.touches[0].screenX;
+        touchStartY = event.touches[0].screenY;
+        containerWidth = mainContainer.offsetWidth;
+        isHorizontalSwipe = false;
+    }
+
+    function handleTouchMove(event) {
+        if (!touchStartX || isAnimating) { return; }
+
+        touchCurrentX = event.touches[0].screenX;
+        var swipeDistanceX = touchCurrentX - touchStartX;
+        var swipeDistanceY = event.touches[0].screenY - touchStartY;
+
+        if (Math.abs(swipeDistanceX) > Math.abs(swipeDistanceY)) {
+            isHorizontalSwipe = true;
+            event.preventDefault();
+            mainContainer.style.transform = 'translateX(' + swipeDistanceX + 'px)';
+        }
+    }
+
+    function handleTouchEnd() {
+        if (!touchStartX || !isHorizontalSwipe) { return; }
+
+        var swipeDistanceX = touchCurrentX - touchStartX;
+        var swipePercentage = Math.abs(swipeDistanceX) / containerWidth;
+
+        if (swipePercentage > 0.2) {
+            slideWithAnimation(swipeDistanceX > 0 ? 'right' : 'left');
+        } else {
+            mainContainer.style.transform = 'translateX(0)';
+        }
+
+        touchStartX = null;
+        touchCurrentX = null;
+        isHorizontalSwipe = false;
+    }
+
+    function slideWithAnimation(direction) {
+        isAnimating = true;
+        mainContainer.style.transition = 'transform 0.3s ease';
+        mainContainer.style.transform = 'translateX('
+            + (direction === 'left' ? '-' : '') + containerWidth + 'px)';
+
+        setTimeout(function () {
+            shiftMonth(direction === 'left' ? 1 : -1);
+            mainContainer.style.transition = 'none';
+            mainContainer.style.transform = 'translateX(0)';
+            isAnimating = false;
+        }, 300);
+    }
+
+    document.addEventListener('touchstart', handleTouchStart, {passive: false});
+    document.addEventListener('touchmove', handleTouchMove, {passive: false});
+    document.addEventListener('touchend', handleTouchEnd);
+})();
+</script>
+{% endif %}
+
+{% include 'footer.html' %}
+</body>
+</html>
