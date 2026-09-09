@@ -1,0 +1,57 @@
+-- =========================================================================
+-- Migration: a week that is counted differently from the week that is worked
+-- =========================================================================
+-- Purpose: a loaf_baskets row holds one working week in mon_start..sun_break_
+--          minutes, and that one week is asked three different questions:
+--          what a booked day costs, what the accrual is pro-rated against,
+--          and what the calendar draws. For almost everybody those have the
+--          same answer, so one week is right.
+--
+--          They come apart for a compressed schedule. Someone working four
+--          ten-hour days whose employer accrues them as five eight-hour days
+--          has no week that is correct: enter the real one and the accrual is
+--          measured against the wrong total, enter the employer's and every
+--          multi-day booking spends a day they are never at work.
+--
+-- WHAT THE COLUMN HOLDS
+--   The weekdays that exist in the employer's week but not in the person's.
+--   The 21 schedule columns keep their meaning untouched - they are the week
+--   the EMPLOYER counts - and this names the days inside it that cost nothing
+--   to book, because no leave is ever requested for them.
+--
+-- WHY "accrual_only" AND NOT "unworked"
+--   Because thu_start stays populated. A row saying the day is not worked
+--   while also giving its hours reads as a contradiction, and resolving it
+--   needs you to know which of three questions is being asked. Naming the
+--   behaviour that survives - it counts for accrual and for nothing else -
+--   explains thu_start instead of arguing with it.
+--
+-- WHY A SPARSE LIST AND NOT A SECOND SCHEDULE
+--   The obvious answer is 21 more columns holding the real week. They are not
+--   needed. The cost of a day comes from the employer's hours and the accrual
+--   denominator comes from the employer's total, so the real hours never enter
+--   the arithmetic - only the question of which days are attended at all.
+--   Seven booleans would do it; one nullable list does it in one column and
+--   stays empty for every row that does not care.
+--
+-- CAREFUL: THIS IS NOT `weekdays`
+--   loaf_baskets.weekdays already exists on this table and means something
+--   entirely different - which days the PAY lands on, the cadence that drives
+--   accrual dates. Same varchar, same comma-separated lowercase names, same
+--   parser, opposite subject. Read the column name, not the shape.
+--
+-- NULL MEANS THE ORDINARY CASE
+--   Not "no days" spelled differently: every existing basket gets NULL and
+--   therefore keeps precisely the figures it shows today. Nothing switches on
+--   until a day is named.
+--
+-- Run on: each environment in turn, production last
+-- =========================================================================
+
+-- AFTER sun_break_minutes on purpose: add_loaf_tables.sql promises the 21
+-- schedule columns are contiguous and move as a block, and this belongs to
+-- that block. Appended without it, MySQL puts it past last_modified.
+ALTER TABLE `loaf_baskets`
+  ADD COLUMN `accrual_only_weekdays` varchar(255) DEFAULT NULL
+    COMMENT 'Weekdays worked on paper only: cost 0 to book and draw as off, but still count for accrual. NOT the pay cadence - that is `weekdays`.'
+    AFTER `sun_break_minutes`;
