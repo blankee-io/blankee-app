@@ -8,6 +8,42 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.26.0 — 2026-09-08
+
+### Added
+- **Hours can be added, not only spent.** A Loaf entry now says which way it
+  moves the balance: taking time off, or hours arriving — a manager's grant, a
+  payroll correction, anything outside the basket's own accrual and grant
+  rules. Before this the only way to record one was to edit the hours you have
+  now, which re-dated the whole forecast and lost the reason for the change.
+
+  Hours added are deliberately **not** treated as time away from work. They go
+  on the balance without touching what you accrue next, because being handed
+  hours is not the same as being at work — counting them as absence would
+  shrink the very accrual they were meant to top up.
+
+- **A basket can be told which weekdays you are not actually there**, for a
+  compressed week that an employer accrues as a standard one — four ten-hour
+  days counted as five eights, say. Those days still count toward accrual,
+  exactly as the employer counts them, but cost nothing to book and show as
+  days off. Without it, either the forecast is measured against the wrong week
+  or every multi-day booking spends a day you were never going to work.
+
+  It is off the form by default, since it is for one shape of schedule and
+  would be noise on everyone else's. `loafBasketModal.countedWeek()` in the
+  browser console reveals the column.
+
+### Changed
+- **A day you do not work now refuses time off.** Typing a figure used to
+  force a booking onto any day at all, including weekends. It no longer does,
+  on booking, editing or Test Time Off. The hours box is also capped at what
+  that day is actually worth.
+
+- **The Planned / Taken / Cancelled dropdown is gone** from the booking form.
+  Only Cancelled ever changed a number, and deleting the booking says that
+  more plainly. The field that replaced it chooses whether hours are being
+  taken or added.
+
 ## 1.25.2 — 2026-09-07
 
 ### Fixed

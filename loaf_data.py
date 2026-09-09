@@ -77,7 +77,7 @@ BASKET_COLUMNS = (
     'yearly_day', 'yearly_month', 'accrual_anchor_date',
     'year_start_month', 'year_start_day',
     'carryover_mode', 'carryover_cap_hours', 'low_balance_hours',
-    'starting_hours', 'starting_date',
+    'starting_hours', 'starting_date', 'accrual_only_weekdays',
 ) + tuple(
     '%s_%s' % (day, part)
     for day in WEEKDAY_PREFIXES
@@ -86,7 +86,8 @@ BASKET_COLUMNS = (
 
 ENTRY_COLUMNS = (
     'basket_id', 'starts_at', 'ends_at', 'all_day',
-    'hours', 'computed_hours', 'hours_overridden', 'status', 'note',
+    'hours', 'computed_hours', 'hours_overridden', 'status', 'direction',
+    'note',
 )
 
 
@@ -418,6 +419,31 @@ def scheduled_minutes(basket, weekday):
     return max(0, (day['end'] - day['start']) - day['break_minutes'])
 
 
+def attends(basket, weekday):
+    """Is this a weekday the person is actually at work?
+
+    Not the same question as scheduled_minutes, and deliberately not folded
+    into it. That one answers what the EMPLOYER counts, which is what the
+    accrual is pro-rated against, and for a day like this it has to keep
+    saying eight hours. This one answers whether anybody is there, which is
+    what decides whether booking the day costs anything.
+
+    They differ only for a compressed week counted as a standard one - four
+    ten-hour days accrued as five eights. Everywhere else accrual_only_weekdays is
+    empty and this is True for every day the schedule covers, so the two
+    questions have the same answer and nothing changes.
+
+    True for an unrecognised weekday: the caller has already asked
+    schedule_for, and a day off is a day off without this saying so as well.
+    """
+    try:
+        name = WEEKDAY_NAMES[int(weekday)]
+    except (IndexError, TypeError, ValueError):
+        return True
+    listed = str(basket.get('accrual_only_weekdays') or '').split(',')
+    return name not in listed
+
+
 # ------------------------------------------------------------ the projection ----
 
 PROJECTION_KEY = 'loaf_projection:%s:{user_id}' % redis_manager.REDIS_KEY_VERSION
@@ -458,6 +484,12 @@ CADENCE_UNITS = ('days', 'weeks', 'months', 'years')
 BASKET_TYPES = ('pto', 'uto')
 CARRYOVER_MODES = ('reset', 'all', 'capped')
 ENTRY_STATUSES = ('planned', 'taken', 'cancelled')
+
+# Which way an entry moves the balance. 'use' is time off and is everything
+# this table held before; 'accrue' is a credit - hours handed over, recorded
+# on the day they arrived. An accrual is never costed against the working
+# week, so it is always one date and always the figure the person typed.
+ENTRY_DIRECTIONS = ('use', 'accrue')
 
 # The same lowercase names the recurring forms emit and auto_balance validates,
 # so a cadence written here is one bucket_utils recognises. It skips a name it
@@ -638,6 +670,11 @@ def clean_basket(payload):
     values['yearly_month'] = yearly_month
 
     values['weekdays'] = _weekday_list(payload.get('weekdays'))
+
+    # Counted for accrual, never attended - see attends(). Same parser and
+    # same storage shape as `weekdays` directly above, and a completely
+    # different subject: that one is when the pay lands.
+    values['accrual_only_weekdays'] = _weekday_list(payload.get('accrual_only_weekdays'))
     values['monthly_days'] = _monthly_day_list(payload.get('monthly_days'))
     values['hidden'] = 1 if str(payload.get('hidden') or '') in ('1', 'true', 'on') else 0
 
@@ -736,6 +773,11 @@ def clean_entry(payload):
         return None, 'That status is not one Loaf understands.'
     values['status'] = status
 
+    direction = str(payload.get('direction') or 'use').strip().lower()
+    if direction not in ENTRY_DIRECTIONS:
+        return None, 'That is not something Loaf can do with hours.'
+    values['direction'] = direction
+
     note = str(payload.get('note') or '').strip()
     if len(note) > 255:
         return None, 'That note is too long.'
@@ -754,6 +796,19 @@ def clean_entry(payload):
     values['hours_overridden'] = 1 if overridden else 0
     if overridden:
         values['hours'] = typed
+
+    # A credit has no shape to work out. There is no range to intersect with a
+    # working week and no schedule that knows how big it should be - somebody
+    # was handed some hours, and the only source for the figure is them. So it
+    # is always its own override, and always the one date it arrived on.
+    if direction == 'accrue':
+        if typed is None or typed <= 0:
+            return None, 'How many hours were added?'
+        values['hours'] = typed
+        values['hours_overridden'] = 1
+        values['all_day'] = 1
+        values['ends_at'] = '%s 23:59:00' % start_date
+        values['starts_at'] = '%s 00:00:00' % start_date
 
     return values, None
 

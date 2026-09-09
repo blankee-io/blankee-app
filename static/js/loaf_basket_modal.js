@@ -28,6 +28,36 @@
     var form = document.getElementById('basket-form');
     var WEEKDAY_PREFIXES = JSON.parse(modal.getAttribute('data-weekday-prefixes'));
 
+    // Both lists are Monday-first and index-aligned - loaf_data.WEEKDAY_PREFIXES
+    // and WEEKDAY_NAMES, handed over together. The inputs are keyed by prefix
+    // and accrual_only_weekdays stores names, so that alignment is load-bearing.
+    var WEEKDAY_NAMES = JSON.parse(modal.getAttribute('data-weekday-names'));
+
+    // The counted-week column is for one shape of schedule - a compressed week
+    // the employer accrues as a standard one - so it stays out of the way until
+    // somebody asks for it from the console:
+    //
+    //     loafBasketModal.countedWeek()        show it
+    //     loafBasketModal.countedWeek(false)   put it away
+    //
+    // localStorage rather than a server setting: it decides what a form shows,
+    // not what anything means, and it should not follow the account onto a
+    // machine where nobody asked for it. Reads are wrapped because a browser
+    // set to block site data throws on access rather than returning null.
+    var COUNTED_KEY = 'loafBasketCountedWeek';
+
+    function countedWeekOn() {
+        try {
+            return localStorage.getItem(COUNTED_KEY) === '1';
+        } catch (err) {
+            return false;
+        }
+    }
+
+    function syncCountedWeek() {
+        modal.classList.toggle('loaf-counted-week', countedWeekOn());
+    }
+
     function el(id) { return document.getElementById(id); }
     function val(id) { return el(id).value; }
 
@@ -105,6 +135,14 @@
     // as unfinished.
     function syncDay(prefix) {
         var off = el('basket-' + prefix + '-off').checked;
+        var notIn = el('basket-' + prefix + '-notin');
+
+        // Off wins, because the two are different states and not degrees of
+        // one. Off means the employer does not count the day at all; Not in
+        // means it counts the day and nobody is there for it. Holding both
+        // would name an accrual-only weekday with no hours behind it.
+        if (off && notIn.checked) { notIn.checked = false; }
+
         ['start', 'end'].forEach(function (part) {
             var field = el('basket-' + prefix + '-' + part);
             field.disabled = off;
@@ -129,6 +167,7 @@
             el('basket-' + prefix + '-start').value = '';
             el('basket-' + prefix + '-end').value = '';
             el('basket-' + prefix + '-off').checked = false;
+            el('basket-' + prefix + '-notin').checked = false;
         });
         syncAmounts();
         syncWeek();
@@ -136,6 +175,7 @@
 
     function openAdd() {
         clearForm();
+        syncCountedWeek();
         el('basket-modal-title').textContent = 'Add a Basket';
         el('basket-submit').textContent = 'Add Basket';
         el('basket-starting-hours').value = '0.00';
@@ -168,6 +208,7 @@
     }
 
     function openEdit(basketId) {
+        syncCountedWeek();
         var row = $('tr[data-basket-id="' + basketId + '"]');
         if (!row.length) { return; }
         clearForm();
@@ -205,6 +246,9 @@
         el('basket-carryover-cap-hours').value = row.attr('data-carryover-cap-hours') || '';
 
         var days = (row.attr('data-weekdays') || '').split(',');
+        // Different column, same shape: these are days counted for accrual and
+        // never attended, not days the pay lands on.
+        var accrualOnly = (row.attr('data-accrual-only-weekdays') || '').split(',');
         $('.basket-weekday').each(function () {
             this.checked = days.indexOf(this.value) !== -1;
         });
@@ -220,6 +264,8 @@
             el('basket-' + prefix + '-start').value = start ? start.substring(0, 5) : '';
             el('basket-' + prefix + '-end').value = end ? end.substring(0, 5) : '';
             el('basket-' + prefix + '-off').checked = !start;
+            el('basket-' + prefix + '-notin').checked =
+                accrualOnly.indexOf(WEEKDAY_NAMES[WEEKDAY_PREFIXES.indexOf(prefix)]) >= 0;
             longest = Math.max(longest,
                 parseInt(row.attr('data-' + prefix + '-break-minutes') || '0', 10) || 0);
         });
@@ -286,12 +332,23 @@
         // schema and the projection still reads them per day; this form simply
         // does not offer that.
         var brk = val('basket-break') || '0';
-        WEEKDAY_PREFIXES.forEach(function (prefix) {
+        var accrualOnly = [];
+        WEEKDAY_PREFIXES.forEach(function (prefix, index) {
             var off = el('basket-' + prefix + '-off').checked;
             payload[prefix + '_start'] = off ? '' : val('basket-' + prefix + '-start');
             payload[prefix + '_end'] = off ? '' : val('basket-' + prefix + '-end');
             payload[prefix + '_break_minutes'] = off ? '0' : brk;
+            if (!off && el('basket-' + prefix + '-notin').checked) {
+                accrualOnly.push(WEEKDAY_NAMES[index]);
+            }
         });
+
+        // The whole safety story, in one place: hidden means the key is absent
+        // and api_update_basket leaves the column alone, so saving a basket
+        // from a browser without the flag cannot wipe a value set from one
+        // that has it. Shown means the key is present - an empty list included,
+        // which is how the setting is turned back off.
+        if (countedWeekOn()) { payload.accrual_only_weekdays = accrualOnly; }
 
         return payload;
     }
@@ -335,6 +392,9 @@
         syncDay(this.id.replace('basket-', '').replace('-off', ''));
     });
 
+    // Times and Off, but NOT the counted-week box. The day somebody is absent
+    // is never the day being copied from, so carrying the flag across would
+    // put it on precisely the four days it does not belong to.
     $('#basket-copy-monday').on('click', function () {
         var start = val('basket-mon-start');
         var end = val('basket-mon-end');
@@ -349,9 +409,13 @@
         });
     });
 
+    // The button says every day, so the counted-week boxes go too. Left
+    // behind, they would make a freshly cleared week still cost nothing on a
+    // Thursday, with nothing on screen saying why.
     $('#basket-clear-week').on('click', function () {
         WEEKDAY_PREFIXES.forEach(function (prefix) {
             el('basket-' + prefix + '-off').checked = false;
+            el('basket-' + prefix + '-notin').checked = false;
             el('basket-' + prefix + '-start').value = '';
             el('basket-' + prefix + '-end').value = '';
             syncDay(prefix);
@@ -371,6 +435,21 @@
         openAdd: openAdd,
         openEdit: openEdit,
         close: close,
-        isOpen: function () { return modal.style.display === 'flex'; }
+        isOpen: function () { return modal.style.display === 'flex'; },
+
+        // Show the counted-week column, for a compressed schedule the employer
+        // accrues as a standard one. Hung here rather than on a global of its
+        // own so that typing loafBasketModal. into the console finds it.
+        // Returns the resulting state, so the console prints confirmation.
+        countedWeek: function (on) {
+            try {
+                if (on === false) { localStorage.removeItem(COUNTED_KEY); }
+                else { localStorage.setItem(COUNTED_KEY, '1'); }
+            } catch (err) {
+                return 'this browser will not store the setting';
+            }
+            syncCountedWeek();      // so an already-open modal changes now
+            return countedWeekOn();
+        }
     };
 })();

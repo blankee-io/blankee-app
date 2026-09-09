@@ -78,11 +78,14 @@ EXPECTED_COLUMNS = (
     ('credit_accounts', 'statement_day'),
     ('credit_accounts', 'payment_due_day'),
     # The interesting parts of the Loaf schema rather than proof the table
-    # exists: the ceiling that stops accrual, one end of the work week, and
-    # the figure an override is measured against.
+    # exists: the ceiling that stops accrual, one end of the work week, the
+    # days inside that week nobody actually attends, and the figure an
+    # override is measured against.
     ('loaf_baskets', 'max_balance_hours'),
     ('loaf_baskets', 'mon_start'),
+    ('loaf_baskets', 'accrual_only_weekdays'),
     ('loaf_entries', 'computed_hours'),
+    ('loaf_entries', 'direction'),
 )
 EXPECTED_CONSTRAINTS = (
     ('totals_remainders_m', 'totals_remainders_m_ibfk_1'),

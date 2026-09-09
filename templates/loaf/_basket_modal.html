@@ -184,9 +184,17 @@
                    per day, and the projection still reads them per day, so a
                    week with genuinely different breaks stays expressible - this
                    form just writes the same figure to all seven. #}
+                {# The fourth column is hidden unless the counted-week flag is
+                   set from the browser console - see loafBasketModal.countedWeek.
+                   It is for one shape of schedule: a compressed week that the
+                   employer accrues as a standard one. Off and Not in are
+                   different states, and the difference is the whole feature:
+                   Off is not counted at all, Not in is counted for accrual but
+                   costs nothing to book. #}
                 <div class="loaf-schedule-grid">
                     <div class="loaf-schedule-head">
                         <span></span><span>Start</span><span>End</span><span>Off</span>
+                        <span class="loaf-schedule-counted">Not in</span>
                     </div>
                     {% for prefix in weekday_prefixes %}
                     <div class="loaf-schedule-row" data-prefix="{{ prefix }}">
@@ -198,6 +206,10 @@
                         <input type="checkbox" id="basket-{{ prefix }}-off"
                                class="loaf-schedule-off"
                                aria-label="{{ weekday_names[loop.index0]|capitalize }} off">
+                        <input type="checkbox" id="basket-{{ prefix }}-notin"
+                               class="loaf-schedule-counted"
+                               data-weekday="{{ weekday_names[loop.index0] }}"
+                               aria-label="Counted for accrual but not attended on {{ weekday_names[loop.index0]|capitalize }}">
                     </div>
                     {% endfor %}
 
