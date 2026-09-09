@@ -86,7 +86,8 @@ BASKET_COLUMNS = (
 
 ENTRY_COLUMNS = (
     'basket_id', 'starts_at', 'ends_at', 'all_day',
-    'hours', 'computed_hours', 'hours_overridden', 'status', 'note',
+    'hours', 'computed_hours', 'hours_overridden', 'status', 'direction',
+    'note',
 )
 
 
@@ -484,6 +485,12 @@ BASKET_TYPES = ('pto', 'uto')
 CARRYOVER_MODES = ('reset', 'all', 'capped')
 ENTRY_STATUSES = ('planned', 'taken', 'cancelled')
 
+# Which way an entry moves the balance. 'use' is time off and is everything
+# this table held before; 'accrue' is a credit - hours handed over, recorded
+# on the day they arrived. An accrual is never costed against the working
+# week, so it is always one date and always the figure the person typed.
+ENTRY_DIRECTIONS = ('use', 'accrue')
+
 # The same lowercase names the recurring forms emit and auto_balance validates,
 # so a cadence written here is one bucket_utils recognises. It skips a name it
 # does not know in silence, which is a cadence that never fires.
@@ -766,6 +773,11 @@ def clean_entry(payload):
         return None, 'That status is not one Loaf understands.'
     values['status'] = status
 
+    direction = str(payload.get('direction') or 'use').strip().lower()
+    if direction not in ENTRY_DIRECTIONS:
+        return None, 'That is not something Loaf can do with hours.'
+    values['direction'] = direction
+
     note = str(payload.get('note') or '').strip()
     if len(note) > 255:
         return None, 'That note is too long.'
@@ -784,6 +796,19 @@ def clean_entry(payload):
     values['hours_overridden'] = 1 if overridden else 0
     if overridden:
         values['hours'] = typed
+
+    # A credit has no shape to work out. There is no range to intersect with a
+    # working week and no schedule that knows how big it should be - somebody
+    # was handed some hours, and the only source for the figure is them. So it
+    # is always its own override, and always the one date it arrived on.
+    if direction == 'accrue':
+        if typed is None or typed <= 0:
+            return None, 'How many hours were added?'
+        values['hours'] = typed
+        values['hours_overridden'] = 1
+        values['all_day'] = 1
+        values['ends_at'] = '%s 23:59:00' % start_date
+        values['starts_at'] = '%s 00:00:00' % start_date
 
     return values, None
 

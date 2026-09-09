@@ -85,6 +85,7 @@ EXPECTED_COLUMNS = (
     ('loaf_baskets', 'mon_start'),
     ('loaf_baskets', 'accrual_only_weekdays'),
     ('loaf_entries', 'computed_hours'),
+    ('loaf_entries', 'direction'),
 )
 EXPECTED_CONSTRAINTS = (
     ('totals_remainders_m', 'totals_remainders_m_ibfk_1'),

@@ -372,10 +372,12 @@ def _month_payload(user_id, basket, year, month, today):
     # worked pro-rates the accrual whichever basket it came out of.
     usage = loaf_forecast.usage_by_date(basket, entries)
     absence = loaf_forecast.absence_by_date(baskets, entries)
+    credits = loaf_forecast.credit_by_date(basket, entries)
 
     viewing = date(int(year), int(month), 1)
     through = loaf_forecast.horizon_for(basket, viewing, today=today)
-    result = loaf_forecast.project(basket, usage, absence, through, today=today)
+    result = loaf_forecast.project(basket, usage, absence, through, today=today,
+                                   credits=credits)
 
     grid_start, grid_end, first, last = loaf_forecast.grid_bounds(year, month)
     rows = loaf_forecast.month_rows(basket, result, absence, grid_start, grid_end)
@@ -402,6 +404,7 @@ def _month_payload(user_id, basket, year, month, today):
                 'hours': entry.get('hours'),
                 'hours_overridden': int(entry.get('hours_overridden') or 0),
                 'status': entry.get('status'),
+                'direction': entry.get('direction') or 'use',
                 'note': entry.get('note'),
             })
             day += timedelta(days=1)
@@ -423,6 +426,7 @@ def _month_payload(user_id, basket, year, month, today):
             'taken': row['taken'],
             'accrued': row['accrued'],
             'granted': row['granted'],
+            'credited': row['credited'],
             'balance': row['balance'],
             'entries': touching.get(stamp, []),
         })
@@ -472,12 +476,41 @@ def _recompute(basket, values):
     unless the user typed a figure, which is the whole point of
     hours_overridden - a comparison could not tell an override of 8.00 with
     8.00 from no override at all.
+
+    A credit skips all of it. There is no range to cost: clean_entry has
+    already fixed the date and taken the figure from the person, and the
+    working week has no opinion about hours it did not produce.
     """
+    if str(values.get('direction') or 'use') == 'accrue':
+        values['computed_hours'] = None
+        return values
+
     computed = loaf_forecast.entry_hours(basket, values)
     values['computed_hours'] = computed
     if not int(values.get('hours_overridden') or 0):
         values['hours'] = computed
     return values
+
+
+def _unworkable(basket, values):
+    """The message for time off booked where no hours are worked, or None.
+
+    Checked ahead of the override, unlike the plain zero-cost guard below it,
+    and that is the difference: typing a figure used to force a booking onto
+    any day at all, including one the schedule says is empty. It cannot now.
+    A day you are not at work is not a day you can take off.
+
+    Only the range as a whole has to miss - a Monday-to-Friday booking is
+    fine, and the days inside it that are not worked simply cost nothing.
+    """
+    if str(values.get('direction') or 'use') == 'accrue':
+        return None                 # a credit is not booked against the week
+
+    if loaf_forecast.entry_hours(basket, values) > 0:
+        return None
+
+    return ('You do not work any of those hours, so there is no time off to '
+            'take. Pick a day your working week covers.')
 
 
 @loaf.route('/api/entries', methods=['POST'])
@@ -491,12 +524,11 @@ def api_create_entry():
     if basket is None:
         return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
 
+    blocked = _unworkable(basket, values)
+    if blocked:
+        return jsonify({'status': 'error', 'message': blocked}), 400
+
     values = _recompute(basket, values)
-    if not values.get('hours_overridden') and not values['hours']:
-        return jsonify({'status': 'error',
-                        'message': 'That range does not cover any of your working '
-                                   'hours, so it costs nothing. Change the dates, or '
-                                   'enter the hours yourself.'}), 400
 
     entry_id = loaf_data.create_entry(current_user.id, values)
     if entry_id is None:
@@ -520,6 +552,13 @@ def api_update_entry(entry_id):
     basket = loaf_data.get_basket(current_user.id, values['basket_id'])
     if basket is None:
         return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
+
+    # The update path had no zero-cost guard at all, so re-saving a booking
+    # onto a day with no hours quietly wrote 0 and kept the row. It gets the
+    # same refusal as the create path.
+    blocked = _unworkable(basket, values)
+    if blocked:
+        return jsonify({'status': 'error', 'message': blocked}), 400
 
     values = _recompute(basket, values)
     if not loaf_data.update_entry(current_user.id, entry_id, values):
@@ -571,7 +610,10 @@ def _basket_summary(basket, entries, baskets, today, extra=None):
     """
     usage = loaf_forecast.usage_by_date(basket, entries)
     absence = loaf_forecast.absence_by_date(baskets, entries)
+    credits = loaf_forecast.credit_by_date(basket, entries)
 
+    # Test Time Off only ever tries taking hours, never being given them, so
+    # `extra` is a use and goes into both usage and absence as before.
     if extra is not None:
         split = loaf_forecast._entry_split(basket, extra)
         for when, hours in split.items():
@@ -579,7 +621,8 @@ def _basket_summary(basket, entries, baskets, today, extra=None):
             absence[when] = round(absence.get(when, 0.0) + hours, 2)
 
     year_start, year_end = loaf_forecast.accrual_year_bounds(basket, today)
-    result = loaf_forecast.project(basket, usage, absence, year_end, today=today)
+    result = loaf_forecast.project(basket, usage, absence, year_end, today=today,
+                                   credits=credits)
 
     summary = dict(result['summary'])
     summary.pop('checkpoints', None)
@@ -646,12 +689,12 @@ def api_test_time_off():
     baskets = loaf_data.get_baskets(current_user.id, include_hidden=False)
     entries = loaf_data.get_entries(current_user.id)
 
+    blocked = _unworkable(basket, values)
+    if blocked:
+        return jsonify({'status': 'error', 'message': blocked}), 400
+
     values = _recompute(basket, values)
     cost = values['hours']
-    if not cost:
-        return jsonify({'status': 'error',
-                        'message': 'That range does not cover any of your working '
-                                   'hours, so it would cost nothing.'}), 400
 
     now = _basket_summary(basket, entries, baskets, today)
     then = _basket_summary(basket, entries, baskets, today, extra=values)
