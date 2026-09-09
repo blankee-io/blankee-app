@@ -44,7 +44,7 @@ import calendar
 from datetime import date, datetime, timedelta
 
 from bucket_utils import recurring_occurrence_dates
-from loaf_data import schedule_for, scheduled_minutes
+from loaf_data import attends, schedule_for, scheduled_minutes
 
 
 # ------------------------------------------------------------- coercions ----
@@ -127,7 +127,17 @@ def hours_by_date(basket, entry):
 
     while day <= last:
         shift = schedule_for(basket, day.weekday())
-        if shift:
+
+        # attends() as well as schedule_for(), and the two are not the same
+        # test. schedule_for says the employer counts this day; attends says
+        # somebody is there for it. A day that is counted but never attended
+        # has hours - they are what keeps the accrual whole - and costs
+        # nothing to book, because no leave is ever requested for it.
+        #
+        # Only job A and the calendar mask this way. _scheduled_hours_between
+        # below must NOT: it is the denominator the accrual is pro-rated
+        # against, and masking it there would quietly inflate every accrual.
+        if shift and attends(basket, day.weekday()):
             full = shift['end'] - shift['start']
             if all_day:
                 minutes = max(0, full - shift['break_minutes'])
@@ -190,13 +200,43 @@ def _accumulate(target, split):
 
 
 def usage_by_date(basket, entries):
-    """One basket's bookings as {date: hours}, cancelled ones excluded."""
+    """One basket's time off as {date: hours}, cancelled ones excluded.
+
+    Hours spent, so credits are not here - see credit_by_date. Keeping the two
+    apart rather than letting a credit be negative usage is what stops it
+    reaching absence_by_date, where a negative would push hours worked above
+    hours scheduled and quietly over-accrue.
+    """
     total = {}
     basket_id = int(basket.get('id') or 0)
     for entry in entries:
         if int(entry.get('basket_id') or 0) != basket_id:
             continue
+        if str(entry.get('direction') or 'use') != 'use':
+            continue
         _accumulate(total, _entry_split(basket, entry))
+    return total
+
+
+def credit_by_date(basket, entries):
+    """One basket's manual accruals as {date: hours}, cancelled excluded.
+
+    Hours handed over rather than earned: a figure on a date, never costed
+    against the working week. They are this basket's own, unlike absence,
+    because being given hours in one pot says nothing about any other.
+    """
+    total = {}
+    basket_id = int(basket.get('id') or 0)
+    for entry in entries:
+        if int(entry.get('basket_id') or 0) != basket_id:
+            continue
+        if str(entry.get('direction') or 'use') != 'accrue':
+            continue
+        if str(entry.get('status') or 'planned') == 'cancelled':
+            continue
+        when = _as_date(str(entry.get('starts_at') or '')[:10])
+        if when is not None:
+            _accumulate(total, {when: _as_float(entry.get('hours'))})
     return total
 
 
@@ -211,6 +251,11 @@ def absence_by_date(baskets, entries):
     by_id = {int(b.get('id') or 0): b for b in baskets}
     total = {}
     for entry in entries:
+        # A credit is not an absence. Being handed eight hours is not eight
+        # hours away from work, and counting it as such would shrink the very
+        # accrual it was meant to top up.
+        if str(entry.get('direction') or 'use') != 'use':
+            continue
         basket = by_id.get(int(entry.get('basket_id') or 0))
         if basket is None:
             continue
@@ -245,7 +290,16 @@ def _year_turns(basket, after, through):
 
 
 def _scheduled_hours_between(basket, after, through):
-    """Hours this basket's week says are worked in (after, through]."""
+    """Hours this basket's week says are worked in (after, through].
+
+    DO NOT add attends() here. This is the denominator the accrual is
+    pro-rated against, and it has to keep counting a day the employer counts
+    even when nobody is there for it - that is the entire point of
+    accrual_only_weekdays. Masking it would drop a four-day week's denominator
+    from forty hours to thirty-two and quietly inflate every accrual from
+    then on, with numbers that still look plausible. The mask belongs in
+    hours_by_date, which costs a booking, and in month_rows, which draws one.
+    """
     minutes = 0
     day = after + timedelta(days=1)
     while day <= through:
@@ -260,7 +314,7 @@ def _hours_between(by_date, after, through):
                      if after < day <= through), 2)
 
 
-def project(basket, usage, absence, through, today=None):
+def project(basket, usage, absence, through, today=None, credits=None):
     """Walk one basket forward and report what happens to its balance.
 
     usage    {date: hours} for THIS basket - what comes off the balance.
@@ -268,6 +322,10 @@ def project(basket, usage, absence, through, today=None):
              therefore what the next accrual is pro-rated by.
     through  the last date to project to. There is no materialised timeline, so
              the horizon is the caller's to choose.
+    credits  {date: hours} for THIS basket - hours handed over by hand. Note
+             they appear here and NOT in absence: a credit adds to the balance
+             without anybody having been away, so it must not touch the
+             pro-rate.
 
     Returns {'events', 'checkpoints', 'summary'}.
     """
@@ -313,8 +371,10 @@ def project(basket, usage, absence, through, today=None):
     # Every date the balance can move on, gathered before the loop so the loop
     # itself is pure arithmetic - the property that makes Blankee's walks
     # readable.
+    credits = credits or {}
     stops = set(accrual_dates) | set(turn_dates)
     stops |= set(d for d in usage if start <= d <= through)
+    stops |= set(d for d in credits if start <= d <= through)
 
     events = []
     checkpoints = [(start, balance)]
@@ -323,7 +383,7 @@ def project(basket, usage, absence, through, today=None):
 
     for when in sorted(stops):
         moved = {'date': when, 'turned_over': False,
-                 'granted': 0.0, 'accrued': 0.0, 'used': 0.0}
+                 'granted': 0.0, 'accrued': 0.0, 'credited': 0.0, 'used': 0.0}
 
         # 1. The year turns first: carryover, then any flat grant.
         if when in turn_dates:
@@ -373,7 +433,19 @@ def project(basket, usage, absence, through, today=None):
             moved['accrued'] = round(balance - before, 2)
             accrued_total = round(accrued_total + moved['accrued'], 2)
 
-        # 3. Then what was taken that day.
+        # 3. Then anything handed over by hand. Not clamped by the ceiling,
+        #    for the reason the grant above is not: the cap stops ACCRUAL, and
+        #    somebody who has been given eight hours has been given them
+        #    whatever the cap says. It is also why a credit sits here rather
+        #    than being folded into the accrual step - the two are added the
+        #    same way and clamped differently.
+        if when in credits and start <= when <= through:
+            credited = round(_as_float(credits[when]), 2)
+            balance += credited
+            moved['credited'] = credited
+            accrued_total = round(accrued_total + credited, 2)
+
+        # 4. Then what was taken that day.
         if when in usage and start <= when <= through:
             taken = usage[when]
             balance -= taken
@@ -548,7 +620,13 @@ def month_rows(basket, result, absence, first, last):
     day = first
     while day <= last:
         event = by_date.get(day)
-        scheduled = round(scheduled_minutes(basket, day.weekday()) / 60.0, 2)
+
+        # Masked, so a counted-but-unattended day draws as the day off it is:
+        # non_working below turns true and worked falls to zero. The accrual
+        # is unaffected - project() reads the unmasked week through
+        # _scheduled_hours_between and never comes through here.
+        scheduled = 0.0 if not attends(basket, day.weekday()) else round(
+            scheduled_minutes(basket, day.weekday()) / 60.0, 2)
         away = absence.get(day, 0.0)
         rows.append({
             'date': day,
@@ -558,6 +636,7 @@ def month_rows(basket, result, absence, first, last):
             'taken': (event or {}).get('used', 0.0),
             'accrued': (event or {}).get('accrued', 0.0),
             'granted': (event or {}).get('granted', 0.0),
+            'credited': (event or {}).get('credited', 0.0),
             'balance': balance_on(result, day),
         })
         day += timedelta(days=1)

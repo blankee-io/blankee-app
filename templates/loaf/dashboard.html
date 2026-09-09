@@ -127,6 +127,24 @@
                     {% endfor %}
                 </select>
 
+                {# Spending hours or being given them. This decides what the
+                   rest of the form means, so it comes before all of it.
+
+                   It replaces the old planned/taken/cancelled dropdown, which
+                   asked a question with almost no consequence: only cancelled
+                   did anything, and Delete says that better. The status column
+                   is still there and still honoured - nothing sets it now.
+
+                   Accruing is for hours arriving outside the basket's own
+                   rules: a manager's grant, a payroll correction. They are NOT
+                   absence, so they add to the balance without touching the
+                   accrual pro-rate - see credit_by_date. #}
+                <label for="loaf-entry-direction">Hours in or out</label>
+                <select id="loaf-entry-direction">
+                    <option value="use">Take time off - hours come out</option>
+                    <option value="accrue">Add hours - a grant or a correction</option>
+                </select>
+
                 {# One day or several. Nearly every booking is one day, and
                    asking for a from-date, an until-date and two times to say
                    "Tuesday off" is four controls for a fact the calendar
@@ -136,7 +154,8 @@
                    .graph-toggle-* is the stylesheet's own pill toggle, written
                    for a graph switcher that was never built. Reviving it beats
                    inventing a second toggle idiom beside it. #}
-                <div class="loaf-span-toggle graph-toggle-group" role="radiogroup"
+                <div class="loaf-span-toggle graph-toggle-group"
+                     id="loaf-entry-span-toggle" role="radiogroup"
                      aria-label="How long is this time off">
                     <button type="button" id="loaf-entry-span-single"
                             class="graph-toggle-btn active" role="radio"
@@ -201,20 +220,21 @@
                    ticked. #}
                 <label for="loaf-entry-hours" id="loaf-entry-hours-label">Hours
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                        <span class="info-tip-text">Filled in from your working week. Change it
-                            and Loaf keeps your figure, leaving it alone if the working week is
-                            edited later.</span>
+                        <span id="loaf-entry-hours-tip" class="info-tip-text">Filled in from your
+                            working week, and capped at what that day is worth - there is no
+                            taking more time off than the day holds. Change it and Loaf keeps
+                            your figure, leaving it alone if the working week is edited
+                            later.</span>
                     </span>
                 </label>
+                {# max is set from the day's scheduled hours as the modal opens.
+                   On a day the week does not cover that is zero, which is what
+                   stops one being booked by typing a figure - and the server
+                   refuses it too, because a max attribute is a courtesy rather
+                   than a rule. Accruing clears the cap: a grant has nothing to
+                   do with the length of the day it lands on. #}
                 <input type="number" id="loaf-entry-hours" class="recurring-amount"
                        step="0.01" min="0" placeholder="Worked out from your week">
-
-                <label for="loaf-entry-status">Status</label>
-                <select id="loaf-entry-status">
-                    <option value="planned">Planned</option>
-                    <option value="taken">Taken</option>
-                    <option value="cancelled">Cancelled - costs nothing</option>
-                </select>
 
                 <label for="loaf-entry-note">Note</label>
                 <input type="text" id="loaf-entry-note" class="category-input" maxlength="255">
@@ -493,6 +513,52 @@
     // cannot answer that; whether they touched the field can.
     var hoursTouched = false;
 
+    // What the day is worth, from the calendar row the modal was opened on.
+    // Nothing else knows it: month_rows computes it, and it is already in the
+    // payload for exactly this.
+    var entryScheduled = 0;
+
+    function entryDirection() {
+        return el('loaf-entry-direction').value === 'accrue' ? 'accrue' : 'use';
+    }
+
+    // Accruing is a date and a figure, so the toggle, the whole-day machinery
+    // and the range fields have nothing to say - and the cap comes off,
+    // because a grant is not measured in days.
+    function syncEntryDirection() {
+        var adding = entryDirection() === 'accrue';
+        var hours = el('loaf-entry-hours');
+
+        el('loaf-entry-span-toggle').style.display = adding ? 'none' : '';
+
+        // The heading follows the direction too. "Book Time Off" over a form
+        // that is handing hours back reads as a mistake.
+        var editing = !!el('loaf-entry-id').value;
+        el('loaf-entry-title').textContent = adding
+            ? (editing ? 'Edit Added Hours' : 'Add Hours')
+            : (editing ? 'Edit Time Off' : 'Book Time Off');
+        el('loaf-entry-submit').textContent = editing
+            ? 'Save' : (adding ? 'Add Hours' : 'Book It');
+        el('loaf-entry-hours-label').style.display = '';
+        el('loaf-entry-hours-tip').textContent = adding
+            ? 'How many hours were added, and on the day they arrived. Not '
+              + 'taken off anything - this is hours arriving, not hours spent.'
+            : 'Filled in from your working week, and capped at what that day '
+              + 'is worth. Change it and Loaf keeps your figure.';
+
+        if (adding) {
+            setEntrySpan('single');
+            hours.removeAttribute('max');
+            hours.placeholder = 'Hours to add';
+        } else {
+            // 0 on a day the week does not cover, which is what makes the box
+            // refuse a figure there. The server refuses it too.
+            hours.setAttribute('max', String(entryScheduled));
+            hours.placeholder = 'Worked out from your week';
+        }
+        syncEntryFields();
+    }
+
     function setEntrySpan(span) {
         entrySpan = span === 'multi' ? 'multi' : 'single';
         var multi = entrySpan === 'multi';
@@ -542,6 +608,8 @@
         el('loaf-entry-start-date').value = row.date;
         el('loaf-entry-end-date').value = '';
         el('loaf-entry-day').textContent = describeDay(row.date);
+        el('loaf-entry-direction').value = 'use';
+        entryScheduled = Number(row.scheduled) || 0;
 
         // What the working week says the day is worth, so the common case -
         // a whole day off - is already filled in and needs no arithmetic.
@@ -563,7 +631,7 @@
             el('loaf-entry-end-date').value = (entry.ends_at || '').substring(0, 10);
             el('loaf-entry-start-time').value = (entry.starts_at || '').substring(11, 16);
             el('loaf-entry-end-time').value = (entry.ends_at || '').substring(11, 16);
-            el('loaf-entry-status').value = entry.status || 'planned';
+            el('loaf-entry-direction').value = entry.direction || 'use';
             el('loaf-entry-override').checked = !!entry.hours_overridden;
             el('loaf-entry-hours').value = entry.hours;
             el('loaf-entry-note').value = entry.note || '';
@@ -583,6 +651,7 @@
         }
 
         setEntrySpan(span);
+        syncEntryDirection();
         el('loaf-entry-modal').style.display = 'flex';
     }
 
@@ -592,10 +661,22 @@
         var common = {
             basket_id: el('loaf-entry-basket').value,
             start_date: el('loaf-entry-start-date').value,
-            status: el('loaf-entry-status').value,
+            direction: entryDirection(),
             hours: el('loaf-entry-hours').value,
             note: el('loaf-entry-note').value
         };
+
+        // Adding hours is a date and a figure, and nothing else. No range,
+        // no times, and always the person's own number - the working week has
+        // no opinion about hours it did not produce.
+        if (entrySpan === 'single' && entryDirection() === 'accrue') {
+            common.all_day = '1';
+            common.end_date = '';
+            common.start_time = '';
+            common.end_time = '';
+            common.hours_overridden = '1';
+            return common;
+        }
 
         // Single day is one whole day, always: the server reads all_day and
         // substitutes that weekday's scheduled hours, which is exactly what
@@ -706,6 +787,7 @@
         if (event.target === this) { closeEntry(); }
     });
     $('#loaf-entry-all-day, #loaf-entry-override').on('change', syncEntryFields);
+    $('#loaf-entry-direction').on('change', syncEntryDirection);
     $('.loaf-span-toggle .graph-toggle-btn').on('click', function () {
         setEntrySpan(this.getAttribute('data-span'));
     });
