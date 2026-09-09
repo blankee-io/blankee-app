@@ -44,7 +44,7 @@ import calendar
 from datetime import date, datetime, timedelta
 
 from bucket_utils import recurring_occurrence_dates
-from loaf_data import schedule_for, scheduled_minutes
+from loaf_data import attends, schedule_for, scheduled_minutes
 
 
 # ------------------------------------------------------------- coercions ----
@@ -127,7 +127,17 @@ def hours_by_date(basket, entry):
 
     while day <= last:
         shift = schedule_for(basket, day.weekday())
-        if shift:
+
+        # attends() as well as schedule_for(), and the two are not the same
+        # test. schedule_for says the employer counts this day; attends says
+        # somebody is there for it. A day that is counted but never attended
+        # has hours - they are what keeps the accrual whole - and costs
+        # nothing to book, because no leave is ever requested for it.
+        #
+        # Only job A and the calendar mask this way. _scheduled_hours_between
+        # below must NOT: it is the denominator the accrual is pro-rated
+        # against, and masking it there would quietly inflate every accrual.
+        if shift and attends(basket, day.weekday()):
             full = shift['end'] - shift['start']
             if all_day:
                 minutes = max(0, full - shift['break_minutes'])
@@ -245,7 +255,16 @@ def _year_turns(basket, after, through):
 
 
 def _scheduled_hours_between(basket, after, through):
-    """Hours this basket's week says are worked in (after, through]."""
+    """Hours this basket's week says are worked in (after, through].
+
+    DO NOT add attends() here. This is the denominator the accrual is
+    pro-rated against, and it has to keep counting a day the employer counts
+    even when nobody is there for it - that is the entire point of
+    accrual_only_weekdays. Masking it would drop a four-day week's denominator
+    from forty hours to thirty-two and quietly inflate every accrual from
+    then on, with numbers that still look plausible. The mask belongs in
+    hours_by_date, which costs a booking, and in month_rows, which draws one.
+    """
     minutes = 0
     day = after + timedelta(days=1)
     while day <= through:
@@ -548,7 +567,13 @@ def month_rows(basket, result, absence, first, last):
     day = first
     while day <= last:
         event = by_date.get(day)
-        scheduled = round(scheduled_minutes(basket, day.weekday()) / 60.0, 2)
+
+        # Masked, so a counted-but-unattended day draws as the day off it is:
+        # non_working below turns true and worked falls to zero. The accrual
+        # is unaffected - project() reads the unmasked week through
+        # _scheduled_hours_between and never comes through here.
+        scheduled = 0.0 if not attends(basket, day.weekday()) else round(
+            scheduled_minutes(basket, day.weekday()) / 60.0, 2)
         away = absence.get(day, 0.0)
         rows.append({
             'date': day,

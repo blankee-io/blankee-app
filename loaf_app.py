@@ -113,8 +113,13 @@ def _one(payload, key, default=None):
 
 
 def _flat(payload):
-    """A payload with single-valued fields unwrapped and lists left alone."""
-    multi = ('weekdays', 'monthly_days')
+    """A payload with single-valued fields unwrapped and lists left alone.
+
+    A field missing from `multi` is silently truncated to its first element,
+    which is not an error anywhere - it just quietly loses days. Anything that
+    can legitimately arrive as a list belongs in the tuple below.
+    """
+    multi = ('weekdays', 'monthly_days', 'accrual_only_weekdays')
     out = {}
     for key, value in payload.items():
         out[key] = value if key in multi else _one(payload, key)
@@ -269,19 +274,25 @@ def api_update_basket(basket_id):
     # not quietly undo a drag-reorder.
     values.pop('display_order', None)
 
-    # Nor is max_balance_hours, which came off the form because the accrual
-    # already says how fast a basket fills. But the column is still there and
-    # the projection still clamps to it, and clean_basket reads a field that
-    # was never sent as "not set" - so saving a name change would wipe a cap
-    # and quietly raise every future balance from that day on.
+    # Two columns the form does not always ask about, and for both of them
+    # clean_basket reads "never sent" as "not set" - so without this, saving a
+    # name change would wipe a figure the projection is still using.
     #
-    # A payload that does not mention it therefore leaves it alone, the same
-    # treatment starting_date gets below. That is also what keeps the door
-    # open: "hours roll over, but you bank at most N" cannot be said with an
-    # accrual rate, and the walk already handles it - only the form does not
-    # ask. A payload that DOES send the field, empty or not, is still obeyed.
-    if 'max_balance_hours' not in payload:
-        values.pop('max_balance_hours', None)
+    #   max_balance_hours   came off the form because the accrual already says
+    #                       how fast a basket fills. The walk still clamps to
+    #                       it, so wiping one quietly raises every future
+    #                       balance from that day on.
+    #   accrual_only_weekdays   only offered once the counted-week column is
+    #                       switched on from the console, so an ordinary save
+    #                       never mentions it. Wiping it would put the
+    #                       Thursdays back and start spending them again.
+    #
+    # A payload that does not mention a field leaves it alone, the same
+    # treatment starting_date gets below. One that DOES send it, empty or not,
+    # is still obeyed - so both stay reachable and clearable on purpose.
+    for absent_means_keep in ('max_balance_hours', 'accrual_only_weekdays'):
+        if absent_means_keep not in payload:
+            values.pop(absent_means_keep, None)
 
     # The starting date moves only when the balance it describes moves. Editing
     # a name would otherwise re-date the figure and shift the whole projection;

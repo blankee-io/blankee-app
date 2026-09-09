@@ -77,7 +77,7 @@ BASKET_COLUMNS = (
     'yearly_day', 'yearly_month', 'accrual_anchor_date',
     'year_start_month', 'year_start_day',
     'carryover_mode', 'carryover_cap_hours', 'low_balance_hours',
-    'starting_hours', 'starting_date',
+    'starting_hours', 'starting_date', 'accrual_only_weekdays',
 ) + tuple(
     '%s_%s' % (day, part)
     for day in WEEKDAY_PREFIXES
@@ -418,6 +418,31 @@ def scheduled_minutes(basket, weekday):
     return max(0, (day['end'] - day['start']) - day['break_minutes'])
 
 
+def attends(basket, weekday):
+    """Is this a weekday the person is actually at work?
+
+    Not the same question as scheduled_minutes, and deliberately not folded
+    into it. That one answers what the EMPLOYER counts, which is what the
+    accrual is pro-rated against, and for a day like this it has to keep
+    saying eight hours. This one answers whether anybody is there, which is
+    what decides whether booking the day costs anything.
+
+    They differ only for a compressed week counted as a standard one - four
+    ten-hour days accrued as five eights. Everywhere else accrual_only_weekdays is
+    empty and this is True for every day the schedule covers, so the two
+    questions have the same answer and nothing changes.
+
+    True for an unrecognised weekday: the caller has already asked
+    schedule_for, and a day off is a day off without this saying so as well.
+    """
+    try:
+        name = WEEKDAY_NAMES[int(weekday)]
+    except (IndexError, TypeError, ValueError):
+        return True
+    listed = str(basket.get('accrual_only_weekdays') or '').split(',')
+    return name not in listed
+
+
 # ------------------------------------------------------------ the projection ----
 
 PROJECTION_KEY = 'loaf_projection:%s:{user_id}' % redis_manager.REDIS_KEY_VERSION
@@ -638,6 +663,11 @@ def clean_basket(payload):
     values['yearly_month'] = yearly_month
 
     values['weekdays'] = _weekday_list(payload.get('weekdays'))
+
+    # Counted for accrual, never attended - see attends(). Same parser and
+    # same storage shape as `weekdays` directly above, and a completely
+    # different subject: that one is when the pay lands.
+    values['accrual_only_weekdays'] = _weekday_list(payload.get('accrual_only_weekdays'))
     values['monthly_days'] = _monthly_day_list(payload.get('monthly_days'))
     values['hidden'] = 1 if str(payload.get('hidden') or '') in ('1', 'true', 'on') else 0
 

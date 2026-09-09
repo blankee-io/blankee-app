@@ -19440,6 +19440,34 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     font-weight: 600;
 }
 
+/* The counted-week column, for a compressed week the employer accrues as a
+   standard one. Hidden until loafBasketModal.countedWeek() sets the flag, so
+   nobody else's form grows a column they have no use for.
+
+   display:none takes a grid item out of flow entirely, so the four-column
+   template below still applies as written while it is away - no placeholder
+   track, no shift. */
+#basket-modal:not(.loaf-counted-week) .loaf-schedule-counted {
+    display: none;
+}
+
+/* Revealed: one 40px track and one more 6px gap, and the modal grows by
+   exactly those 46px. The two 1fr tracks divide what is left after the fixed
+   ones, so giving back precisely what the new track took means the time
+   inputs keep the width measured above, to the pixel - the AM/PM is as safe
+   revealed as hidden, with no second measurement to keep in step.
+
+   40 rather than the 26px the Off column uses: "Not in" has to be legible at
+   10px uppercase with letter-spacing, and Off does not. */
+#basket-modal.loaf-counted-week .loaf-schedule-head,
+#basket-modal.loaf-counted-week .loaf-schedule-row {
+    grid-template-columns: 38px 1fr 1fr 26px 40px;
+}
+
+#basket-modal.loaf-counted-week .income-form-container {
+    width: 421px;
+}
+
 /* Both inputs are sized by the grid, not by themselves - a time input left to
    its intrinsic width is a different size in every browser.
 
@@ -19472,7 +19500,11 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     color: var(--secondary);
 }
 
-.loaf-schedule-off {
+/* Both boxes in the row, so .loaf-schedule-off keeps meaning the Off box and
+   nothing else - a shared class here would make that selector ambiguous for
+   anything counting the days. */
+.loaf-schedule-off,
+input.loaf-schedule-counted {
     justify-self: center;
     margin: 0;
     cursor: pointer;
@@ -19635,6 +19667,17 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     .loaf-schedule-row {
         grid-template-columns: 34px 1fr 1fr 28px;
         gap: 4px;
+    }
+
+    /* The same fifth track against the narrower template. Note that
+       .income-form-container also carries max-width: calc(100vw - 10px), so
+       on a narrow phone the 421px above is clamped and the time fields really
+       do lose the width this column takes. Accepted rather than solved: this
+       is a console-only column for one person's schedule, and the rule below
+       already hides the picker button to buy back most of it. */
+    #basket-modal.loaf-counted-week .loaf-schedule-head,
+    #basket-modal.loaf-counted-week .loaf-schedule-row {
+        grid-template-columns: 34px 1fr 1fr 28px 32px;
     }
 
     /* The picker button, not the AM/PM. Tapping the field opens the native
