@@ -50,7 +50,15 @@
                     <option value="uto">UTO - unpaid time off</option>
                 </select>
 
-                <div class="loaf-form-divider"><span>What it holds</span></div>
+                <button type="button" class="loaf-section-toggle"
+                        id="basket-section-holds-toggle"
+                        data-section="holds"
+                        aria-expanded="true"
+                        aria-controls="basket-section-holds">
+                    <i class="fa-solid fa-chevron-down"></i>
+                    <span>What it holds</span>
+                </button>
+                <div id="basket-section-holds" class="loaf-section" data-section="holds">
 
                 <label for="basket-starting-hours">Hours you have now
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
@@ -63,23 +71,16 @@
                 <input type="number" id="basket-starting-hours" class="recurring-amount"
                        step="0.01" min="0" value="0.00">
 
-                <label for="basket-low-balance-hours">Warn me when hour balance goes below
-                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                        <span class="info-tip-text">Hours. The month view marks any day the
-                            balance drops under this - so you see it coming rather than
-                            finding out when it has already gone.</span>
-                    </span>
-                </label>
-                <div class="loaf-amount-row">
-                    <input type="number" id="basket-low-balance-hours"
-                           class="recurring-amount" step="0.01" min="0">
-                    <label class="loaf-amount-none" for="basket-warn-negative-only">
-                        <input type="checkbox" id="basket-warn-negative-only">
-                        Only when negative
-                    </label>
                 </div>
-
-                <div class="loaf-form-divider"><span>How it fills</span></div>
+                <button type="button" class="loaf-section-toggle"
+                        id="basket-section-fills-toggle"
+                        data-section="fills"
+                        aria-expanded="false"
+                        aria-controls="basket-section-fills">
+                    <i class="fa-solid fa-chevron-right"></i>
+                    <span>How it fills</span>
+                </button>
+                <div id="basket-section-fills" class="loaf-section" data-section="fills" hidden>
 
                 {# Half a field and a checkbox, rather than an empty box meaning
                    "none". A blank number input is ambiguous - it reads as
@@ -172,7 +173,16 @@
                     </select>
                 </div>
 
-                <div class="loaf-form-divider"><span>Your working week</span></div>
+                </div>
+                <button type="button" class="loaf-section-toggle"
+                        id="basket-section-week-toggle"
+                        data-section="week"
+                        aria-expanded="false"
+                        aria-controls="basket-section-week">
+                    <i class="fa-solid fa-chevron-right"></i>
+                    <span>Your working week</span>
+                </button>
+                <div id="basket-section-week" class="loaf-section" data-section="week" hidden>
 
                 {# Times rather than a total per day, because "off Tuesday from
                    1pm" cannot be costed without them. Off is a checkbox rather
@@ -238,7 +248,94 @@
                     </div>
                 </div>
 
-                <div class="loaf-form-divider"><span>When the year turns</span></div>
+                </div>
+                <button type="button" class="loaf-section-toggle"
+                        id="basket-section-shut-toggle"
+                        data-section="shut"
+                        aria-expanded="false"
+                        aria-controls="basket-section-shut">
+                    <i class="fa-solid fa-chevron-right"></i>
+                    <span>Days the office is shut</span>
+                </button>
+                <div id="basket-section-shut" class="loaf-section" data-section="shut" hidden>
+
+                {# Rules rather than dates, computed per year - see
+                   loaf_holidays.py. A holiday is not leave: it costs nothing
+                   to book because there is nothing to book, and on a basket
+                   that accrues per hour worked it reduces the accrual, since
+                   a paid holiday is not an hour worked. On a flat basket it
+                   changes no arithmetic at all. #}
+                <label>Public holidays you get off
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Loaf works out when each one falls, including
+                            the shift when it lands on a weekend. Booking time off on one costs
+                            nothing, because the office is already shut.</span>
+                    </span>
+                </label>
+                {# A dropdown of checkboxes rather than fifteen of them on the
+                   page. The panel is .category-dropdown, the same one the
+                   category pickers open, so it comes with its own scrolling,
+                   shadow and hover rows. The trigger is NOT .styled-dropdown-
+                   trigger: that one is deliberately transparent and
+                   borderless for the month and year headers, where this has
+                   to look like the selects above and below it. #}
+                <div class="loaf-holiday-picker">
+                    <button type="button" id="basket-holiday-toggle"
+                            class="loaf-holiday-trigger" aria-haspopup="true"
+                            aria-expanded="false" aria-controls="basket-holiday-menu">
+                        <span id="basket-holiday-summary">None</span>
+                        <i class="fa-solid fa-chevron-down"></i>
+                    </button>
+                    <div id="basket-holiday-menu" class="category-dropdown" hidden>
+                        {% for slug, label, _rule in holidays %}
+                        <label class="category-dropdown-item loaf-holiday">
+                            <input type="checkbox" class="basket-holiday" value="{{ slug }}">
+                            {{ label }}
+                        </label>
+                        {% endfor %}
+
+                        {# Whatever this employer gives that Loaf has no rule
+                           for. Drawn by the JS from custom_holidays so the
+                           list survives an edit. #}
+                        <div id="basket-custom-holidays"></div>
+
+                        {# .create-new-category is the row the category
+                           pickers already use to add one from inside the
+                           list - top border, own hover, plus icon. #}
+                        <div id="basket-holiday-add"
+                             class="category-dropdown-item create-new-category">
+                            <i class="fa-solid fa-plus"></i>Add a holiday
+                        </div>
+
+                        <div id="basket-holiday-new" class="loaf-holiday-new" hidden>
+                            <input type="text" id="basket-holiday-name"
+                                   maxlength="60" placeholder="Name">
+                            <input type="text" id="basket-holiday-date"
+                                   maxlength="5" placeholder="MM-DD"
+                                   inputmode="numeric">
+                            <button type="button" id="basket-holiday-save"
+                                    class="loaf-holiday-save"
+                                    title="Add this holiday"
+                                    aria-label="Add this holiday">
+                                <i class="fa-solid fa-check"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                </div>
+
+
+                {# Everything most people never touch. Collapsed, and NOT the
+                   .menu-collapse the side menu uses: that animates a
+                   max-height fixed per list, and this section changes height
+                   when the carry-over cap appears. #}
+                <button type="button" id="basket-advanced-toggle"
+                        class="loaf-advanced-toggle" aria-expanded="false"
+                        aria-controls="basket-advanced">
+                    <i class="fa-solid fa-chevron-right"></i> Advanced options
+                </button>
+
+                <div id="basket-advanced" class="loaf-advanced" hidden>
 
                 <label for="basket-year-start-month">The year starts on
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
@@ -267,6 +364,37 @@
                     <label for="basket-carryover-cap-hours">Carry over at most</label>
                     <input type="number" id="basket-carryover-cap-hours" class="recurring-amount"
                            step="0.01" min="0" placeholder="0.00">
+                </div>
+
+                <label for="basket-accrual-basis">Does time off reduce what you accrue next?
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Most employers hand over the same figure every
+                            pay period whatever you did, which is the first option. The second is
+                            for a rate earned per hour worked, where being away - on leave, or a
+                            public holiday - earns you less. Your payslip tells you which: an
+                            accrual that is the same every time is the first.</span>
+                    </span>
+                </label>
+                <select id="basket-accrual-basis">
+                    <option value="flat">No - the same every pay period</option>
+                    <option value="worked">Yes - it is earned per hour worked</option>
+                </select>
+
+                <label for="basket-low-balance-hours">Warn me when hour balance goes below
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Hours. The month view marks any day the
+                            balance drops under this - so you see it coming rather than
+                            finding out when it has already gone.</span>
+                    </span>
+                </label>
+                <div class="loaf-amount-row">
+                    <input type="number" id="basket-low-balance-hours"
+                           class="recurring-amount" step="0.01" min="0">
+                    <label class="loaf-amount-none" for="basket-warn-negative-only">
+                        <input type="checkbox" id="basket-warn-negative-only">
+                        Only when negative
+                    </label>
+                </div>
                 </div>
 
                 <button type="submit" id="basket-submit">Add Basket</button>

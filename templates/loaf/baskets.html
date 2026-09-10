@@ -85,6 +85,9 @@
                         data-carryover-cap-hours="{{ basket.carryover_cap_hours if basket.carryover_cap_hours is not none else '' }}"
                         data-low-balance-hours="{{ basket.low_balance_hours if basket.low_balance_hours is not none else '' }}"
                         data-accrual-only-weekdays="{{ basket.accrual_only_weekdays or '' }}"
+                        data-accrual-basis="{{ basket.accrual_basis or 'flat' }}"
+                        data-holidays="{{ basket.holidays or '' }}"
+                        data-custom-holidays="{{ basket.custom_holidays or '' }}"
                         {%- for prefix in weekday_prefixes %}
                         data-{{ prefix }}-start="{{ basket[prefix ~ '_start'] or '' }}"
                         data-{{ prefix }}-end="{{ basket[prefix ~ '_end'] or '' }}"

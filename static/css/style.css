@@ -19510,6 +19510,222 @@ input.loaf-schedule-counted {
     cursor: pointer;
 }
 
+/* The holidays, as a dropdown of checkboxes rather than fifteen of them
+   sitting open on the form. The panel is .category-dropdown, borrowed whole
+   from the category pickers - it already scrolls, floats above what follows
+   it, and hovers its rows.
+
+   Only the trigger is new, and it is new because .styled-dropdown-trigger is
+   deliberately transparent and borderless for the month and year headers,
+   where this one has to match the selects above and below it in a form. */
+.loaf-holiday-picker {
+    position: relative;
+    margin: 5px 0 10px;
+}
+
+.loaf-holiday-trigger {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 12px;
+    background-color: var(--white);
+    border: 1px solid var(--secondary-hover);
+    border-radius: 8px;
+    color: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+}
+
+.loaf-holiday-trigger:hover,
+.loaf-holiday-trigger[aria-expanded="true"] {
+    border-color: var(--primary);
+}
+
+.loaf-holiday-trigger i {
+    flex: none;
+    color: var(--secondary);
+    font-size: 11px;
+}
+
+/* Capped, because fifteen rows would run off a short modal and the container
+   they sit in scrolls rather than growing. */
+#basket-holiday-menu {
+    max-height: 240px;
+}
+
+label.loaf-holiday {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 !important;
+    font-size: 13px;
+    font-weight: 400 !important;
+    cursor: pointer;
+}
+
+.loaf-holiday input {
+    flex: none;
+    margin: 0;
+    cursor: pointer;
+}
+
+/* A holiday this employer gives that Loaf has no rule for. No checkbox: it
+   is on the list because you get it, so the way to stop getting it is to
+   take it off. */
+.loaf-holiday-custom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.loaf-holiday-drop {
+    flex: none;
+    padding: 2px 6px;
+    background: none;
+    border: none;
+    color: var(--secondary);
+    cursor: pointer;
+}
+
+.loaf-holiday-drop:hover {
+    color: var(--danger);
+}
+
+/* The little add form, inside the panel rather than beside it - the row that
+   opens it is in there too, and a form that appeared outside would leave the
+   list pointing at nothing.
+
+   The name takes what is left, because it is the part with something to say;
+   the date needs only room for MM-DD. NOT .add-day-btn for the button: that
+   is a full-width block button - width: 100% and 24px of padding - which
+   took the whole row and pushed both fields down to nothing. */
+.loaf-holiday-new {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    background-color: var(--secondary-lighter);
+    border-top: 2px solid var(--secondary-hover);
+}
+
+/* Needed because of the display above it. The hidden attribute works through
+   a UA rule of display: none, and ANY author display beats it - so setting
+   display: flex quietly un-hid the form, and it sat open under the Add row
+   from the moment the panel was drawn. Anything given a display and also
+   toggled with hidden needs this pair. */
+.loaf-holiday-new[hidden] {
+    display: none;
+}
+
+.loaf-holiday-new input {
+    min-width: 0;
+    padding: 7px 8px;
+    background-color: var(--white);
+    border: 1px solid var(--secondary-hover);
+    border-radius: 6px;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+
+.loaf-holiday-new input:focus {
+    border-color: var(--primary);
+    outline: none;
+}
+
+/* Half each. MM-DD needs far less room than a name does, but an even split
+   reads as one control in two parts rather than a field with an
+   afterthought bolted on. */
+#basket-holiday-name,
+#basket-holiday-date {
+    flex: 1 1 0;
+
+    /* The shared form rule gives every text input margin: 5px 0 10px, and
+       align-items centres the MARGIN box - so five above and ten below put
+       the inputs 2.5px higher than the button and left it looking dropped.
+       Addressed by id because that rule is (0,2,1) and would otherwise win.
+       The row's own padding does the spacing here. */
+    margin: 0;
+}
+
+#basket-holiday-date {
+    text-align: center;
+}
+
+/* The 32px circle .remove-day-btn already establishes, in the confirming
+   colour rather than the destructive one. */
+.loaf-holiday-save {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    background-color: var(--primary);
+    border: none;
+    border-radius: 50%;
+    color: var(--white);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.loaf-holiday-save:hover {
+    background-color: var(--primary-hover);
+    transform: scale(1.1);
+}
+
+/* The section headers, and Advanced. One look for both, because they are the
+   same thing: a heading you can shut.
+
+   The panels themselves get NO display of their own, deliberately. They are
+   toggled with the hidden attribute, which works through a UA display: none
+   that any author display would beat - the trap .loaf-holiday-new fell into
+   above. Nothing here needs a display, so nothing here has one. */
+.loaf-section-toggle,
+.loaf-advanced-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin: 6px 0 10px;
+    padding: 10px 0;
+    background: none;
+    border: none;
+    border-top: 1px solid var(--secondary-hover);
+    color: var(--secondary-dark);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.loaf-section-toggle:hover,
+.loaf-advanced-toggle:hover {
+    color: var(--primary);
+}
+
+.loaf-section-toggle i,
+.loaf-advanced-toggle i {
+    width: 10px;
+    font-size: 11px;
+    transition: transform 0.2s ease;
+}
+
+/* The open one is the one you are working in, so it reads as a heading
+   rather than as one more thing that could be clicked. */
+.loaf-section-toggle.is-open {
+    color: var(--primary);
+    font-size: 14px;
+}
+
 /* One break for the week, under the days rather than in them. Its own row
    so it does not read as an eighth day. */
 .loaf-schedule-break-row {
