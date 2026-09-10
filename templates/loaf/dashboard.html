@@ -652,6 +652,23 @@
     var rangeEnd = false;           // is the next click the end of the range?
     var rangeDrag = null;           // 'start' or 'end' while one is dragged
     var rangeDragged = false;       // suppress the click a drag ends with
+    var rangeFrom = null;           // a day pressed on, before it is a drag
+    var rangeOpenedAt = 0;          // when, so the opening click cannot shut it
+
+    // Scrolled into view AFTER the click that opened it, never during.
+    //
+    // Doing it on focus moved the form 104px between mousedown and mouseup,
+    // so the two landed on different elements, the browser fired the click
+    // at their common ancestor instead of the field, and the handler that
+    // closes on an outside click took it for one. The panel opened and shut
+    // again in the same gesture - and only the first time, because by the
+    // second the form was already scrolled and nothing moved.
+    function revealRange() {
+        var panel = el('loaf-range');
+        if (panel && !panel.hidden) {
+            panel.scrollIntoView({block: 'nearest'});
+        }
+    }
 
     function isoOf(when) {
         return when.getFullYear() + '-'
@@ -758,11 +775,7 @@
         panel.hidden = !open;
         if (!open) { return; }
         drawRange();
-        // The form scrolls, and a panel opened near the bottom of it hung
-        // 60px past the edge and was simply cut off. 'nearest' scrolls the
-        // form the least it can to bring the whole thing into view, and
-        // does nothing when it already is.
-        panel.scrollIntoView({block: 'nearest'});
+        rangeOpenedAt = Date.now();
     }
 
     // A click is either the start of a new range or the end of the one being
@@ -1076,6 +1089,8 @@
         rangeEnd = !!el('loaf-entry-start-date').value;
         showRange(true);
     });
+    // Once the click is over and the layout has stopped moving.
+    $('#loaf-entry-start-date, #loaf-entry-end-date').on('click', revealRange);
 
     // Clicking away puts it back. Scoped to the modal, and it must not reach
     // the backdrop handler that closes the whole form.
@@ -1085,6 +1100,9 @@
             || event.target.closest('#loaf-entry-end-date')) {
             return;
         }
+        // Belt as well as braces: the click that opened it can never be the
+        // click that shuts it, whatever the layout did in between.
+        if (Date.now() - rangeOpenedAt < 300) { return; }
         showRange(false);
     }, true);
 
@@ -1100,20 +1118,47 @@
     // browser starting a text selection across the grid, which makes a drag
     // look like a smear of highlighted numbers.
     $('#loaf-range-grid').on('mousedown', '.loaf-range-day', function (event) {
+        rangeDragged = false;
+        rangeFrom = null;
         if (this.classList.contains('is-start')) { rangeDrag = 'start'; }
         else if (this.classList.contains('is-end')) { rangeDrag = 'end'; }
-        else { return; }
-        rangeDragged = false;
+        else {
+            // Not a handle, so it might be a press-and-drag to sweep out a
+            // new range - or it might be an ordinary click. Which it is is
+            // not known until the mouse moves, so nothing is committed here
+            // and the click handler still does its job if it never does.
+            rangeFrom = this.getAttribute('data-date');
+        }
         event.preventDefault();
     });
 
     $(document).on('mouseup', function () {
-        if (rangeDrag) { rangeDrag = null; }
+        rangeDrag = null;
+        rangeFrom = null;
     });
     $('#loaf-range-grid').on('mouseover', '.loaf-range-day', function () {
         // Dragging one end moves that end, and only as far as the other -
         // a start dragged past its end would leave a range running
         // backwards, which is not a range.
+        // The mouse has moved with a day held down, so that press was a
+        // drag after all: it sweeps out a range from where it started to
+        // wherever it is let go. Dragged backwards, the two swap - the day
+        // pressed on is one end of the range either way.
+        if (rangeFrom && this.getAttribute('data-date') !== rangeFrom) {
+            var began = dateFrom(rangeFrom);
+            var now = dateFrom(this.getAttribute('data-date'));
+            rangeFrom = null;
+            if (!began || !now) { return; }
+            el('loaf-entry-start-date').value = isoOf(now < began ? now : began);
+            el('loaf-entry-end-date').value = isoOf(now < began ? began : now);
+            rangeDrag = now < began ? 'start' : 'end';
+            rangeDragged = true;
+            rangeEnd = false;
+            rangeHover = null;
+            paintRange();
+            return;
+        }
+
         if (rangeDrag) {
             var over = dateFrom(this.getAttribute('data-date'));
             var from = dateFrom(el('loaf-entry-start-date').value);
