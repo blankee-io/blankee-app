@@ -550,7 +550,22 @@ def project(basket, usage, absence, through, today=None, credits=None):
                 earned = round(_as_float(accrual_hours), 2)
             else:
                 window_start = period_start.get(when, start)
-                scheduled = _scheduled_hours_between(basket, window_start, when)
+
+                # A flat figure when the basket has one, because that is what
+                # payroll divides by. Walking the week is the honest answer
+                # to "how many hours were in this period" and not the one an
+                # employer uses: a semi-monthly period holds ten, eleven or
+                # twelve weekdays, so the walked figure swings between 80 and
+                # 96 where payroll applies 2080/24 to every period alike.
+                #
+                # Only the divisor. Absence is still counted from the
+                # calendar - real hours away on real days - which is the same
+                # shape payroll uses and is what makes the arithmetic agree
+                # with a payslip rather than merely come close.
+                fixed = _as_float(basket.get('period_hours'), 0.0)
+                scheduled = (fixed if fixed > 0
+                             else _scheduled_hours_between(basket, window_start,
+                                                           when))
                 absent = _hours_between(absence, window_start, when)
                 shut = _holiday_hours_between(basket, window_start, when)
                 worked = max(0.0, scheduled - absent - shut)

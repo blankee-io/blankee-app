@@ -380,6 +380,26 @@
                     <option value="worked">Yes - it is earned per hour worked</option>
                 </select>
 
+                {# Only meaningful for the per-hour basis, so only shown for
+                   it - a flat accrual has no denominator to disagree about. #}
+                <div id="basket-period-hours-row" style="display:none;">
+                    <label for="basket-period-hours">Hours your employer counts
+                        in a pay period
+                        <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                            <span class="info-tip-text">Leave it empty and Loaf counts the
+                                weekdays in each period, which is honest and is not what
+                                payroll does - a semi-monthly period holds ten, eleven or
+                                twelve of them. Most employers divide by one flat figure all
+                                year: 86.67 paid twice a month, 80 paid fortnightly. Setting
+                                it makes the pro-rate match your payslip rather than come
+                                close.</span>
+                        </span>
+                    </label>
+                    <input type="number" id="basket-period-hours"
+                           class="recurring-amount" step="0.01" min="0"
+                           placeholder="Count the weekdays">
+                </div>
+
                 <label for="basket-low-balance-hours">Warn me when hour balance goes below
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
                         <span class="info-tip-text">Hours. The month view marks any day the
