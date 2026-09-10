@@ -19645,6 +19645,13 @@ label.loaf-holiday {
 #basket-holiday-name,
 #basket-holiday-date {
     flex: 1 1 0;
+
+    /* The shared form rule gives every text input margin: 5px 0 10px, and
+       align-items centres the MARGIN box - so five above and ten below put
+       the inputs 2.5px higher than the button and left it looking dropped.
+       Addressed by id because that rule is (0,2,1) and would otherwise win.
+       The row's own padding does the spacing here. */
+    margin: 0;
 }
 
 #basket-holiday-date {
@@ -19675,9 +19682,14 @@ label.loaf-holiday {
     transform: scale(1.1);
 }
 
-/* Advanced. A button rather than a summary/details pair, because the panel
-   changes height when the carry-over cap appears and details has no hook to
-   keep the chevron in step. */
+/* The section headers, and Advanced. One look for both, because they are the
+   same thing: a heading you can shut.
+
+   The panels themselves get NO display of their own, deliberately. They are
+   toggled with the hidden attribute, which works through a UA display: none
+   that any author display would beat - the trap .loaf-holiday-new fell into
+   above. Nothing here needs a display, so nothing here has one. */
+.loaf-section-toggle,
 .loaf-advanced-toggle {
     display: flex;
     align-items: center;
@@ -19695,14 +19707,23 @@ label.loaf-holiday {
     cursor: pointer;
 }
 
+.loaf-section-toggle:hover,
 .loaf-advanced-toggle:hover {
     color: var(--primary);
 }
 
+.loaf-section-toggle i,
 .loaf-advanced-toggle i {
     width: 10px;
     font-size: 11px;
     transition: transform 0.2s ease;
+}
+
+/* The open one is the one you are working in, so it reads as a heading
+   rather than as one more thing that could be clicked. */
+.loaf-section-toggle.is-open {
+    color: var(--primary);
+    font-size: 14px;
 }
 
 /* One break for the week, under the days rather than in them. Its own row

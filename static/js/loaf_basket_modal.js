@@ -109,6 +109,81 @@
         }
     }
 
+    // ---------------------------------------------------------- sections ----
+    //
+    // One open at a time, and the form fills itself in in order: finish a
+    // section and it closes and hands over to the next.
+    //
+    // The rule for "finished" is deliberately not "the last field has a
+    // value". It is: the section has everything it needs, AND focus has left
+    // it. Advancing on a keystroke shuts a section while somebody is still
+    // deciding, which is the difference between a form that helps and one
+    // that feels possessed.
+    //
+    // And only once each. Reopen a section afterwards and it stays open,
+    // however much you edit - being marched forward a second time is worse
+    // than not being marched at all.
+    var SECTIONS = ['holds', 'fills', 'week', 'shut'];
+    var advanced = {};
+
+    function sectionOpen(key) {
+        var panel = el('basket-section-' + key);
+        return panel && !panel.hidden;
+    }
+
+    function showSection(key) {
+        SECTIONS.forEach(function (other) {
+            var panel = el('basket-section-' + other);
+            var button = el('basket-section-' + other + '-toggle');
+            if (!panel || !button) { return; }
+            var open = other === key;
+            panel.hidden = !open;
+            button.setAttribute('aria-expanded', open ? 'true' : 'false');
+            button.classList.toggle('is-open', open);
+            button.querySelector('i').className = open
+                ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-right';
+        });
+    }
+
+    // What each section needs before it will hand over. Kept small on
+    // purpose: a section nobody has to fill in should not trap anybody in it.
+    function sectionDone(key) {
+        if (key === 'holds') {
+            return $.trim(val('basket-starting-hours')) !== '';
+        }
+        if (key === 'fills') {
+            var earns = el('basket-no-accrual').checked
+                || $.trim(val('basket-accrual-hours')) !== '';
+            var granted = el('basket-no-grant').checked
+                || $.trim(val('basket-grant-hours')) !== '';
+            // Nothing arriving at all is a complete answer too - a pot topped
+            // up by hand needs no pay date.
+            if (el('basket-no-accrual').checked && el('basket-no-grant').checked) {
+                return true;
+            }
+            return earns && granted
+                && $.trim(val('basket-accrual-anchor-date')) !== '';
+        }
+        if (key === 'week') {
+            return WEEKDAY_PREFIXES.some(function (prefix) {
+                return el('basket-' + prefix + '-off').checked
+                    || $.trim(val('basket-' + prefix + '-start')) !== '';
+            });
+        }
+        return true;            // the holidays are nobody's obligation
+    }
+
+    function advanceFrom(key) {
+        if (advanced[key] || !sectionOpen(key) || !sectionDone(key)) { return; }
+        var next = SECTIONS[SECTIONS.indexOf(key) + 1];
+        // Nothing after the last one - Advanced is only ever opened by hand -
+        // so it stays where it is rather than collapsing to nothing. A form
+        // that shuts itself completely reads as having gone away.
+        if (!next) { return; }
+        advanced[key] = true;
+        showSection(next);
+    }
+
     // A plain show/hide rather than the side menu's .menu-collapse, which
     // animates a max-height fixed per list - this section changes height when
     // the carry-over cap appears, and a fixed maximum would clip it.
@@ -255,6 +330,8 @@
         el('basket-monthly-container').innerHTML = '';
         $('.basket-weekday').prop('checked', false);
         el('basket-accrual-basis').value = 'flat';
+        advanced = {};
+        showSection('holds');
         $('.basket-holiday').prop('checked', false);
         customHolidays = [];
         drawCustomHolidays();
@@ -357,6 +434,11 @@
         // Stored as MM-DD|Name, separated by semicolons - see
         // loaf_holidays.parse_custom. A name may not contain either
         // delimiter, so splitting is safe in both directions.
+        // Every section counts as already dealt with: this basket is filled
+        // in, and being walked through it a field at a time is a setup flow
+        // wearing out its welcome.
+        SECTIONS.forEach(function (key) { advanced[key] = true; });
+
         customHolidays = (row.attr('data-custom-holidays') || '')
             .split(';').filter(Boolean).map(function (entry) {
                 var parts = entry.split('|');
@@ -527,6 +609,29 @@
         .on('change', syncAmounts);
     $('#basket-advanced-toggle').on('click', function () {
         showAdvanced(el('basket-advanced').hidden);
+    });
+
+    // A header opens its own section and shuts the rest. Clicking the one
+    // already open leaves it open rather than closing to nothing: a form
+    // with every section shut has nowhere obvious to look.
+    $('.loaf-section-toggle').on('click', function () {
+        var key = this.getAttribute('data-section');
+        advanced[key] = true;         // asked for by hand; do not march on
+        showSection(key);
+    });
+
+    // focusout, not change: it fires once focus has actually left, so a
+    // section is never pulled out from under the field being typed in.
+    // relatedTarget is where focus went - still inside means stay put.
+    SECTIONS.forEach(function (key) {
+        var panel = el('basket-section-' + key);
+        if (!panel) { return; }
+        panel.addEventListener('focusout', function (event) {
+            if (panel.contains(event.relatedTarget)) { return; }
+            // A tick later, so a click landing on the next section's header
+            // has run first and this does not fight it.
+            setTimeout(function () { advanceFrom(key); }, 0);
+        });
     });
 
     $('#basket-holiday-toggle').on('click', function () {

@@ -50,7 +50,15 @@
                     <option value="uto">UTO - unpaid time off</option>
                 </select>
 
-                <div class="loaf-form-divider"><span>What it holds</span></div>
+                <button type="button" class="loaf-section-toggle"
+                        id="basket-section-holds-toggle"
+                        data-section="holds"
+                        aria-expanded="true"
+                        aria-controls="basket-section-holds">
+                    <i class="fa-solid fa-chevron-down"></i>
+                    <span>What it holds</span>
+                </button>
+                <div id="basket-section-holds" class="loaf-section" data-section="holds">
 
                 <label for="basket-starting-hours">Hours you have now
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
@@ -63,7 +71,16 @@
                 <input type="number" id="basket-starting-hours" class="recurring-amount"
                        step="0.01" min="0" value="0.00">
 
-                <div class="loaf-form-divider"><span>How it fills</span></div>
+                </div>
+                <button type="button" class="loaf-section-toggle"
+                        id="basket-section-fills-toggle"
+                        data-section="fills"
+                        aria-expanded="false"
+                        aria-controls="basket-section-fills">
+                    <i class="fa-solid fa-chevron-right"></i>
+                    <span>How it fills</span>
+                </button>
+                <div id="basket-section-fills" class="loaf-section" data-section="fills" hidden>
 
                 {# Half a field and a checkbox, rather than an empty box meaning
                    "none". A blank number input is ambiguous - it reads as
@@ -156,7 +173,16 @@
                     </select>
                 </div>
 
-                <div class="loaf-form-divider"><span>Your working week</span></div>
+                </div>
+                <button type="button" class="loaf-section-toggle"
+                        id="basket-section-week-toggle"
+                        data-section="week"
+                        aria-expanded="false"
+                        aria-controls="basket-section-week">
+                    <i class="fa-solid fa-chevron-right"></i>
+                    <span>Your working week</span>
+                </button>
+                <div id="basket-section-week" class="loaf-section" data-section="week" hidden>
 
                 {# Times rather than a total per day, because "off Tuesday from
                    1pm" cannot be costed without them. Off is a checkbox rather
@@ -222,7 +248,16 @@
                     </div>
                 </div>
 
-                <div class="loaf-form-divider"><span>Days the office is shut</span></div>
+                </div>
+                <button type="button" class="loaf-section-toggle"
+                        id="basket-section-shut-toggle"
+                        data-section="shut"
+                        aria-expanded="false"
+                        aria-controls="basket-section-shut">
+                    <i class="fa-solid fa-chevron-right"></i>
+                    <span>Days the office is shut</span>
+                </button>
+                <div id="basket-section-shut" class="loaf-section" data-section="shut" hidden>
 
                 {# Rules rather than dates, computed per year - see
                    loaf_holidays.py. A holiday is not leave: it costs nothing
@@ -287,6 +322,8 @@
                         </div>
                     </div>
                 </div>
+                </div>
+
 
                 {# Everything most people never touch. Collapsed, and NOT the
                    .menu-collapse the side menu uses: that animates a
