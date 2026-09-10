@@ -216,6 +216,85 @@ def baskets():
 
 # --------------------------------------------------------------- the API ----
 
+def _backfill_year(user_id, basket_id, stated_hours, today):
+    """Lay down the accruals a mid-year basket already missed.
+
+    Somebody adopting Loaf in September has been accruing since January and
+    has taken leave Loaf never saw. Left alone, the whole year before today is
+    blank: no accruals on the calendar, and no way to enter last spring's
+    holiday without the balance going wrong.
+
+    So the basket is re-dated to the start of its accrual year, which makes
+    every pay date since then land on its own, and one entry reconciles the
+    total down to the figure the person actually gave. That entry is a 'prior'
+    - it comes off the balance and is invisible to the pro-rate, because it
+    carries a year of leave on a single date and the real dates are precisely
+    what is not known.
+
+    Returns a note for the caller to pass on, or None when nothing was built.
+    Never raises: a basket that cannot be backfilled is still a good basket,
+    and is left exactly as it would have been before any of this existed.
+    """
+    basket = loaf_data.get_basket(user_id, basket_id)
+    if basket is None or basket.get('accrual_hours') is None:
+        return None
+    if not basket.get('accrual_anchor_date'):
+        return None
+
+    year_start, _ = loaf_forecast.accrual_year_bounds(basket, today)
+    if year_start >= today:
+        return None                 # the year began today; nothing to catch up
+
+    # Re-date to the year start and replay from nothing, so the engine - not
+    # arithmetic repeated here - decides what the accruals, the grant, the
+    # carryover and the ceiling come to. Anything computed by hand would be a
+    # second implementation of the walk, drifting the day either changes.
+    loaf_data.update_basket(user_id, basket_id, {
+        'starting_hours': 0, 'starting_date': year_start.isoformat()})
+    replayed = loaf_data.get_basket(user_id, basket_id)
+    result = loaf_forecast.project(replayed, {}, {}, today, today=today)
+    earned = loaf_forecast.balance_on(result, today)
+
+    if not result.get('events'):
+        # No pay date has come round yet inside this year. Put the basket back.
+        loaf_data.update_basket(user_id, basket_id, {
+            'starting_hours': stated_hours,
+            'starting_date': today.isoformat()})
+        return None
+
+    spent = round(earned - float(stated_hours or 0), 2)
+    if spent < -0.005:
+        # More hours than the accruals can account for. Refuse rather than
+        # invent the difference: it means the rate, the pay dates or the year
+        # start is not what the person thinks, and a basket that quietly
+        # conjures hours would hide that for months.
+        loaf_data.update_basket(user_id, basket_id, {
+            'starting_hours': stated_hours,
+            'starting_date': today.isoformat()})
+        return ('Loaf did not fill in this year, because the accruals since %s '
+                'come to %.2f hours and you have more than that. Check the '
+                'accrual figure, the pay dates and when your leave year '
+                'starts.' % (year_start.strftime('%-d %B'), earned))
+
+    if spent < 0.005:
+        return None                 # nothing was spent; the accruals alone fit
+
+    loaf_data.create_entry(user_id, {
+        'basket_id': basket_id,
+        'starts_at': '%s 00:00:00' % today.isoformat(),
+        'ends_at': '%s 23:59:00' % today.isoformat(),
+        'all_day': 1, 'hours': spent, 'computed_hours': None,
+        'hours_overridden': 1, 'status': 'planned', 'direction': 'prior',
+        'note': 'Time off already taken this year'})
+
+    return ('Loaf filled in %.2f hours of accruals since %s and recorded %.2f '
+            'hours as already taken, which leaves the %.2f you entered. Split '
+            'that into your actual days off whenever you like - but delete it '
+            'as you go, or the two will both come off.'
+            % (earned, year_start.strftime('%-d %B'), spent,
+               float(stated_hours or 0)))
+
+
 @loaf.route('/api/baskets', methods=['POST'])
 @login_required
 def api_create_basket():
@@ -242,7 +321,12 @@ def api_create_basket():
     # Only when nothing was given, though. The form sends nothing; a caller
     # that does say when means it, and overwriting that silently would make the
     # endpoint unable to express a basket that started earlier.
-    if not values.get('starting_date'):
+    #
+    # Whether we stamped it also decides whether the year behind it gets
+    # filled in below: a caller that named a date has already said where this
+    # basket begins, and moving it would overrule them.
+    stamped_today = not values.get('starting_date')
+    if stamped_today:
         values['starting_date'] = _today().isoformat()
 
     basket_id = loaf_data.create_basket(current_user.id, values)
@@ -250,7 +334,17 @@ def api_create_basket():
         return jsonify({'status': 'error',
                         'message': 'Could not save that basket.'}), 500
 
-    return jsonify({'status': 'success', 'basket_id': basket_id})
+    # A basket started part-way through its leave year has a year behind it
+    # that Loaf knows nothing about. Fill it in - see _backfill_year. Only on
+    # create: afterwards these are ordinary rows, and rebuilding them would
+    # overwrite whatever the person has since done with them.
+    note = None
+    if stamped_today:
+        note = _backfill_year(current_user.id, basket_id,
+                              values.get('starting_hours'), _today())
+
+    return jsonify({'status': 'success', 'basket_id': basket_id,
+                    'note': note})
 
 
 @loaf.route('/api/baskets/<int:basket_id>', methods=['POST'])
@@ -481,7 +575,7 @@ def _recompute(basket, values):
     already fixed the date and taken the figure from the person, and the
     working week has no opinion about hours it did not produce.
     """
-    if str(values.get('direction') or 'use') == 'accrue':
+    if str(values.get('direction') or 'use') in loaf_data.FLAT_DIRECTIONS:
         values['computed_hours'] = None
         return values
 
@@ -503,8 +597,8 @@ def _unworkable(basket, values):
     Only the range as a whole has to miss - a Monday-to-Friday booking is
     fine, and the days inside it that are not worked simply cost nothing.
     """
-    if str(values.get('direction') or 'use') == 'accrue':
-        return None                 # a credit is not booked against the week
+    if str(values.get('direction') or 'use') in loaf_data.FLAT_DIRECTIONS:
+        return None                 # neither is booked against the week
 
     if loaf_forecast.entry_hours(basket, values) > 0:
         return None

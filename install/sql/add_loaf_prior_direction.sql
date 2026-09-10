@@ -1,0 +1,42 @@
+-- =========================================================================
+-- Migration: time off taken before Loaf was watching
+-- =========================================================================
+-- Purpose: somebody adopting Loaf in September has already taken leave this
+--          year, and Loaf has no record of any of it. Until now the only way
+--          to express that was to state the balance as of today and let the
+--          whole year before it be blank - so the calendar showed nothing,
+--          and none of the accruals that actually happened appeared.
+--
+--          A basket created mid-year now lays down the accruals it missed and
+--          one entry reconciling them to the balance the person gave. That
+--          entry stands for the leave they took and Loaf never saw.
+--
+-- WHY A THIRD DIRECTION AND NOT A 'use'
+--   Because it must NOT reduce the next accrual. It is one date carrying a
+--   year of leave, so counted as absence it would land entirely inside the
+--   current pay period - 106 hours away against 81 scheduled - and drive that
+--   accrual to zero, and possibly the one after it. The hours were really
+--   taken and really should have pro-rated something, but they should have
+--   pro-rated the periods they happened in, and those are exactly what is not
+--   known. Charging them all to this period is not a better guess than
+--   charging them to none.
+--
+-- WHY NOT AN 'accrue' WITH A NEGATIVE FIGURE
+--   Same objection the direction column was created to avoid: a signed figure
+--   makes every reader work out what it means. 'accrue' adds and is not
+--   absence; 'prior' subtracts and is not absence; 'use' subtracts and is.
+--   Three states, each said out loud.
+--
+-- IT IS NOT SCAFFOLDING
+--   A person may itemise their year properly and delete it, and a person may
+--   leave it exactly where it is forever. Both are supported and neither is
+--   the assumed one. What it must not do is quietly shrink as real leave is
+--   added beside it - so it does not, and the two would double count. That is
+--   the one thing about it worth saying on screen.
+--
+-- Run on: each environment in turn, production last
+-- =========================================================================
+
+ALTER TABLE `loaf_entries`
+  MODIFY COLUMN `direction` enum('use','accrue','prior') NOT NULL DEFAULT 'use'
+    COMMENT 'use spends hours and counts as absence; accrue adds them; prior spends them without counting as absence, for leave taken before Loaf was tracking.';
