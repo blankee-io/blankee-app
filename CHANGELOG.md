@@ -8,6 +8,46 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.28.0 — 2026-09-10
+
+### Added
+- **A basket can say whether time off reduces what you accrue next**, and the
+  answer most employers give is now the default. Loaf has only ever accrued
+  one way — a rate pro-rated by the hours you actually worked, so any absence
+  shrank the next accrual. That is a real policy and a common one for hourly
+  staff, but most salaried people accrue the same figure every pay period
+  whatever they did. Loaf was quietly wrong for them, and wrong in the
+  direction that under-credits, so a forecast looked merely pessimistic
+  rather than broken and drifted further the more leave you took.
+
+  **Existing baskets keep the behaviour they have.** The new default applies
+  to baskets made from now on; nothing you are already looking at changes.
+
+- **Public holidays.** Tell a basket which ones the office closes for, from a
+  list of fifteen, and Loaf works out when each falls — including the shift
+  when a fixed one lands on a weekend. Booking time off on a holiday costs
+  nothing, because there is nothing to book, and where a basket accrues per
+  hour worked a holiday reduces the accrual, since a paid holiday is not an
+  hour worked.
+
+- **Holidays Loaf has never heard of.** A company day, a religious observance
+  on a fixed date, anything outside the list — give it a name and a date and
+  it behaves like the rest. Annual, and never moved off a weekend: that rule
+  is real for the federal holidays and applying it to yours would hand you a
+  day your employer never gave.
+
+### Changed
+- **The basket form fills itself in a section at a time.** Finish one and it
+  closes and opens the next, rather than presenting everything at once. A
+  section hands over when it has what it needs and you have moved on from it
+  — never while you are still typing in it, and never twice.
+
+- **Advanced options** hides the four settings most people never touch: when
+  the leave year starts, what happens to unused hours, whether time off
+  reduces your accrual, and the low-balance warning. It opens itself when a
+  basket has something unusual in there, so one never looks ordinary until
+  you go hunting.
+
 ## 1.27.1 — 2026-09-10
 
 ### Fixed
