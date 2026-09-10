@@ -203,6 +203,36 @@
                         <input type="time" id="loaf-entry-end-time" class="loaf-entry-time">
                     </div>
 
+                    {# Both ends of the range from one calendar: click a day
+                       for the start, click another for the end, and the
+                       stretch between fills in.
+
+                       The two date inputs above stay, and stay editable -
+                       they are the source of truth, this writes into them,
+                       and typing into them moves this. A calendar alone
+                       would take away typing a date and tabbing to it, which
+                       is faster than clicking for anybody who knows the
+                       date they want. #}
+                    <div id="loaf-range" class="loaf-range">
+                        <div class="loaf-range-head">
+                            <button type="button" id="loaf-range-prev"
+                                    aria-label="Previous month">
+                                <i class="fa-solid fa-chevron-left"></i>
+                            </button>
+                            <span id="loaf-range-label"></span>
+                            <button type="button" id="loaf-range-next"
+                                    aria-label="Next month">
+                                <i class="fa-solid fa-chevron-right"></i>
+                            </button>
+                        </div>
+                        <div class="loaf-range-days" aria-hidden="true">
+                            <span>Mo</span><span>Tu</span><span>We</span>
+                            <span>Th</span><span>Fr</span><span>Sa</span>
+                            <span>Su</span>
+                        </div>
+                        <div id="loaf-range-grid" class="loaf-range-grid"></div>
+                    </div>
+
                     <div class="date-checkbox-row">
                         <input type="checkbox" id="loaf-entry-override">
                         <label for="loaf-entry-override" class="date-checkbox-label">
@@ -586,6 +616,105 @@
         syncEntryFields();
     }
 
+    // ------------------------------------------------ the range picker ----
+    //
+    // One calendar for both ends of a booking: click a day for the start,
+    // click another for the end, and the stretch between fills in.
+    //
+    // The two date inputs above it are the source of truth, not this. It
+    // writes into them and reads back out of them, so everything that
+    // already collects, validates or reopens a booking is untouched - and
+    // typing a date still works, which is faster than clicking for anybody
+    // who knows the date they want.
+    var rangeMonth = null;          // the month on show, as a Date on the 1st
+    var rangeHover = null;          // the day under the cursor, for a preview
+
+    function isoOf(when) {
+        return when.getFullYear() + '-'
+            + ('0' + (when.getMonth() + 1)).slice(-2) + '-'
+            + ('0' + when.getDate()).slice(-2);
+    }
+
+    function dateFrom(iso) {
+        var bits = String(iso || '').split('-');
+        if (bits.length !== 3) { return null; }
+        var when = new Date(+bits[0], +bits[1] - 1, +bits[2]);
+        return isNaN(when.getTime()) ? null : when;
+    }
+
+    // Monday first, matching the day names above the grid and the rest of
+    // Loaf. getDay() is Sunday-first, hence the shuffle.
+    function mondayIndex(when) {
+        return (when.getDay() + 6) % 7;
+    }
+
+    function drawRange() {
+        var grid = el('loaf-range-grid');
+        if (!grid) { return; }
+
+        var from = dateFrom(el('loaf-entry-start-date').value);
+        var to = dateFrom(el('loaf-entry-end-date').value);
+        if (!rangeMonth) {
+            rangeMonth = new Date((from || new Date()).getFullYear(),
+                                  (from || new Date()).getMonth(), 1);
+        }
+
+        el('loaf-range-label').textContent = rangeMonth.toLocaleDateString(
+            undefined, {month: 'long', year: 'numeric'});
+
+        // Hovering past the start shows what the range would be, which is
+        // the thing that makes a two-click picker feel like one gesture.
+        var end = to || (from && rangeHover && rangeHover > from
+                         ? rangeHover : null);
+
+        var first = new Date(rangeMonth.getFullYear(), rangeMonth.getMonth(), 1);
+        var day = new Date(first);
+        day.setDate(1 - mondayIndex(first));
+
+        var today = isoOf(new Date());
+        grid.innerHTML = '';
+        for (var i = 0; i < 42; i += 1) {
+            var iso = isoOf(day);
+            var cell = document.createElement('button');
+            cell.type = 'button';
+            cell.className = 'loaf-range-day';
+            cell.textContent = day.getDate();
+            cell.setAttribute('data-date', iso);
+
+            if (day.getMonth() !== rangeMonth.getMonth()) {
+                cell.classList.add('is-other');
+            }
+            if (iso === today) { cell.classList.add('is-today'); }
+            if (from && iso === isoOf(from)) { cell.classList.add('is-start'); }
+            if (end && iso === isoOf(end)) { cell.classList.add('is-end'); }
+            if (from && end && day > from && day < end) {
+                cell.classList.add('is-between');
+            }
+            grid.appendChild(cell);
+            day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+        }
+    }
+
+    // A click is either the start of a new range or the end of the one being
+    // built. Picking a day before the start makes it the new start rather
+    // than refusing - it is what somebody who clicked the wrong one first
+    // means, and refusing would leave them to work out why nothing happened.
+    function pickRangeDay(iso) {
+        var picked = dateFrom(iso);
+        var from = dateFrom(el('loaf-entry-start-date').value);
+        var to = dateFrom(el('loaf-entry-end-date').value);
+        if (!picked) { return; }
+
+        if (!from || to || picked < from) {
+            el('loaf-entry-start-date').value = iso;
+            el('loaf-entry-end-date').value = '';
+        } else {
+            el('loaf-entry-end-date').value = iso;
+        }
+        rangeHover = null;
+        drawRange();
+    }
+
     function setEntrySpan(span) {
         entrySpan = span === 'multi' ? 'multi' : 'single';
         var multi = entrySpan === 'multi';
@@ -693,8 +822,16 @@
             hoursTouched = !!entry.hours_overridden;
         }
 
+        // Opened on the month of the day that was clicked, not on today -
+        // booking next March from a March cell should not start in
+        // September.
+        var opening = dateFrom(el('loaf-entry-start-date').value) || new Date();
+        rangeMonth = new Date(opening.getFullYear(), opening.getMonth(), 1);
+        rangeHover = null;
+
         setEntrySpan(span);
         syncEntryDirection();
+        drawRange();
         el('loaf-entry-modal').style.display = 'flex';
     }
 
@@ -831,6 +968,40 @@
     });
     $('#loaf-entry-all-day, #loaf-entry-override').on('change', syncEntryFields);
     $('#loaf-entry-direction').on('change', syncEntryDirection);
+
+    $('#loaf-range-prev').on('click', function () {
+        rangeMonth = new Date(rangeMonth.getFullYear(),
+                              rangeMonth.getMonth() - 1, 1);
+        drawRange();
+    });
+    $('#loaf-range-next').on('click', function () {
+        rangeMonth = new Date(rangeMonth.getFullYear(),
+                              rangeMonth.getMonth() + 1, 1);
+        drawRange();
+    });
+
+    // Delegated, because the grid is rebuilt on every draw.
+    $('#loaf-range-grid').on('click', '.loaf-range-day', function () {
+        pickRangeDay(this.getAttribute('data-date'));
+    });
+    $('#loaf-range-grid').on('mouseover', '.loaf-range-day', function () {
+        if (!el('loaf-entry-start-date').value || el('loaf-entry-end-date').value) {
+            return;
+        }
+        rangeHover = dateFrom(this.getAttribute('data-date'));
+        drawRange();
+    });
+    $('#loaf-range').on('mouseleave', function () {
+        if (rangeHover) { rangeHover = null; drawRange(); }
+    });
+
+    // Typing a date has to move the calendar, or the two disagree about
+    // what is selected and only one of them is right.
+    $('#loaf-entry-start-date, #loaf-entry-end-date').on('change', function () {
+        var when = dateFrom(this.value);
+        if (when) { rangeMonth = new Date(when.getFullYear(), when.getMonth(), 1); }
+        drawRange();
+    });
     $('.loaf-span-toggle .graph-toggle-btn').on('click', function () {
         setEntrySpan(this.getAttribute('data-span'));
     });

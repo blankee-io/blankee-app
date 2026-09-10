@@ -20047,6 +20047,111 @@ label.loaf-holiday {
     text-align: center;
 }
 
+/* The range picker: one calendar, both ends of a booking. Its own small
+   styles rather than dashboard_m's - that grid is a table sized to a page,
+   where this is 42 buttons inside a 375px modal. What it does borrow is the
+   colours, so a selected day here is the same orange as a booked day there.
+
+   No display on .loaf-range: the multi-day block it sits in is toggled with
+   the hidden attribute, and a display here would beat the UA rule that
+   works through. Same trap .loaf-holiday-new fell into. */
+.loaf-range {
+    margin: 5px 0 10px;
+    padding: 8px;
+    background-color: var(--white);
+    border: 1px solid var(--secondary-hover);
+    border-radius: 8px;
+    box-sizing: border-box;
+    user-select: none;
+}
+
+.loaf-range-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.loaf-range-head button {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 50%;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.loaf-range-head button:hover {
+    background-color: var(--secondary-lighter);
+    color: var(--primary);
+}
+
+.loaf-range-days,
+.loaf-range-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+}
+
+.loaf-range-days {
+    margin-bottom: 2px;
+    color: var(--secondary);
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+.loaf-range-day {
+    padding: 6px 0;
+    background: none;
+    border: none;
+    /* Square-ish cells that still add up to the width, whatever it is. */
+    aspect-ratio: 1 / 1;
+    color: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.loaf-range-day:hover {
+    background-color: var(--secondary-lighter);
+}
+
+.loaf-range-day.is-other {
+    color: var(--secondary);
+}
+
+.loaf-range-day.is-today {
+    font-weight: 700;
+    text-decoration: underline;
+}
+
+/* The stretch between the two ends. Square, so the run reads as one bar
+   rather than a row of separate days. */
+.loaf-range-day.is-between {
+    background-color: var(--accent-lighter);
+}
+
+.loaf-range-day.is-start,
+.loaf-range-day.is-end {
+    background-color: var(--accent);
+    color: var(--white);
+    font-weight: 600;
+}
+
+/* Rounded on the outside of the run only, which is what makes a range look
+   like one selection with two ends rather than two selections. */
+.loaf-range-day.is-start { border-radius: 6px 0 0 6px; }
+.loaf-range-day.is-end { border-radius: 0 6px 6px 0; }
+.loaf-range-day.is-start.is-end { border-radius: 6px; }
+
 /* The booking form. Times sit beside their date in a .cadence-row, so they are
    sized by it; disabling rather than hiding them when whole days are ticked
    keeps the form from jumping height as the box is toggled.
