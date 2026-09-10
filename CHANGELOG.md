@@ -8,6 +8,33 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.30.0 — 2026-09-10
+
+### Added
+- **Book several days off from one calendar.** Choosing Multiple days used to
+  mean typing two dates into two boxes and holding the shape of the week in
+  your head. Clicking either date field now drops a calendar under it: click
+  the first day, click the last, and the run between them fills in.
+
+  **Two months are on show, side by side.** A week off that runs over the turn
+  of a month was the case a single month made worst — you picked the start,
+  stepped forward, and picked the end with nothing left to compare it to. The
+  arrows move both months together.
+
+  **Either end can be dragged** once a range is picked, and a press-and-drag
+  across empty days sweeps a new one out from scratch, backwards or forwards.
+  A tick in the corner puts the calendar away; the two date fields stay, so
+  typing a date and tabbing past it still works exactly as before.
+
+### Fixed
+- **The calendar no longer blinks shut the first time you open it.** Opening it
+  scrolled the form to bring the whole panel into view, and that happened
+  between pressing the mouse down and letting it up — so the two landed on
+  different elements, the browser reported the click against their common
+  parent, and the handler that closes on a click outside took it for one. It
+  only ever happened once, because by the second attempt the form had already
+  scrolled and nothing moved.
+
 ## 1.29.0 — 2026-09-10
 
 ### Added
