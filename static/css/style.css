@@ -20055,6 +20055,14 @@ label.loaf-holiday {
    No display on .loaf-range: the multi-day block it sits in is toggled with
    the hidden attribute, and a display here would beat the UA rule that
    works through. Same trap .loaf-holiday-new fell into. */
+/* The browser's own picker would open on top of this one and set the same
+   field, so its icon goes. The segmented editor still takes a typed date,
+   which is the half worth keeping. */
+#loaf-entry-start-date::-webkit-calendar-picker-indicator,
+#loaf-entry-end-date::-webkit-calendar-picker-indicator {
+    display: none;
+}
+
 .loaf-range {
     margin: 5px 0 10px;
     padding: 8px;
