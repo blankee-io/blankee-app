@@ -30,6 +30,7 @@ from flask_login import login_required, current_user
 
 import apps_registry
 import loaf_data
+import loaf_holidays
 import loaf_forecast
 from db_connections import get_db_pool
 from log_config import get_logger, log_exception
@@ -188,6 +189,7 @@ def dashboard():
         # read, so any page including that form has to pass them.
         weekday_prefixes=loaf_data.WEEKDAY_PREFIXES,
         weekday_names=loaf_data.WEEKDAY_NAMES,
+        holidays=loaf_holidays.HOLIDAYS,
         **_shell())
 
 
@@ -206,6 +208,7 @@ def baskets():
         today=_today(),
         weekday_prefixes=loaf_data.WEEKDAY_PREFIXES,
         weekday_names=loaf_data.WEEKDAY_NAMES,
+        holidays=loaf_holidays.HOLIDAYS,
         # Passed in rather than registered as template filters: they are only
         # wanted on Loaf's pages, and app_template_filter would put them in
         # every Blankee template's namespace too.

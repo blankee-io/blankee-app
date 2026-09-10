@@ -44,6 +44,7 @@ import calendar
 from datetime import date, datetime, timedelta
 
 from bucket_utils import recurring_occurrence_dates
+import loaf_holidays
 from loaf_data import attends, schedule_for, scheduled_minutes
 
 
@@ -125,8 +126,12 @@ def hours_by_date(basket, entry):
     day = starts.date()
     last = ends.date()
 
+    shut = loaf_holidays.dates_between(basket.get('holidays'), starts.date(),
+                                       ends.date(),
+                                       basket.get('custom_holidays'))
+
     while day <= last:
-        shift = schedule_for(basket, day.weekday())
+        shift = None if day in shut else schedule_for(basket, day.weekday())
 
         # attends() as well as schedule_for(), and the two are not the same
         # test. schedule_for says the employer counts this day; attends says
@@ -399,6 +404,29 @@ def _scheduled_hours_between(basket, after, through):
     return round(minutes / 60.0, 2)
 
 
+def _holiday_hours_between(basket, after, through):
+    """Hours lost to the office being shut in (after, through].
+
+    Absence, not a shorter period - which is the whole point and easy to get
+    backwards. Taking the holiday out of the DENOMINATOR too would cancel it
+    out and change nothing; payroll does not do that. A paid holiday is not
+    an hour worked, so on a basket that accrues per hour worked it costs an
+    accrual exactly as leave does.
+
+    Read per basket rather than folded into absence_by_date, because that dict
+    is shared by every basket and two baskets naming Christmas would subtract
+    it twice.
+    """
+    if not basket.get('holidays') and not basket.get('custom_holidays'):
+        return 0.0
+    minutes = 0
+    for when in loaf_holidays.dates_between(basket.get('holidays'),
+                                            after + timedelta(days=1), through,
+                                            basket.get('custom_holidays')):
+        minutes += scheduled_minutes(basket, when.weekday())
+    return round(minutes / 60.0, 2)
+
+
 def _hours_between(by_date, after, through):
     """Hours from a {date: hours} dict falling in (after, through]."""
     return round(sum(hours for day, hours in by_date.items()
@@ -424,6 +452,7 @@ def project(basket, usage, absence, through, today=None, credits=None):
     today = _as_date(today) or date.today()
 
     accrual_hours = basket.get('accrual_hours')
+    basis = str(basket.get('accrual_basis') or 'flat')
     grant_hours = basket.get('grant_hours')
     ceiling = basket.get('max_balance_hours')
     anchor = _as_date(basket.get('accrual_anchor_date'))
@@ -514,18 +543,26 @@ def project(basket, usage, absence, through, today=None, credits=None):
         # 2. Then accrual, pro-rated by hours actually worked in the period
         #    that just ended, and clamped by the ceiling.
         if when in accrual_dates:
-            window_start = period_start.get(when, start)
-            scheduled = _scheduled_hours_between(basket, window_start, when)
-            absent = _hours_between(absence, window_start, when)
-            worked = max(0.0, scheduled - absent)
-
-            if scheduled > 0:
-                earned = round(_as_float(accrual_hours) * (worked / scheduled), 2)
+            if basis == 'flat':
+                # The same figure every period, whatever happened in it. Most
+                # employers do this, and it is the default: there is no
+                # denominator, so there is nothing to disagree about.
+                earned = round(_as_float(accrual_hours), 2)
             else:
-                # A period with nothing scheduled earns nothing. Guards the
-                # division, and is also the right answer for a basket whose
-                # week is entirely blank.
-                earned = 0.0
+                window_start = period_start.get(when, start)
+                scheduled = _scheduled_hours_between(basket, window_start, when)
+                absent = _hours_between(absence, window_start, when)
+                shut = _holiday_hours_between(basket, window_start, when)
+                worked = max(0.0, scheduled - absent - shut)
+
+                if scheduled > 0:
+                    earned = round(_as_float(accrual_hours)
+                                   * (worked / scheduled), 2)
+                else:
+                    # A period with nothing scheduled earns nothing. Guards the
+                    # division, and is also the right answer for a basket whose
+                    # week is entirely blank.
+                    earned = 0.0
 
             before = balance
             balance += earned
@@ -723,6 +760,9 @@ def month_rows(basket, result, absence, first, last):
     first, last = _as_date(first), _as_date(last)
     by_date = {e['date']: e for e in result['events']}
 
+    shut = loaf_holidays.dates_between(basket.get('holidays'), first, last,
+                                       basket.get('custom_holidays'))
+
     rows = []
     day = first
     while day <= last:
@@ -732,8 +772,8 @@ def month_rows(basket, result, absence, first, last):
         # non_working below turns true and worked falls to zero. The accrual
         # is unaffected - project() reads the unmasked week through
         # _scheduled_hours_between and never comes through here.
-        scheduled = 0.0 if not attends(basket, day.weekday()) else round(
-            scheduled_minutes(basket, day.weekday()) / 60.0, 2)
+        scheduled = 0.0 if (day in shut or not attends(basket, day.weekday())) \
+            else round(scheduled_minutes(basket, day.weekday()) / 60.0, 2)
         away = absence.get(day, 0.0)
         rows.append({
             'date': day,

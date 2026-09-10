@@ -109,6 +109,176 @@
         }
     }
 
+    // ---------------------------------------------------------- sections ----
+    //
+    // One open at a time, and the form fills itself in in order: finish a
+    // section and it closes and hands over to the next.
+    //
+    // The rule for "finished" is deliberately not "the last field has a
+    // value". It is: the section has everything it needs, AND focus has left
+    // it. Advancing on a keystroke shuts a section while somebody is still
+    // deciding, which is the difference between a form that helps and one
+    // that feels possessed.
+    //
+    // And only once each. Reopen a section afterwards and it stays open,
+    // however much you edit - being marched forward a second time is worse
+    // than not being marched at all.
+    var SECTIONS = ['holds', 'fills', 'week', 'shut'];
+    var advanced = {};
+
+    function sectionOpen(key) {
+        var panel = el('basket-section-' + key);
+        return panel && !panel.hidden;
+    }
+
+    function showSection(key) {
+        SECTIONS.forEach(function (other) {
+            var panel = el('basket-section-' + other);
+            var button = el('basket-section-' + other + '-toggle');
+            if (!panel || !button) { return; }
+            var open = other === key;
+            panel.hidden = !open;
+            button.setAttribute('aria-expanded', open ? 'true' : 'false');
+            button.classList.toggle('is-open', open);
+            button.querySelector('i').className = open
+                ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-right';
+        });
+    }
+
+    // What each section needs before it will hand over. Kept small on
+    // purpose: a section nobody has to fill in should not trap anybody in it.
+    function sectionDone(key) {
+        if (key === 'holds') {
+            return $.trim(val('basket-starting-hours')) !== '';
+        }
+        if (key === 'fills') {
+            var earns = el('basket-no-accrual').checked
+                || $.trim(val('basket-accrual-hours')) !== '';
+            var granted = el('basket-no-grant').checked
+                || $.trim(val('basket-grant-hours')) !== '';
+            // Nothing arriving at all is a complete answer too - a pot topped
+            // up by hand needs no pay date.
+            if (el('basket-no-accrual').checked && el('basket-no-grant').checked) {
+                return true;
+            }
+            return earns && granted
+                && $.trim(val('basket-accrual-anchor-date')) !== '';
+        }
+        if (key === 'week') {
+            return WEEKDAY_PREFIXES.some(function (prefix) {
+                return el('basket-' + prefix + '-off').checked
+                    || $.trim(val('basket-' + prefix + '-start')) !== '';
+            });
+        }
+        return true;            // the holidays are nobody's obligation
+    }
+
+    function advanceFrom(key) {
+        if (advanced[key] || !sectionOpen(key) || !sectionDone(key)) { return; }
+        var next = SECTIONS[SECTIONS.indexOf(key) + 1];
+        // Nothing after the last one - Advanced is only ever opened by hand -
+        // so it stays where it is rather than collapsing to nothing. A form
+        // that shuts itself completely reads as having gone away.
+        if (!next) { return; }
+        advanced[key] = true;
+        showSection(next);
+    }
+
+    // A plain show/hide rather than the side menu's .menu-collapse, which
+    // animates a max-height fixed per list - this section changes height when
+    // the carry-over cap appears, and a fixed maximum would clip it.
+    // "None", the one name, or a count - never a list long enough to
+    // outgrow the button and wrap it onto three lines.
+    // Holidays this employer gives that Loaf has no rule for, as
+    // [{date: 'MM-DD', name: '...'}]. Held here rather than read back out of
+    // the DOM, so the order and the stored form have exactly one owner.
+    var customHolidays = [];
+
+    function drawCustomHolidays() {
+        var host = el('basket-custom-holidays');
+        host.innerHTML = '';
+        customHolidays.forEach(function (entry) {
+            var row = document.createElement('div');
+            row.className = 'category-dropdown-item loaf-holiday-custom';
+
+            var text = document.createElement('span');
+            text.textContent = entry.name + ' \u00b7 ' + entry.date;
+            row.appendChild(text);
+
+            // No checkbox: it is on the list because you get it, so the way
+            // to stop getting it is to take it off.
+            var drop = document.createElement('button');
+            drop.type = 'button';
+            drop.className = 'loaf-holiday-drop';
+            drop.title = 'Remove ' + entry.name;
+            drop.setAttribute('aria-label', 'Remove ' + entry.name);
+            drop.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+            drop.addEventListener('click', function () {
+                var at = customHolidays.indexOf(entry);
+                if (at >= 0) { customHolidays.splice(at, 1); }
+                drawCustomHolidays();
+                syncHolidays();
+            });
+            row.appendChild(drop);
+            host.appendChild(row);
+        });
+    }
+
+    function showNewHoliday(open) {
+        el('basket-holiday-new').hidden = !open;
+        el('basket-holiday-add').hidden = open;
+        if (open) { el('basket-holiday-name').focus(); }
+    }
+
+    // MM-DD, and a real day of a real month. February is checked against a
+    // leap year so the 29th is allowed - loaf_holidays does the same.
+    function readNewHoliday() {
+        var name = $.trim(el('basket-holiday-name').value);
+        var bits = $.trim(el('basket-holiday-date').value).split('-');
+        if (bits.length !== 2) { return null; }
+        var month = parseInt(bits[0], 10);
+        var day = parseInt(bits[1], 10);
+        if (!(month >= 1 && month <= 12) || !(day >= 1)) { return null; }
+        var probe = new Date(2024, month - 1, day);
+        if (probe.getMonth() !== month - 1 || probe.getDate() !== day) {
+            return null;
+        }
+        return {name: name || 'Holiday',
+                date: ('0' + month).slice(-2) + '-' + ('0' + day).slice(-2)};
+    }
+
+    // "None", the one name, or a count - never a list long enough to outgrow
+    // the button and wrap it onto three lines. Counts both kinds: to somebody
+    // reading it there is only one list.
+    function syncHolidays() {
+        var picked = $('.basket-holiday:checked');
+        var total = picked.length + customHolidays.length;
+        var text = 'None';
+        if (total === 1) {
+            text = picked.length
+                ? $.trim(picked.first().closest('label').text())
+                : customHolidays[0].name;
+        } else if (total) {
+            text = total + ' selected';
+        }
+        el('basket-holiday-summary').textContent = text;
+    }
+
+    function showHolidays(open) {
+        el('basket-holiday-menu').hidden = !open;
+        el('basket-holiday-toggle').setAttribute(
+            'aria-expanded', open ? 'true' : 'false');
+    }
+
+    function showAdvanced(open) {
+        var panel = el('basket-advanced');
+        var button = el('basket-advanced-toggle');
+        panel.hidden = !open;
+        button.setAttribute('aria-expanded', open ? 'true' : 'false');
+        button.querySelector('i').className = open
+            ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-right';
+    }
+
     function syncCarryover() {
         el('basket-carryover-cap-row').style.display =
             val('basket-carryover-mode') === 'capped' ? 'block' : 'none';
@@ -159,6 +329,16 @@
         el('basket-id').value = '';
         el('basket-monthly-container').innerHTML = '';
         $('.basket-weekday').prop('checked', false);
+        el('basket-accrual-basis').value = 'flat';
+        advanced = {};
+        showSection('holds');
+        $('.basket-holiday').prop('checked', false);
+        customHolidays = [];
+        drawCustomHolidays();
+        showNewHoliday(false);
+        syncHolidays();
+        showHolidays(false);
+        showAdvanced(false);
         el('basket-no-accrual').checked = false;
         el('basket-no-grant').checked = false;
         el('basket-warn-negative-only').checked = false;
@@ -243,6 +423,38 @@
         el('basket-year-start-month').value = row.attr('data-year-start-month') || '1';
         el('basket-year-start-day').value = row.attr('data-year-start-day') || '1';
         el('basket-carryover-mode').value = row.attr('data-carryover-mode') || 'reset';
+        el('basket-accrual-basis').value =
+            row.attr('data-accrual-basis') || 'flat';
+
+        var shut = (row.attr('data-holidays') || '').split(',');
+        $('.basket-holiday').each(function () {
+            this.checked = shut.indexOf(this.value) >= 0;
+        });
+
+        // Stored as MM-DD|Name, separated by semicolons - see
+        // loaf_holidays.parse_custom. A name may not contain either
+        // delimiter, so splitting is safe in both directions.
+        // Every section counts as already dealt with: this basket is filled
+        // in, and being walked through it a field at a time is a setup flow
+        // wearing out its welcome.
+        SECTIONS.forEach(function (key) { advanced[key] = true; });
+
+        customHolidays = (row.attr('data-custom-holidays') || '')
+            .split(';').filter(Boolean).map(function (entry) {
+                var parts = entry.split('|');
+                return {date: parts[0],
+                        name: parts.slice(1).join('|') || 'Holiday'};
+            });
+        drawCustomHolidays();
+        syncHolidays();
+
+        // Opened for anybody who has something in there worth seeing, so an
+        // unusual basket does not look like an ordinary one until you go
+        // hunting. A default basket stays shut.
+        showAdvanced(shut.length > 0 && shut[0] !== ''
+            || el('basket-accrual-basis').value !== 'flat'
+            || (row.attr('data-carryover-mode') || 'reset') !== 'reset'
+            || !!row.attr('data-low-balance-hours'));
         el('basket-carryover-cap-hours').value = row.attr('data-carryover-cap-hours') || '';
 
         var days = (row.attr('data-weekdays') || '').split(',');
@@ -332,6 +544,13 @@
         // schema and the projection still reads them per day; this form simply
         // does not offer that.
         var brk = val('basket-break') || '0';
+        payload.accrual_basis = val('basket-accrual-basis');
+        payload.holidays = $('.basket-holiday:checked')
+            .map(function () { return this.value; }).get();
+        payload.custom_holidays = customHolidays.map(function (h) {
+            return h.date + '|' + h.name;
+        }).join(';');
+
         var accrualOnly = [];
         WEEKDAY_PREFIXES.forEach(function (prefix, index) {
             var off = el('basket-' + prefix + '-off').checked;
@@ -388,6 +607,69 @@
 
     $('#basket-no-accrual, #basket-no-grant, #basket-warn-negative-only')
         .on('change', syncAmounts);
+    $('#basket-advanced-toggle').on('click', function () {
+        showAdvanced(el('basket-advanced').hidden);
+    });
+
+    // A header opens its own section and shuts the rest. Clicking the one
+    // already open leaves it open rather than closing to nothing: a form
+    // with every section shut has nowhere obvious to look.
+    $('.loaf-section-toggle').on('click', function () {
+        var key = this.getAttribute('data-section');
+        advanced[key] = true;         // asked for by hand; do not march on
+        showSection(key);
+    });
+
+    // focusout, not change: it fires once focus has actually left, so a
+    // section is never pulled out from under the field being typed in.
+    // relatedTarget is where focus went - still inside means stay put.
+    SECTIONS.forEach(function (key) {
+        var panel = el('basket-section-' + key);
+        if (!panel) { return; }
+        panel.addEventListener('focusout', function (event) {
+            if (panel.contains(event.relatedTarget)) { return; }
+            // A tick later, so a click landing on the next section's header
+            // has run first and this does not fight it.
+            setTimeout(function () { advanceFrom(key); }, 0);
+        });
+    });
+
+    $('#basket-holiday-toggle').on('click', function () {
+        showHolidays(el('basket-holiday-menu').hidden);
+    });
+    $('.basket-holiday').on('change', syncHolidays);
+
+    $('#basket-holiday-add').on('click', function () { showNewHoliday(true); });
+    $('#basket-holiday-save').on('click', function () {
+        var entry = readNewHoliday();
+        if (!entry) {
+            showToast('Give the holiday a date as MM-DD, like 03-17.', 'error');
+            return;
+        }
+        customHolidays.push(entry);
+        el('basket-holiday-name').value = '';
+        el('basket-holiday-date').value = '';
+        showNewHoliday(false);
+        drawCustomHolidays();
+        syncHolidays();
+    });
+    // Enter adds the holiday rather than submitting the whole basket, which
+    // is what a text input inside a form does otherwise.
+    $('#basket-holiday-name, #basket-holiday-date').on('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            $('#basket-holiday-save').trigger('click');
+        }
+    });
+
+    // Clicking away closes the panel and nothing else. Scoped to the modal so
+    // it cannot interfere with the page behind it, and it must not reach the
+    // modal's own backdrop handler - that closes the whole form.
+    modal.addEventListener('click', function (event) {
+        if (!event.target.closest('.loaf-holiday-picker')) {
+            showHolidays(false);
+        }
+    }, true);
     $('.loaf-schedule-off').on('change', function () {
         syncDay(this.id.replace('basket-', '').replace('-off', ''));
     });
