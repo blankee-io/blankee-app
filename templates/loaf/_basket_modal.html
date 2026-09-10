@@ -258,6 +258,29 @@
                             {{ label }}
                         </label>
                         {% endfor %}
+
+                        {# Whatever this employer gives that Loaf has no rule
+                           for. Drawn by the JS from custom_holidays so the
+                           list survives an edit. #}
+                        <div id="basket-custom-holidays"></div>
+
+                        {# .create-new-category is the row the category
+                           pickers already use to add one from inside the
+                           list - top border, own hover, plus icon. #}
+                        <div id="basket-holiday-add"
+                             class="category-dropdown-item create-new-category">
+                            <i class="fa-solid fa-plus"></i>Add a holiday
+                        </div>
+
+                        <div id="basket-holiday-new" class="loaf-holiday-new" hidden>
+                            <input type="text" id="basket-holiday-name"
+                                   maxlength="60" placeholder="Name">
+                            <input type="text" id="basket-holiday-date"
+                                   maxlength="5" placeholder="MM-DD"
+                                   inputmode="numeric">
+                            <button type="button" id="basket-holiday-save"
+                                    class="add-day-btn">Add</button>
+                        </div>
                     </div>
                 </div>
 

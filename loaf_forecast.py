@@ -127,7 +127,8 @@ def hours_by_date(basket, entry):
     last = ends.date()
 
     shut = loaf_holidays.dates_between(basket.get('holidays'), starts.date(),
-                                       ends.date())
+                                       ends.date(),
+                                       basket.get('custom_holidays'))
 
     while day <= last:
         shift = None if day in shut else schedule_for(basket, day.weekday())
@@ -416,11 +417,12 @@ def _holiday_hours_between(basket, after, through):
     is shared by every basket and two baskets naming Christmas would subtract
     it twice.
     """
-    if not basket.get('holidays'):
+    if not basket.get('holidays') and not basket.get('custom_holidays'):
         return 0.0
     minutes = 0
     for when in loaf_holidays.dates_between(basket.get('holidays'),
-                                            after + timedelta(days=1), through):
+                                            after + timedelta(days=1), through,
+                                            basket.get('custom_holidays')):
         minutes += scheduled_minutes(basket, when.weekday())
     return round(minutes / 60.0, 2)
 
@@ -758,7 +760,8 @@ def month_rows(basket, result, absence, first, last):
     first, last = _as_date(first), _as_date(last)
     by_date = {e['date']: e for e in result['events']}
 
-    shut = loaf_holidays.dates_between(basket.get('holidays'), first, last)
+    shut = loaf_holidays.dates_between(basket.get('holidays'), first, last,
+                                       basket.get('custom_holidays'))
 
     rows = []
     day = first

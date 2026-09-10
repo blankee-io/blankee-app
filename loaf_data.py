@@ -79,7 +79,7 @@ BASKET_COLUMNS = (
     'year_start_month', 'year_start_day',
     'carryover_mode', 'carryover_cap_hours', 'low_balance_hours',
     'starting_hours', 'starting_date', 'accrual_only_weekdays',
-    'accrual_basis', 'holidays',
+    'accrual_basis', 'holidays', 'custom_holidays',
 ) + tuple(
     '%s_%s' % (day, part)
     for day in WEEKDAY_PREFIXES
@@ -699,6 +699,8 @@ def clean_basket(payload):
 
     values['holidays'] = ','.join(
         loaf_holidays.as_list(payload.get('holidays'))) or None
+    values['custom_holidays'] = loaf_holidays.format_custom(
+        payload.get('custom_holidays'))
     values['monthly_days'] = _monthly_day_list(payload.get('monthly_days'))
     values['hidden'] = 1 if str(payload.get('hidden') or '') in ('1', 'true', 'on') else 0
 

@@ -19574,6 +19574,59 @@ label.loaf-holiday {
     cursor: pointer;
 }
 
+/* A holiday this employer gives that Loaf has no rule for. No checkbox: it
+   is on the list because you get it, so the way to stop getting it is to
+   take it off. */
+.loaf-holiday-custom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.loaf-holiday-drop {
+    flex: none;
+    padding: 2px 6px;
+    background: none;
+    border: none;
+    color: var(--secondary);
+    cursor: pointer;
+}
+
+.loaf-holiday-drop:hover {
+    color: var(--danger);
+}
+
+/* The little add form, inside the panel rather than beside it - the row that
+   opens it is in there too, and a form that appeared outside would leave the
+   list pointing at nothing. */
+.loaf-holiday-new {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+    background-color: var(--secondary-lighter);
+    border-top: 2px solid var(--secondary-hover);
+}
+
+.loaf-holiday-new input {
+    min-width: 0;
+    padding: 6px 8px;
+    background-color: var(--white);
+    border: 1px solid var(--secondary-hover);
+    border-radius: 6px;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+
+#basket-holiday-name { flex: 1 1 auto; }
+#basket-holiday-date { flex: 0 0 68px; text-align: center; }
+
+.loaf-holiday-new .add-day-btn {
+    flex: none;
+    margin: 0;
+}
+
 /* Advanced. A button rather than a summary/details pair, because the panel
    changes height when the carry-over cap appears and details has no hook to
    keep the chevron in step. */

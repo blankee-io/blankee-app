@@ -46,6 +46,7 @@ MIGRATIONS = [
     'add_loaf_entry_direction.sql',
     'add_loaf_prior_direction.sql',
     'add_loaf_accrual_basis.sql',
+    'add_loaf_custom_holidays.sql',
 ]
 
 # install/sql/ holds only what a fresh install applies. The rollback scripts and

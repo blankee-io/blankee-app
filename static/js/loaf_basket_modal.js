@@ -114,13 +114,77 @@
     // the carry-over cap appears, and a fixed maximum would clip it.
     // "None", the one name, or a count - never a list long enough to
     // outgrow the button and wrap it onto three lines.
+    // Holidays this employer gives that Loaf has no rule for, as
+    // [{date: 'MM-DD', name: '...'}]. Held here rather than read back out of
+    // the DOM, so the order and the stored form have exactly one owner.
+    var customHolidays = [];
+
+    function drawCustomHolidays() {
+        var host = el('basket-custom-holidays');
+        host.innerHTML = '';
+        customHolidays.forEach(function (entry) {
+            var row = document.createElement('div');
+            row.className = 'category-dropdown-item loaf-holiday-custom';
+
+            var text = document.createElement('span');
+            text.textContent = entry.name + ' \u00b7 ' + entry.date;
+            row.appendChild(text);
+
+            // No checkbox: it is on the list because you get it, so the way
+            // to stop getting it is to take it off.
+            var drop = document.createElement('button');
+            drop.type = 'button';
+            drop.className = 'loaf-holiday-drop';
+            drop.title = 'Remove ' + entry.name;
+            drop.setAttribute('aria-label', 'Remove ' + entry.name);
+            drop.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+            drop.addEventListener('click', function () {
+                var at = customHolidays.indexOf(entry);
+                if (at >= 0) { customHolidays.splice(at, 1); }
+                drawCustomHolidays();
+                syncHolidays();
+            });
+            row.appendChild(drop);
+            host.appendChild(row);
+        });
+    }
+
+    function showNewHoliday(open) {
+        el('basket-holiday-new').hidden = !open;
+        el('basket-holiday-add').hidden = open;
+        if (open) { el('basket-holiday-name').focus(); }
+    }
+
+    // MM-DD, and a real day of a real month. February is checked against a
+    // leap year so the 29th is allowed - loaf_holidays does the same.
+    function readNewHoliday() {
+        var name = $.trim(el('basket-holiday-name').value);
+        var bits = $.trim(el('basket-holiday-date').value).split('-');
+        if (bits.length !== 2) { return null; }
+        var month = parseInt(bits[0], 10);
+        var day = parseInt(bits[1], 10);
+        if (!(month >= 1 && month <= 12) || !(day >= 1)) { return null; }
+        var probe = new Date(2024, month - 1, day);
+        if (probe.getMonth() !== month - 1 || probe.getDate() !== day) {
+            return null;
+        }
+        return {name: name || 'Holiday',
+                date: ('0' + month).slice(-2) + '-' + ('0' + day).slice(-2)};
+    }
+
+    // "None", the one name, or a count - never a list long enough to outgrow
+    // the button and wrap it onto three lines. Counts both kinds: to somebody
+    // reading it there is only one list.
     function syncHolidays() {
         var picked = $('.basket-holiday:checked');
+        var total = picked.length + customHolidays.length;
         var text = 'None';
-        if (picked.length === 1) {
-            text = $.trim(picked.first().closest('label').text());
-        } else if (picked.length) {
-            text = picked.length + ' selected';
+        if (total === 1) {
+            text = picked.length
+                ? $.trim(picked.first().closest('label').text())
+                : customHolidays[0].name;
+        } else if (total) {
+            text = total + ' selected';
         }
         el('basket-holiday-summary').textContent = text;
     }
@@ -192,6 +256,9 @@
         $('.basket-weekday').prop('checked', false);
         el('basket-accrual-basis').value = 'flat';
         $('.basket-holiday').prop('checked', false);
+        customHolidays = [];
+        drawCustomHolidays();
+        showNewHoliday(false);
         syncHolidays();
         showHolidays(false);
         showAdvanced(false);
@@ -286,6 +353,17 @@
         $('.basket-holiday').each(function () {
             this.checked = shut.indexOf(this.value) >= 0;
         });
+
+        // Stored as MM-DD|Name, separated by semicolons - see
+        // loaf_holidays.parse_custom. A name may not contain either
+        // delimiter, so splitting is safe in both directions.
+        customHolidays = (row.attr('data-custom-holidays') || '')
+            .split(';').filter(Boolean).map(function (entry) {
+                var parts = entry.split('|');
+                return {date: parts[0],
+                        name: parts.slice(1).join('|') || 'Holiday'};
+            });
+        drawCustomHolidays();
         syncHolidays();
 
         // Opened for anybody who has something in there worth seeing, so an
@@ -387,6 +465,9 @@
         payload.accrual_basis = val('basket-accrual-basis');
         payload.holidays = $('.basket-holiday:checked')
             .map(function () { return this.value; }).get();
+        payload.custom_holidays = customHolidays.map(function (h) {
+            return h.date + '|' + h.name;
+        }).join(';');
 
         var accrualOnly = [];
         WEEKDAY_PREFIXES.forEach(function (prefix, index) {
@@ -452,6 +533,29 @@
         showHolidays(el('basket-holiday-menu').hidden);
     });
     $('.basket-holiday').on('change', syncHolidays);
+
+    $('#basket-holiday-add').on('click', function () { showNewHoliday(true); });
+    $('#basket-holiday-save').on('click', function () {
+        var entry = readNewHoliday();
+        if (!entry) {
+            showToast('Give the holiday a date as MM-DD, like 03-17.', 'error');
+            return;
+        }
+        customHolidays.push(entry);
+        el('basket-holiday-name').value = '';
+        el('basket-holiday-date').value = '';
+        showNewHoliday(false);
+        drawCustomHolidays();
+        syncHolidays();
+    });
+    // Enter adds the holiday rather than submitting the whole basket, which
+    // is what a text input inside a form does otherwise.
+    $('#basket-holiday-name, #basket-holiday-date').on('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            $('#basket-holiday-save').trigger('click');
+        }
+    });
 
     // Clicking away closes the panel and nothing else. Scoped to the modal so
     // it cannot interfere with the page behind it, and it must not reach the

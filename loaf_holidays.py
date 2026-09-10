@@ -132,17 +132,98 @@ def as_list(value):
     return [slug for slug, _, _ in HOLIDAYS if slug in sent]
 
 
-def dates_between(slugs, first, last):
+ENTRY_SEP, FIELD_SEP = ';', '|'
+MAX_CUSTOM = 20
+
+
+def parse_custom(value):
+    """A stored custom list as [(month, day, name)], bad entries dropped.
+
+    Tolerant on the way in and strict about what it returns: anything that is
+    not a real date in a real month is discarded rather than stored, so
+    nothing downstream has to defend against 31 February.
+    """
+    if isinstance(value, (list, tuple)):
+        raw = list(value)
+    else:
+        raw = str(value or '').split(ENTRY_SEP)
+
+    out = []
+    for entry in raw:
+        if isinstance(entry, dict):
+            when, name = entry.get('date') or '', entry.get('name') or ''
+        else:
+            parts = str(entry).split(FIELD_SEP, 1)
+            when, name = parts[0], (parts[1] if len(parts) > 1 else '')
+
+        bits = str(when).strip().split('-')
+        if len(bits) != 2:
+            continue
+        try:
+            month, day = int(bits[0]), int(bits[1])
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= month <= 12:
+            continue
+        # A real day of that month, in a leap year so 29 February survives.
+        try:
+            date(2024, month, day)
+        except ValueError:
+            continue
+
+        name = ' '.join(str(name).replace(ENTRY_SEP, ' ')
+                        .replace(FIELD_SEP, ' ').split())[:60]
+        out.append((month, day, name or 'Holiday'))
+        if len(out) >= MAX_CUSTOM:
+            break
+    return out
+
+
+def format_custom(value):
+    """Back to the stored form, or None when there is nothing to store."""
+    parsed = parse_custom(value)
+    if not parsed:
+        return None
+    return ENTRY_SEP.join('%02d-%02d%s%s' % (m, d, FIELD_SEP, n)
+                          for m, d, n in parsed)
+
+
+def custom_dates_between(value, first, last):
+    """Every custom holiday falling in [first, last].
+
+    Deliberately NOT shifted off a weekend, unlike the fixed federal ones.
+    That rule is real where it applies, and inventing it here would hand
+    somebody a Friday their employer never gave them. One landing on a
+    Saturday simply does nothing.
+    """
+    parsed = parse_custom(value)
+    if not parsed or first is None or last is None or last < first:
+        return set()
+
+    out = set()
+    for year in range(first.year, last.year + 1):
+        for month, day, _name in parsed:
+            try:
+                when = date(year, month, day)
+            except ValueError:
+                continue        # 29 February in a year that has none
+            if first <= when <= last:
+                out.add(when)
+    return out
+
+
+def dates_between(slugs, first, last, custom=None):
     """Every observed holiday date in [first, last], as a set.
 
     Computed per year across the span rather than per date, because the rules
     are annual and a projection asks about a whole grid at a time.
     """
+    out = custom_dates_between(custom, first, last)
+
     chosen = as_list(slugs)
     if not chosen or first is None or last is None or last < first:
-        return set()
+        return out
 
-    out = set()
     for year in range(first.year, last.year + 1):
         for slug in chosen:
             when = date_of(slug, year)
