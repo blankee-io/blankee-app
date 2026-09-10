@@ -20063,6 +20063,127 @@ label.loaf-holiday {
     display: none;
 }
 
+/* The job list above the baskets. The week is a subtitle, not a second
+   name: it is there to tell two jobs apart at a glance, and reading at the
+   same weight as the employer made the row a run-on sentence. */
+.loaf-shelf-week {
+    margin-left: 8px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    font-weight: 400;
+}
+
+/* No header row on this table - one column of names and one of buttons needs
+   no explaining - so the first row must not inherit the striping that assumes
+   a header sits above it. */
+.loaf-shelves-table {
+    margin-bottom: 18px;
+}
+
+.loaf-shelves-table td.basket-actions {
+    text-align: right;
+    white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+    .loaf-shelf-week {
+        display: block;
+        margin-left: 0;
+    }
+}
+
+/* The pools on a job, above the calendar it draws them all on.
+
+   Four colours, from the palette rather than invented: a job with five pools
+   starts repeating, which is better than running out and drawing one of them
+   in nothing. They are the same four the day cells use, and the swatch on the
+   chip is what says which is which. */
+:root {
+    --pool-0: var(--accent);
+    --pool-1: var(--primary);
+    --pool-2: var(--warning);
+    --pool-3: var(--secondary-dark);
+}
+
+.loaf-pools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    /* The calendar's own box, so the chips start where its first column
+       does. #loaf-calendar is max-width 875 with auto margins, and on a wide
+       screen that centres it - a full-width row of chips above it then began
+       at the page edge while everything else was inset by 137px.
+
+       Matching the numbers rather than nesting the chips inside the table's
+       container, because that container is full width too: it is the table
+       that is centred, not the wrapper. */
+    width: 100%;
+    max-width: 875px;
+    min-width: 350px;
+    margin: 0 auto 10px;
+}
+
+.loaf-pools[hidden] { display: none; }
+
+/* A chip is a button because it does something - it moves which pool the
+   running balance counts down. It does NOT change what the calendar draws,
+   so it is deliberately quiet: no border until it is the focused one. */
+.loaf-pool {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background-color: var(--white);
+    border: 1px solid transparent;
+    border-radius: 999px;
+    box-shadow: 0 1px 2px var(--shadow-sm);
+    color: var(--text-dark);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.loaf-pool:hover { background-color: var(--secondary-lighter); }
+
+.loaf-pool.is-focused {
+    border-color: var(--text-dark);
+    font-weight: 600;
+}
+
+.loaf-pool-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: var(--pool-0);
+}
+
+.loaf-pool-1 .loaf-pool-swatch { background-color: var(--pool-1); }
+.loaf-pool-2 .loaf-pool-swatch { background-color: var(--pool-2); }
+.loaf-pool-3 .loaf-pool-swatch { background-color: var(--pool-3); }
+
+.loaf-pool-hours { color: var(--secondary-dark); }
+.loaf-pool.is-focused .loaf-pool-hours { color: inherit; }
+.loaf-pool-hours.negative-value { color: var(--danger); }
+
+/* A day that drew on a pool carries its colour as a bar down the left edge,
+   not as a background: the cell already uses its background for the
+   out-of-month dimming and for today, and a third meaning on the same
+   property would have them fighting. */
+.loaf-drew-0 { box-shadow: inset 3px 0 0 var(--pool-0); }
+.loaf-drew-1 { box-shadow: inset 3px 0 0 var(--pool-1); }
+.loaf-drew-2 { box-shadow: inset 3px 0 0 var(--pool-2); }
+.loaf-drew-3 { box-shadow: inset 3px 0 0 var(--pool-3); }
+
+/* Half a morning paid and the afternoon unpaid is one day drawing on two
+   pools. Stacking the inset shadows would put one exactly on top of the
+   other, so a day like that gets both bars, one under the next. */
+.loaf-drew-many.loaf-drew-0.loaf-drew-1 {
+    box-shadow: inset 3px 0 0 var(--pool-0), inset 3px -50% 0 var(--pool-1);
+}
+
+@media (max-width: 600px) {
+    .loaf-pool { font-size: 12px; padding: 4px 8px; }
+}
+
 .loaf-range-anchor {
     position: relative;
 }

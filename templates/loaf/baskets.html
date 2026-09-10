@@ -37,6 +37,57 @@
 
     <div class="main-container" id="main-container">
         <div class="loaf-baskets-container">
+
+            {# The jobs, above the pools of hours they are earned at.
+
+               A job carries the working week, the days the office is shut and
+               when pay lands - everything two baskets on the same job have to
+               agree about. It used to sit on each basket, and two baskets only
+               costed the same while somebody kept two copies identical by
+               hand.
+
+               "Shelf" is what the table is called. Nobody reads that word
+               here, because it says nothing on its own. #}
+            <div class="recurring-header baskets">
+                <span>Jobs</span>
+                <button id="add-shelf-btn" class="add-income-btn" type="button"
+                        title="Add Job">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
+            </div>
+
+            {% if shelves %}
+            <table class="loaf-baskets-table loaf-shelves-table">
+                <tbody id="shelf-rows">
+                    {% for shelf in shelves.values() %}
+                    <tr data-shelf-row="{{ shelf.id }}">
+                        <td class="basket-name">
+                            <span class="basket-name-text">{{ shelf.name }}</span>
+                            <span class="loaf-shelf-week">
+                                {{ describe_week(shelf) }}
+                            </span>
+                        </td>
+                        <td class="basket-actions">
+                            <button type="button" class="edit-recurring-btn edit-shelf-btn"
+                                    data-shelf-id="{{ shelf.id }}" title="Edit this job">
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
+                            <button type="button" class="delete-recurring-btn delete-shelf-btn"
+                                    data-shelf-id="{{ shelf.id }}"
+                                    data-name="{{ shelf.name }}" title="Delete this job">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="recurring-income-empty-info">
+                <p>No jobs yet. A basket adds one for you the first time.</p>
+            </div>
+            {% endif %}
+
             <div class="recurring-header baskets">
                 <span>Baskets</span>
                 <button id="add-basket-btn" class="add-income-btn" type="button" title="Add Basket">
@@ -63,8 +114,17 @@
                     {# Every value the edit form needs is a data attribute. The
                        modal never scrapes a cell - the one thing most worth
                        copying from recurring_i.html, because a cell holds a
-                       formatted string and a form needs the figure. #}
+                       formatted string and a form needs the figure.
+
+                       Half of them come from the shelf now: the working week,
+                       the holidays and the pay cadence belong to the job, not
+                       to this pool of hours. Falling back to the basket keeps
+                       a shelf-less row rendering during the update window,
+                       exactly as loaf_data.shelf_of does. #}
+                    {% set shelf = shelves.get(basket.shelf_id) or basket %}
                     <tr data-basket-id="{{ basket.id }}"
+                        data-shelf-id="{{ basket.shelf_id or '' }}"
+                        data-shelf-name="{{ shelf.name or '' }}"
                         data-name="{{ basket.name }}"
                         data-basket-type="{{ basket.basket_type }}"
                         data-starting-hours="{{ basket.starting_hours if basket.starting_hours is not none else '' }}"
@@ -72,27 +132,27 @@
                         data-max-balance-hours="{{ basket.max_balance_hours if basket.max_balance_hours is not none else '' }}"
                         data-grant-hours="{{ basket.grant_hours if basket.grant_hours is not none else '' }}"
                         data-accrual-hours="{{ basket.accrual_hours if basket.accrual_hours is not none else '' }}"
-                        data-cadence-interval="{{ basket.cadence_interval or 1 }}"
-                        data-cadence-unit="{{ basket.cadence_unit or 'weeks' }}"
-                        data-weekdays="{{ basket.weekdays or '' }}"
-                        data-monthly-days="{{ basket.monthly_days or '' }}"
-                        data-yearly-day="{{ basket.yearly_day if basket.yearly_day is not none else '' }}"
-                        data-yearly-month="{{ basket.yearly_month if basket.yearly_month is not none else '' }}"
-                        data-accrual-anchor-date="{{ basket.accrual_anchor_date or '' }}"
-                        data-year-start-month="{{ basket.year_start_month or 1 }}"
-                        data-year-start-day="{{ basket.year_start_day or 1 }}"
+                        data-cadence-interval="{{ shelf.cadence_interval or 1 }}"
+                        data-cadence-unit="{{ shelf.cadence_unit or 'weeks' }}"
+                        data-weekdays="{{ shelf.weekdays or '' }}"
+                        data-monthly-days="{{ shelf.monthly_days or '' }}"
+                        data-yearly-day="{{ shelf.yearly_day if shelf.yearly_day is not none else '' }}"
+                        data-yearly-month="{{ shelf.yearly_month if shelf.yearly_month is not none else '' }}"
+                        data-accrual-anchor-date="{{ shelf.accrual_anchor_date or '' }}"
+                        data-year-start-month="{{ shelf.year_start_month or 1 }}"
+                        data-year-start-day="{{ shelf.year_start_day or 1 }}"
                         data-carryover-mode="{{ basket.carryover_mode or 'reset' }}"
                         data-carryover-cap-hours="{{ basket.carryover_cap_hours if basket.carryover_cap_hours is not none else '' }}"
                         data-low-balance-hours="{{ basket.low_balance_hours if basket.low_balance_hours is not none else '' }}"
-                        data-accrual-only-weekdays="{{ basket.accrual_only_weekdays or '' }}"
+                        data-accrual-only-weekdays="{{ shelf.accrual_only_weekdays or '' }}"
                         data-accrual-basis="{{ basket.accrual_basis or 'flat' }}"
-                        data-period-hours="{{ basket.period_hours if basket.period_hours is not none else '' }}"
-                        data-holidays="{{ basket.holidays or '' }}"
-                        data-custom-holidays="{{ basket.custom_holidays or '' }}"
+                        data-period-hours="{{ shelf.period_hours if shelf.period_hours is not none else '' }}"
+                        data-holidays="{{ shelf.holidays or '' }}"
+                        data-custom-holidays="{{ shelf.custom_holidays or '' }}"
                         {%- for prefix in weekday_prefixes %}
-                        data-{{ prefix }}-start="{{ basket[prefix ~ '_start'] or '' }}"
-                        data-{{ prefix }}-end="{{ basket[prefix ~ '_end'] or '' }}"
-                        data-{{ prefix }}-break-minutes="{{ basket[prefix ~ '_break_minutes'] or 0 }}"
+                        data-{{ prefix }}-start="{{ shelf[prefix ~ '_start'] or '' }}"
+                        data-{{ prefix }}-end="{{ shelf[prefix ~ '_end'] or '' }}"
+                        data-{{ prefix }}-break-minutes="{{ shelf[prefix ~ '_break_minutes'] or 0 }}"
                         {%- endfor %}>
                         <td class="basket-handle">
                             <span class="sort-handle" title="Drag to reorder">
@@ -113,7 +173,7 @@
                         </td>
                         <td class="basket-start">{{ '%.2f'|format(basket.starting_hours or 0) }}</td>
                         <td class="basket-fill">
-                            {% set fill = describe_fill(basket) %}
+                            {% set fill = describe_fill(basket, shelf) %}
                             {% if fill %}{{ fill }}{% else %}<span class="basket-none">by hand</span>{% endif %}
                         </td>
                         <td class="basket-max">
@@ -157,6 +217,7 @@
     </div>
 
     {% include 'loaf/_basket_modal.html' %}
+    {% include 'loaf/_shelf_modal.html' %}
 
     {% include 'loading_modals.html' %}
 
@@ -165,6 +226,40 @@
 // static/js/loaf_basket_modal.js, because the month view opens the same one.
 (function () {
     'use strict';
+
+    // Deleting a job takes every basket on it, and every hour booked against
+    // those. Two levels of cascade is more than the word "delete" implies on
+    // its own, so the confirmation says so out loud.
+    async function removeShelf(shelfId, name) {
+        var ok = await showConfirmModal({
+            title: 'Delete this job?',
+            message: 'Deleting "' + name + '" also deletes every basket filed ' +
+                     'under it, and every hour booked against those. This ' +
+                     'cannot be undone.',
+            confirmText: 'Delete',
+            cancelText: 'Keep it',
+            danger: true
+        });
+        if (!ok) { return; }
+
+        $.ajax({
+            url: '/loaf/api/shelves/' + shelfId + '/delete',
+            method: 'POST',
+            contentType: 'application/json',
+            success: function (response) {
+                if (response.status === 'success') {
+                    location.reload();
+                } else {
+                    showToast(response.message || 'Could not delete that job.',
+                              'error');
+                }
+            },
+            error: function (xhr) {
+                var body = xhr.responseJSON || {};
+                showToast(body.message || 'Could not delete that job.', 'error');
+            }
+        });
+    }
 
     async function removeBasket(basketId, name) {
         var ok = await showConfirmModal({
@@ -205,6 +300,17 @@
     });
 
     $('#add-basket-btn').on('click', function () { loafBasketModal.openAdd(); });
+
+    // The job form. Same script, same markup, different id prefix - see the
+    // two build() calls at the foot of loaf_basket_modal.js.
+    $('#add-shelf-btn').on('click', function () { loafShelfModal.openAdd(); });
+    $(document).on('click', '.edit-shelf-btn', function () {
+        loafShelfModal.openEdit($(this).attr('data-shelf-id'));
+    });
+    $(document).on('click', '.delete-shelf-btn', function () {
+        removeShelf($(this).attr('data-shelf-id'),
+                    $(this).attr('data-name') || 'this job');
+    });
 
     // Drag to reorder. jQuery UI sortable plus touch-punch, the pair
     // manage_categories.html uses - the only drag-ordering in this codebase.
