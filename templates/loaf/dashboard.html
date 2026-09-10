@@ -139,11 +139,13 @@
                    rules: a manager's grant, a payroll correction. They are NOT
                    absence, so they add to the balance without touching the
                    accrual pro-rate - see credit_by_date. #}
-                <label for="loaf-entry-direction">Hours in or out</label>
-                <select id="loaf-entry-direction">
-                    <option value="use">Take time off - hours come out</option>
-                    <option value="accrue">Add hours - a grant or a correction</option>
-                </select>
+                <div id="loaf-entry-direction-row">
+                    <label for="loaf-entry-direction">Hours in or out</label>
+                    <select id="loaf-entry-direction">
+                        <option value="use">Take time off - hours come out</option>
+                        <option value="accrue">Add hours - a grant or a correction</option>
+                    </select>
+                </div>
 
                 {# One day or several. Nearly every booking is one day, and
                    asking for a from-date, an until-date and two times to say
@@ -571,6 +573,22 @@
         el('loaf-entry-multi').style.display = multi ? '' : 'none';
         el('loaf-entry-day').style.display = multi ? 'none' : '';
         el('loaf-entry-hours-label').style.display = multi ? 'none' : '';
+
+        // A range is always time off, so the direction has only one answer
+        // here and asking it would offer one the form cannot hold: hours
+        // arriving are a single date and a figure, never a span. Forced back
+        // to use as well as hidden, so a hidden control cannot carry a stale
+        // answer into what gets saved.
+        //
+        // Refreshed only when the value actually changed, and safe to do:
+        // syncEntryDirection calls back into here on the accrue branch alone,
+        // and by then this is use. Without the call the heading, the button
+        // and the toggle keep describing an accrual that is no longer set.
+        if (multi && el('loaf-entry-direction').value === 'accrue') {
+            el('loaf-entry-direction').value = 'use';
+            syncEntryDirection();
+        }
+        el('loaf-entry-direction-row').style.display = multi ? 'none' : '';
 
         syncEntryFields();
     }

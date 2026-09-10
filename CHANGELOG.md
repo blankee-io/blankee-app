@@ -8,6 +8,33 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.26.1 — 2026-09-09
+
+### Fixed
+- **Loaf's first pay date now accrues.** Every forecast quietly skipped its
+  first accrual and started on the second one, because the date you give as
+  the next pay date was being treated as the start of a period rather than the
+  end of one — leaving it with no period behind it to measure, and so nothing
+  to earn.
+
+  This was harmless while that field meant the *first* pay date, one already
+  paid and rightly skipped. It became a bug in 1.25.0, when the field became
+  the *next* pay date and so a date that must be paid.
+
+  **Balances will go up** by one accrual for any basket whose next pay date
+  has not yet passed. Nothing needs re-entering; the forecast is replayed from
+  scratch every time it is drawn, so simply opening Loaf shows the corrected
+  figures.
+
+  Baskets whose pay date is already behind them are unaffected — a pay date is
+  only counted when it falls after the day you stated your balance, which was
+  already true and is right either way.
+
+- **The pay period is now measured properly for a semi-monthly cadence.** A
+  basket paid on the 1st and the 15th had its first period measured back a
+  whole month rather than to the previous pay date, so time off inside that
+  period pro-rated the accrual by roughly half what it should have.
+
 ## 1.26.0 — 2026-09-08
 
 ### Added
