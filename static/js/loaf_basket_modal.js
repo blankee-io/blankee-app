@@ -279,6 +279,70 @@
             ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-right';
     }
 
+    // How many minutes the working week comes to, breaks removed. The same
+    // sum loaf_data.scheduled_minutes does, on the form's own fields.
+    function weeklyMinutes() {
+        var total = 0;
+        WEEKDAY_PREFIXES.forEach(function (prefix) {
+            if (el('basket-' + prefix + '-off').checked) { return; }
+            var from = val('basket-' + prefix + '-start');
+            var to = val('basket-' + prefix + '-end');
+            if (!from || !to) { return; }
+            var a = from.split(':'), b = to.split(':');
+            var span = (Number(b[0]) * 60 + Number(b[1]))
+                - (Number(a[0]) * 60 + Number(a[1]));
+            if (span > 0) {
+                total += span - (Number(val('basket-break')) || 0);
+            }
+        });
+        return total;
+    }
+
+    // How many times a year the cadence comes round.
+    function periodsPerYear() {
+        var every = Number(val('basket-cadence-interval')) || 1;
+        var unit = val('basket-cadence-unit');
+        if (unit === 'days') { return 365 / every; }
+        if (unit === 'weeks') {
+            return (52 / every)
+                * ($('.basket-weekday:checked').length || 1);
+        }
+        if (unit === 'months') {
+            return (12 / every)
+                * ($('#basket-monthly-container .monthly-day-select').length || 1);
+        }
+        return 1 / every;
+    }
+
+    // The figure payroll would use: a year of hours split evenly across the
+    // year's pay periods. 40 hours a week paid twice a month is 2080/24 =
+    // 86.67; paid fortnightly it is 2080/26 = 80. Both are the numbers that
+    // actually appear on payslips, which is the point - Loaf can work this
+    // out rather than asking somebody to.
+    function suggestedPeriodHours() {
+        var weekly = weeklyMinutes() / 60;
+        var periods = periodsPerYear();
+        if (!(weekly > 0) || !(periods > 0)) { return null; }
+        return Math.round(weekly * 52 / periods * 100) / 100;
+    }
+
+    // The flat denominator is for the per-hour basis alone. Hidden rather
+    // than disabled on a flat accrual, because a greyed field still reads as
+    // a question somebody has to have an answer for.
+    //
+    // Filled in rather than merely suggested through a placeholder: an empty
+    // box means "walk the weekdays instead", so a figure shown but not used
+    // would be telling somebody the opposite of what is happening. Clearing
+    // it is still how you ask for that.
+    function syncBasis() {
+        var worked = val('basket-accrual-basis') === 'worked';
+        el('basket-period-hours-row').style.display = worked ? '' : 'none';
+        if (worked && !$.trim(val('basket-period-hours'))) {
+            var guess = suggestedPeriodHours();
+            if (guess) { el('basket-period-hours').value = guess; }
+        }
+    }
+
     function syncCarryover() {
         el('basket-carryover-cap-row').style.display =
             val('basket-carryover-mode') === 'capped' ? 'block' : 'none';
@@ -330,6 +394,8 @@
         el('basket-monthly-container').innerHTML = '';
         $('.basket-weekday').prop('checked', false);
         el('basket-accrual-basis').value = 'flat';
+        el('basket-period-hours').value = '';
+        syncBasis();
         advanced = {};
         showSection('holds');
         $('.basket-holiday').prop('checked', false);
@@ -425,6 +491,8 @@
         el('basket-carryover-mode').value = row.attr('data-carryover-mode') || 'reset';
         el('basket-accrual-basis').value =
             row.attr('data-accrual-basis') || 'flat';
+        el('basket-period-hours').value = row.attr('data-period-hours') || '';
+        syncBasis();
 
         var shut = (row.attr('data-holidays') || '').split(',');
         $('.basket-holiday').each(function () {
@@ -454,7 +522,8 @@
         showAdvanced(shut.length > 0 && shut[0] !== ''
             || el('basket-accrual-basis').value !== 'flat'
             || (row.attr('data-carryover-mode') || 'reset') !== 'reset'
-            || !!row.attr('data-low-balance-hours'));
+            || !!row.attr('data-low-balance-hours')
+            || !!row.attr('data-period-hours'));
         el('basket-carryover-cap-hours').value = row.attr('data-carryover-cap-hours') || '';
 
         var days = (row.attr('data-weekdays') || '').split(',');
@@ -553,6 +622,7 @@
         // does not offer that.
         var brk = val('basket-break') || '0';
         payload.accrual_basis = val('basket-accrual-basis');
+        payload.period_hours = val('basket-period-hours');
         payload.holidays = $('.basket-holiday:checked')
             .map(function () { return this.value; }).get();
         payload.custom_holidays = customHolidays.map(function (h) {
@@ -615,6 +685,8 @@
 
     $('#basket-no-accrual, #basket-no-grant, #basket-warn-negative-only')
         .on('change', syncAmounts);
+    $('#basket-accrual-basis').on('change', syncBasis);
+
     $('#basket-advanced-toggle').on('click', function () {
         showAdvanced(el('basket-advanced').hidden);
     });

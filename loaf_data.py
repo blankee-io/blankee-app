@@ -79,7 +79,7 @@ BASKET_COLUMNS = (
     'year_start_month', 'year_start_day',
     'carryover_mode', 'carryover_cap_hours', 'low_balance_hours',
     'starting_hours', 'starting_date', 'accrual_only_weekdays',
-    'accrual_basis', 'holidays', 'custom_holidays',
+    'accrual_basis', 'period_hours', 'holidays', 'custom_holidays',
 ) + tuple(
     '%s_%s' % (day, part)
     for day in WEEKDAY_PREFIXES
@@ -640,7 +640,8 @@ def clean_basket(payload):
 
     # Nullable figures. Empty means "not set", which is a real answer for every
     # one of these - see _opt_number.
-    for field, label in (('max_balance_hours', 'The maximum balance'),
+    for field, label in (('period_hours', 'The hours in a pay period'),
+                         ('max_balance_hours', 'The maximum balance'),
                          ('grant_hours', 'The granted hours'),
                          ('accrual_hours', 'The accrual'),
                          ('carryover_cap_hours', 'The carryover cap'),
