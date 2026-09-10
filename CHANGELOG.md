@@ -8,6 +8,26 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.29.0 — 2026-09-10
+
+### Added
+- **A basket that accrues per hour worked can be told the hours its employer
+  counts in a pay period.** Loaf has been working that out by counting the
+  weekdays, which is honest and is not what payroll does — a semi-monthly
+  period holds ten, eleven or twelve of them, so the figure swings between 80
+  and 96 where an employer applies one flat number all year.
+
+  Checked against a real payslip, taking 24 hours off should accrue 4.81.
+  Counting the weekdays gave 4.66; the flat figure gives 4.81.
+
+  **Loaf works it out for you** — weekly hours times 52, divided by the pay
+  periods in a year. Paid twice a month on a 40-hour week that is 86.67;
+  fortnightly, 80. It appears in Advanced once the accrual is set to per hour
+  worked, already filled in, and you can change it.
+
+  Only the divisor changes: time off is still counted from the calendar.
+  Baskets that already exist keep counting weekdays until you set one.
+
 ## 1.28.2 — 2026-09-10
 
 ### Fixed
