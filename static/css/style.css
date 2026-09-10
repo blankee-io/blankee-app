@@ -10752,7 +10752,16 @@ transform: scale(1.2);
     width: 100%;
 }
 
-.cadence-row input[type="number"] {
+.cadence-row input[type="number"],
+/* A number field is briefly type="text" while it is being edited, so its
+   contents can be selected - see loaf_basket_modal.js, which explains why
+   that swap is the only way. Every rule keyed on the type stops applying
+   for that moment, and this one carries the width: without it the interval
+   box jumped from 64px to the full 318 the instant it was clicked.
+   Matched on the marker the swap leaves rather than by loosening the
+   selector to `.cadence-row input`, which would catch the date and time
+   fields in the booking form and shrink those to a fifth. */
+.cadence-row input[data-was-number] {
     flex: 0 0 20%;
     min-width: 0;
 }
