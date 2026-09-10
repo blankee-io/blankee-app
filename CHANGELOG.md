@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.27.1 — 2026-09-10
+
+### Fixed
+- **Hours you add by hand now show on the calendar.** They moved the balance,
+  as they should, but the day they landed on showed nothing — the accrual line
+  counted what was earned on a pay date and granted at the year turn, and
+  quietly left out hours handed over. All three now appear on that line.
+
 ## 1.27.0 — 2026-09-09
 
 ### Added
