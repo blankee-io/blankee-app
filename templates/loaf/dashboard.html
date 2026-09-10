@@ -539,6 +539,7 @@
     // because a grant is not measured in days.
     function syncEntryDirection() {
         var adding = entryIsFlat();
+        var prior = entryDirection() === 'prior';
         var hours = el('loaf-entry-hours');
 
         el('loaf-entry-span-toggle').style.display = adding ? 'none' : '';
@@ -546,13 +547,21 @@
         // The heading follows the direction too. "Book Time Off" over a form
         // that is handing hours back reads as a mistake.
         var editing = !!el('loaf-entry-id').value;
-        el('loaf-entry-title').textContent = adding
+        el('loaf-entry-title').textContent = prior
+            ? (editing ? 'Edit Time Already Taken' : 'Record Time Already Taken')
+            : adding
             ? (editing ? 'Edit Added Hours' : 'Add Hours')
             : (editing ? 'Edit Time Off' : 'Book Time Off');
         el('loaf-entry-submit').textContent = editing
-            ? 'Save' : (adding ? 'Add Hours' : 'Book It');
+            ? 'Save' : (prior ? 'Record It' : adding ? 'Add Hours' : 'Book It');
         el('loaf-entry-hours-label').style.display = '';
-        el('loaf-entry-hours-tip').textContent = adding
+        el('loaf-entry-hours-tip').textContent = prior
+            ? 'Time off you took before Loaf was keeping track. It comes off '
+              + 'the balance, but is not counted against what you accrue next '
+              + '- the days it actually happened on are not known, and '
+              + 'charging a year of it to this pay period would be worse than '
+              + 'charging it to none.'
+            : adding
             ? 'How many hours were added, and on the day they arrived. Not '
               + 'taken off anything - this is hours arriving, not hours spent.'
             : 'Filled in from your working week, and capped at what that day '
