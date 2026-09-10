@@ -412,9 +412,15 @@
 
         // zero-value is how dashboard_m greys a line that has nothing on it,
         // rather than leaving the cell ragged by omitting the line entirely.
+        //
+        // All three ways hours arrive, on one line: earned on a pay date,
+        // granted at the year turn, and handed over by hand. The payload has
+        // carried `credited` since it existed and this line ignored it, so an
+        // added-hours entry moved the balance and showed nothing.
+        var arrived = row.accrued + row.granted + (row.credited || 0);
         sections.appendChild(line('dashboard-m-income-total', 'A',
-                                  formatHours(row.accrued + row.granted),
-                                  (row.accrued + row.granted) ? '' : 'zero-value'));
+                                  formatHours(arrived),
+                                  arrived ? '' : 'zero-value'));
         sections.appendChild(line('dashboard-m-expense-total', 'U',
                                   formatHours(row.taken),
                                   row.taken ? '' : 'zero-value'));
