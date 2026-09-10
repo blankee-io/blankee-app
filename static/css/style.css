@@ -19615,6 +19615,15 @@ label.loaf-holiday {
     border-top: 2px solid var(--secondary-hover);
 }
 
+/* Needed because of the display above it. The hidden attribute works through
+   a UA rule of display: none, and ANY author display beats it - so setting
+   display: flex quietly un-hid the form, and it sat open under the Add row
+   from the moment the panel was drawn. Anything given a display and also
+   toggled with hidden needs this pair. */
+.loaf-holiday-new[hidden] {
+    display: none;
+}
+
 .loaf-holiday-new input {
     min-width: 0;
     padding: 7px 8px;
@@ -19630,8 +19639,17 @@ label.loaf-holiday {
     outline: none;
 }
 
-#basket-holiday-name { flex: 1 1 auto; }
-#basket-holiday-date { flex: 0 0 70px; text-align: center; }
+/* Half each. MM-DD needs far less room than a name does, but an even split
+   reads as one control in two parts rather than a field with an
+   afterthought bolted on. */
+#basket-holiday-name,
+#basket-holiday-date {
+    flex: 1 1 0;
+}
+
+#basket-holiday-date {
+    text-align: center;
+}
 
 /* The 32px circle .remove-day-btn already establishes, in the confirming
    colour rather than the destructive one. */
