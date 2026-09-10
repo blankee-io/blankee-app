@@ -19600,9 +19600,15 @@ label.loaf-holiday {
 
 /* The little add form, inside the panel rather than beside it - the row that
    opens it is in there too, and a form that appeared outside would leave the
-   list pointing at nothing. */
+   list pointing at nothing.
+
+   The name takes what is left, because it is the part with something to say;
+   the date needs only room for MM-DD. NOT .add-day-btn for the button: that
+   is a full-width block button - width: 100% and 24px of padding - which
+   took the whole row and pushed both fields down to nothing. */
 .loaf-holiday-new {
     display: flex;
+    align-items: center;
     gap: 6px;
     padding: 8px 10px;
     background-color: var(--secondary-lighter);
@@ -19611,7 +19617,7 @@ label.loaf-holiday {
 
 .loaf-holiday-new input {
     min-width: 0;
-    padding: 6px 8px;
+    padding: 7px 8px;
     background-color: var(--white);
     border: 1px solid var(--secondary-hover);
     border-radius: 6px;
@@ -19619,12 +19625,36 @@ label.loaf-holiday {
     box-sizing: border-box;
 }
 
-#basket-holiday-name { flex: 1 1 auto; }
-#basket-holiday-date { flex: 0 0 68px; text-align: center; }
+.loaf-holiday-new input:focus {
+    border-color: var(--primary);
+    outline: none;
+}
 
-.loaf-holiday-new .add-day-btn {
+#basket-holiday-name { flex: 1 1 auto; }
+#basket-holiday-date { flex: 0 0 70px; text-align: center; }
+
+/* The 32px circle .remove-day-btn already establishes, in the confirming
+   colour rather than the destructive one. */
+.loaf-holiday-save {
+    display: flex;
+    justify-content: center;
+    align-items: center;
     flex: none;
-    margin: 0;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    background-color: var(--primary);
+    border: none;
+    border-radius: 50%;
+    color: var(--white);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.loaf-holiday-save:hover {
+    background-color: var(--primary-hover);
+    transform: scale(1.1);
 }
 
 /* Advanced. A button rather than a summary/details pair, because the panel
