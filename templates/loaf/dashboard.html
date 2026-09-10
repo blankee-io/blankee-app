@@ -220,23 +220,40 @@
                            is faster than clicking for anybody who knows the
                            date they want. #}
                         <div id="loaf-range" class="loaf-range" hidden>
-                            <div class="loaf-range-head">
-                                <button type="button" id="loaf-range-prev"
-                                        aria-label="Previous month">
-                                    <i class="fa-solid fa-chevron-left"></i>
-                                </button>
-                                <span id="loaf-range-label"></span>
-                                <button type="button" id="loaf-range-next"
-                                        aria-label="Next month">
-                                    <i class="fa-solid fa-chevron-right"></i>
-                                </button>
+                            {# Two months at once, because a booking that
+                               crosses the turn of one is the case a single
+                               month makes worst - you lose sight of the
+                               start while looking for the end. The arrows
+                               move the pair. #}
+                            <div class="loaf-range-months">
+                                {% for slot in [0, 1] %}
+                                <div class="loaf-range-month">
+                                    <div class="loaf-range-head">
+                                        {% if slot == 0 %}
+                                        <button type="button" id="loaf-range-prev"
+                                                aria-label="Previous month">
+                                            <i class="fa-solid fa-chevron-left"></i>
+                                        </button>
+                                        {% else %}<span class="loaf-range-gap"></span>{% endif %}
+                                        <span class="loaf-range-label"
+                                              data-slot="{{ slot }}"></span>
+                                        {% if slot == 1 %}
+                                        <button type="button" id="loaf-range-next"
+                                                aria-label="Next month">
+                                            <i class="fa-solid fa-chevron-right"></i>
+                                        </button>
+                                        {% else %}<span class="loaf-range-gap"></span>{% endif %}
+                                    </div>
+                                    <div class="loaf-range-days" aria-hidden="true">
+                                        <span>M</span><span>T</span><span>W</span>
+                                        <span>T</span><span>F</span><span>S</span>
+                                        <span>S</span>
+                                    </div>
+                                    <div class="loaf-range-grid"
+                                         data-slot="{{ slot }}"></div>
+                                </div>
+                                {% endfor %}
                             </div>
-                            <div class="loaf-range-days" aria-hidden="true">
-                                <span>Mo</span><span>Tu</span><span>We</span>
-                                <span>Th</span><span>Fr</span><span>Sa</span>
-                                <span>Su</span>
-                            </div>
-                            <div id="loaf-range-grid" class="loaf-range-grid"></div>
 
                             {# Either end can be dragged, so the panel cannot
                                shut itself the moment a second day is clicked
@@ -698,37 +715,56 @@
     // dispatches the event straight at the element and never goes near that
     // sequence. Hover now only repaints classes on buttons that stay put.
     function buildRange() {
-        var grid = el('loaf-range-grid');
-        if (!grid) { return; }
-
         var key = rangeMonth.getFullYear() + '-' + rangeMonth.getMonth();
         if (rangeBuilt === key) { return; }
         rangeBuilt = key;
 
-        el('loaf-range-label').textContent = rangeMonth.toLocaleDateString(
-            undefined, {month: 'long', year: 'numeric'});
+        // Two of them, this month and the next. Each grid still holds its
+        // own 42 days, so a date can appear in both - painting keys off the
+        // date and not the cell, so the two agree without being told to.
+        [0, 1].forEach(function (slot) {
+            var grid = document.querySelector(
+                '.loaf-range-grid[data-slot="' + slot + '"]');
+            var label = document.querySelector(
+                '.loaf-range-label[data-slot="' + slot + '"]');
+            if (!grid) { return; }
 
-        var first = new Date(rangeMonth.getFullYear(), rangeMonth.getMonth(), 1);
-        var day = new Date(first);
-        day.setDate(1 - mondayIndex(first));
+            var shown = new Date(rangeMonth.getFullYear(),
+                                 rangeMonth.getMonth() + slot, 1);
+            label.textContent = shown.toLocaleDateString(
+                undefined, {month: 'short', year: 'numeric'});
 
-        grid.innerHTML = '';
-        for (var i = 0; i < 42; i += 1) {
-            var cell = document.createElement('button');
-            cell.type = 'button';
-            cell.className = 'loaf-range-day';
-            cell.textContent = day.getDate();
-            cell.setAttribute('data-date', isoOf(day));
-            cell.setAttribute('data-other',
-                              day.getMonth() === rangeMonth.getMonth() ? '' : '1');
-            grid.appendChild(cell);
-            day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
-        }
+            var day = new Date(shown);
+            day.setDate(1 - mondayIndex(shown));
+
+            grid.innerHTML = '';
+            for (var i = 0; i < 42; i += 1) {
+                var cell;
+                if (day.getMonth() === shown.getMonth()) {
+                    cell = document.createElement('button');
+                    cell.type = 'button';
+                    cell.className = 'loaf-range-day';
+                    cell.textContent = day.getDate();
+                    cell.setAttribute('data-date', isoOf(day));
+                } else {
+                    // Nothing at all, not a greyed-out day. With the next
+                    // month sat beside this one its 1st would otherwise be
+                    // drawn twice - once here as a spill-over and once in
+                    // its own grid - and two cells with the same date is
+                    // one too many for anything that looks a date up.
+                    cell = document.createElement('span');
+                    cell.className = 'loaf-range-blank';
+                }
+                grid.appendChild(cell);
+                day = new Date(day.getFullYear(), day.getMonth(),
+                               day.getDate() + 1);
+            }
+        });
     }
 
     function paintRange() {
-        var grid = el('loaf-range-grid');
-        if (!grid) { return; }
+        var panel = el('loaf-range');
+        if (!panel) { return; }
 
         var from = dateFrom(el('loaf-entry-start-date').value);
         var to = dateFrom(el('loaf-entry-end-date').value);
@@ -748,11 +784,10 @@
                   + to.toLocaleDateString(undefined, shape);
         }
 
-        grid.querySelectorAll('.loaf-range-day').forEach(function (cell) {
+        panel.querySelectorAll('.loaf-range-day').forEach(function (cell) {
             var iso = cell.getAttribute('data-date');
             var when = dateFrom(iso);
             cell.className = 'loaf-range-day'
-                + (cell.getAttribute('data-other') ? ' is-other' : '')
                 + (iso === today ? ' is-today' : '')
                 + (from && iso === isoOf(from) ? ' is-start' : '')
                 + (end && iso === isoOf(end) ? ' is-end' : '')
@@ -1107,7 +1142,7 @@
     }, true);
 
     // Delegated, because the grid is rebuilt whenever the month changes.
-    $('#loaf-range-grid').on('click', '.loaf-range-day', function () {
+    $('#loaf-range').on('click', '.loaf-range-day', function () {
         // A drag ends in a click on whatever it finished over, and acting on
         // that would throw away the range just dragged.
         if (rangeDragged) { rangeDragged = false; return; }
@@ -1117,7 +1152,7 @@
     // Either end can be taken hold of and moved. preventDefault stops the
     // browser starting a text selection across the grid, which makes a drag
     // look like a smear of highlighted numbers.
-    $('#loaf-range-grid').on('mousedown', '.loaf-range-day', function (event) {
+    $('#loaf-range').on('mousedown', '.loaf-range-day', function (event) {
         rangeDragged = false;
         rangeFrom = null;
         if (this.classList.contains('is-start')) { rangeDrag = 'start'; }
@@ -1136,7 +1171,7 @@
         rangeDrag = null;
         rangeFrom = null;
     });
-    $('#loaf-range-grid').on('mouseover', '.loaf-range-day', function () {
+    $('#loaf-range').on('mouseover', '.loaf-range-day', function () {
         // Dragging one end moves that end, and only as far as the other -
         // a start dragged past its end would leave a range running
         // backwards, which is not a range.

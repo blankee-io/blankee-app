@@ -20081,7 +20081,7 @@ label.loaf-holiday {
     left: 0;
     z-index: 1000;
     margin-top: 2px;
-    padding: 8px;
+    padding: 8px 6px;
     background-color: var(--white);
     border: 1px solid var(--text-dark);
     border-radius: 8px;
@@ -20090,21 +20090,43 @@ label.loaf-holiday {
     user-select: none;
 }
 
+/* Two months, side by side. min-width: 0 is not decoration - a grid child
+   of a flex row defaults to min-content, which for a 7-column grid is
+   whatever the widest '30' needs, and the pair would push the panel wider
+   than the form rather than sharing it. */
+.loaf-range-months {
+    display: flex;
+    gap: 8px;
+}
+
+.loaf-range-month {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+/* Stands in for the arrow the other month has, so both labels sit in the
+   middle of their own month rather than one being shunted across. */
+.loaf-range-gap {
+    width: 22px;
+}
+
 .loaf-range-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 6px;
-    font-size: 13px;
+    margin-bottom: 4px;
+    font-size: 11px;
     font-weight: 600;
+    white-space: nowrap;
 }
 
 .loaf-range-head button {
     display: flex;
     justify-content: center;
     align-items: center;
-    width: 26px;
-    height: 26px;
+    flex: none;
+    width: 22px;
+    height: 22px;
     padding: 0;
     background: none;
     border: none;
@@ -20128,20 +20150,24 @@ label.loaf-holiday {
 .loaf-range-days {
     margin-bottom: 2px;
     color: var(--secondary);
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
     text-align: center;
     text-transform: uppercase;
 }
 
+/* No padding of its own: at two months to a form this narrow a cell is
+   about 19px across, and aspect-ratio makes the height follow the width,
+   so padding would only push the number out of a box it already fills. */
 .loaf-range-day {
-    padding: 6px 0;
+    padding: 0;
     background: none;
     border: none;
     /* Square-ish cells that still add up to the width, whatever it is. */
     aspect-ratio: 1 / 1;
     color: inherit;
-    font-size: 12px;
+    font-size: 10px;
+    line-height: 1;
     cursor: pointer;
 }
 
@@ -20149,8 +20175,10 @@ label.loaf-holiday {
     background-color: var(--secondary-lighter);
 }
 
-.loaf-range-day.is-other {
-    color: var(--secondary);
+/* An empty square where a day of another month would have been, holding
+   the shape of the week without drawing a date that belongs next door. */
+.loaf-range-blank {
+    aspect-ratio: 1 / 1;
 }
 
 .loaf-range-day.is-today {
