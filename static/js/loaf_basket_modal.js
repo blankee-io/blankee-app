@@ -109,6 +109,18 @@
         }
     }
 
+    // A plain show/hide rather than the side menu's .menu-collapse, which
+    // animates a max-height fixed per list - this section changes height when
+    // the carry-over cap appears, and a fixed maximum would clip it.
+    function showAdvanced(open) {
+        var panel = el('basket-advanced');
+        var button = el('basket-advanced-toggle');
+        panel.hidden = !open;
+        button.setAttribute('aria-expanded', open ? 'true' : 'false');
+        button.querySelector('i').className = open
+            ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-right';
+    }
+
     function syncCarryover() {
         el('basket-carryover-cap-row').style.display =
             val('basket-carryover-mode') === 'capped' ? 'block' : 'none';
@@ -159,6 +171,9 @@
         el('basket-id').value = '';
         el('basket-monthly-container').innerHTML = '';
         $('.basket-weekday').prop('checked', false);
+        el('basket-accrual-basis').value = 'flat';
+        $('.basket-holiday').prop('checked', false);
+        showAdvanced(false);
         el('basket-no-accrual').checked = false;
         el('basket-no-grant').checked = false;
         el('basket-warn-negative-only').checked = false;
@@ -243,6 +258,21 @@
         el('basket-year-start-month').value = row.attr('data-year-start-month') || '1';
         el('basket-year-start-day').value = row.attr('data-year-start-day') || '1';
         el('basket-carryover-mode').value = row.attr('data-carryover-mode') || 'reset';
+        el('basket-accrual-basis').value =
+            row.attr('data-accrual-basis') || 'flat';
+
+        var shut = (row.attr('data-holidays') || '').split(',');
+        $('.basket-holiday').each(function () {
+            this.checked = shut.indexOf(this.value) >= 0;
+        });
+
+        // Opened for anybody who has something in there worth seeing, so an
+        // unusual basket does not look like an ordinary one until you go
+        // hunting. A default basket stays shut.
+        showAdvanced(shut.length > 0 && shut[0] !== ''
+            || el('basket-accrual-basis').value !== 'flat'
+            || (row.attr('data-carryover-mode') || 'reset') !== 'reset'
+            || !!row.attr('data-low-balance-hours'));
         el('basket-carryover-cap-hours').value = row.attr('data-carryover-cap-hours') || '';
 
         var days = (row.attr('data-weekdays') || '').split(',');
@@ -332,6 +362,10 @@
         // schema and the projection still reads them per day; this form simply
         // does not offer that.
         var brk = val('basket-break') || '0';
+        payload.accrual_basis = val('basket-accrual-basis');
+        payload.holidays = $('.basket-holiday:checked')
+            .map(function () { return this.value; }).get();
+
         var accrualOnly = [];
         WEEKDAY_PREFIXES.forEach(function (prefix, index) {
             var off = el('basket-' + prefix + '-off').checked;
@@ -388,6 +422,9 @@
 
     $('#basket-no-accrual, #basket-no-grant, #basket-warn-negative-only')
         .on('change', syncAmounts);
+    $('#basket-advanced-toggle').on('click', function () {
+        showAdvanced(el('basket-advanced').hidden);
+    });
     $('.loaf-schedule-off').on('change', function () {
         syncDay(this.id.replace('basket-', '').replace('-off', ''));
     });

@@ -84,6 +84,8 @@ EXPECTED_COLUMNS = (
     ('loaf_baskets', 'max_balance_hours'),
     ('loaf_baskets', 'mon_start'),
     ('loaf_baskets', 'accrual_only_weekdays'),
+    ('loaf_baskets', 'accrual_basis'),
+    ('loaf_baskets', 'holidays'),
     ('loaf_entries', 'computed_hours'),
     ('loaf_entries', 'direction'),
 )

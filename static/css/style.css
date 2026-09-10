@@ -19510,6 +19510,71 @@ input.loaf-schedule-counted {
     cursor: pointer;
 }
 
+/* The holidays. A two-column grid of checkboxes rather than a multi-select,
+   because fifteen options with a dozen unticked is a thing to scan, not a
+   thing to scroll. Two columns keep it inside the modal without scrolling
+   for the common case. */
+.loaf-holiday-grid {
+    /* Multi-column rather than a two-track grid: the list is chronological,
+       and a grid fills across, so reading down a column would skip every
+       other holiday. Columns fill downward, and adapt if the list grows -
+       where a grid would need its row count hardcoded. */
+    columns: 2;
+    column-gap: 10px;
+    margin: 5px 0 10px;
+    padding: 8px 10px;
+    background-color: var(--accent-lighter);
+    border: 1px solid var(--accent-hover);
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+
+label.loaf-holiday {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 !important;
+    font-size: 12px;
+    font-weight: 400 !important;
+    cursor: pointer;
+}
+
+.loaf-holiday input {
+    flex: none;
+    margin: 0;
+    cursor: pointer;
+}
+
+/* Advanced. A button rather than a summary/details pair, because the panel
+   changes height when the carry-over cap appears and details has no hook to
+   keep the chevron in step. */
+.loaf-advanced-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin: 6px 0 10px;
+    padding: 10px 0;
+    background: none;
+    border: none;
+    border-top: 1px solid var(--secondary-hover);
+    color: var(--secondary-dark);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.loaf-advanced-toggle:hover {
+    color: var(--primary);
+}
+
+.loaf-advanced-toggle i {
+    width: 10px;
+    font-size: 11px;
+    transition: transform 0.2s ease;
+}
+
 /* One break for the week, under the days rather than in them. Its own row
    so it does not read as an eighth day. */
 .loaf-schedule-break-row {

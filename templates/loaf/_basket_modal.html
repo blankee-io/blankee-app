@@ -63,22 +63,6 @@
                 <input type="number" id="basket-starting-hours" class="recurring-amount"
                        step="0.01" min="0" value="0.00">
 
-                <label for="basket-low-balance-hours">Warn me when hour balance goes below
-                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                        <span class="info-tip-text">Hours. The month view marks any day the
-                            balance drops under this - so you see it coming rather than
-                            finding out when it has already gone.</span>
-                    </span>
-                </label>
-                <div class="loaf-amount-row">
-                    <input type="number" id="basket-low-balance-hours"
-                           class="recurring-amount" step="0.01" min="0">
-                    <label class="loaf-amount-none" for="basket-warn-negative-only">
-                        <input type="checkbox" id="basket-warn-negative-only">
-                        Only when negative
-                    </label>
-                </div>
-
                 <div class="loaf-form-divider"><span>How it fills</span></div>
 
                 {# Half a field and a checkbox, rather than an empty box meaning
@@ -238,7 +222,41 @@
                     </div>
                 </div>
 
-                <div class="loaf-form-divider"><span>When the year turns</span></div>
+                <div class="loaf-form-divider"><span>Days the office is shut</span></div>
+
+                {# Rules rather than dates, computed per year - see
+                   loaf_holidays.py. A holiday is not leave: it costs nothing
+                   to book because there is nothing to book, and on a basket
+                   that accrues per hour worked it reduces the accrual, since
+                   a paid holiday is not an hour worked. On a flat basket it
+                   changes no arithmetic at all. #}
+                <label>Public holidays you get off
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Loaf works out when each one falls, including
+                            the shift when it lands on a weekend. Booking time off on one costs
+                            nothing, because the office is already shut.</span>
+                    </span>
+                </label>
+                <div class="loaf-holiday-grid">
+                    {% for slug, label, _rule in holidays %}
+                    <label class="loaf-holiday">
+                        <input type="checkbox" class="basket-holiday" value="{{ slug }}">
+                        {{ label }}
+                    </label>
+                    {% endfor %}
+                </div>
+
+                {# Everything most people never touch. Collapsed, and NOT the
+                   .menu-collapse the side menu uses: that animates a
+                   max-height fixed per list, and this section changes height
+                   when the carry-over cap appears. #}
+                <button type="button" id="basket-advanced-toggle"
+                        class="loaf-advanced-toggle" aria-expanded="false"
+                        aria-controls="basket-advanced">
+                    <i class="fa-solid fa-chevron-right"></i> Advanced options
+                </button>
+
+                <div id="basket-advanced" class="loaf-advanced" hidden>
 
                 <label for="basket-year-start-month">The year starts on
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
@@ -267,6 +285,37 @@
                     <label for="basket-carryover-cap-hours">Carry over at most</label>
                     <input type="number" id="basket-carryover-cap-hours" class="recurring-amount"
                            step="0.01" min="0" placeholder="0.00">
+                </div>
+
+                <label for="basket-accrual-basis">Does time off reduce what you accrue next?
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Most employers hand over the same figure every
+                            pay period whatever you did, which is the first option. The second is
+                            for a rate earned per hour worked, where being away - on leave, or a
+                            public holiday - earns you less. Your payslip tells you which: an
+                            accrual that is the same every time is the first.</span>
+                    </span>
+                </label>
+                <select id="basket-accrual-basis">
+                    <option value="flat">No - the same every pay period</option>
+                    <option value="worked">Yes - it is earned per hour worked</option>
+                </select>
+
+                <label for="basket-low-balance-hours">Warn me when hour balance goes below
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Hours. The month view marks any day the
+                            balance drops under this - so you see it coming rather than
+                            finding out when it has already gone.</span>
+                    </span>
+                </label>
+                <div class="loaf-amount-row">
+                    <input type="number" id="basket-low-balance-hours"
+                           class="recurring-amount" step="0.01" min="0">
+                    <label class="loaf-amount-none" for="basket-warn-negative-only">
+                        <input type="checkbox" id="basket-warn-negative-only">
+                        Only when negative
+                    </label>
+                </div>
                 </div>
 
                 <button type="submit" id="basket-submit">Add Basket</button>
