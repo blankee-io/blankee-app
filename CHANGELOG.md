@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.28.2 — 2026-09-10
+
+### Fixed
+- **Clicking the "pay lands every" box no longer stretches it** across the
+  whole form. Selecting the contents of a number field means briefly treating
+  it as text, and the rule that gave that box its narrow width only applied
+  while it was a number.
+
 ## 1.28.1 — 2026-09-10
 
 ### Changed
