@@ -144,6 +144,7 @@
                     <select id="loaf-entry-direction">
                         <option value="use">Take time off - hours come out</option>
                         <option value="accrue">Add hours - a grant or a correction</option>
+                        <option value="prior">Time off already taken - not itemised</option>
                     </select>
                 </div>
 
@@ -520,15 +521,25 @@
     // payload for exactly this.
     var entryScheduled = 0;
 
+    // accrue and prior are both a date and a figure - no range, no times, no
+    // cap - so the form treats them alike and only the wording differs.
+    var FLAT = ['accrue', 'prior'];
+
     function entryDirection() {
-        return el('loaf-entry-direction').value === 'accrue' ? 'accrue' : 'use';
+        var picked = el('loaf-entry-direction').value;
+        return FLAT.indexOf(picked) >= 0 || picked === 'use' ? picked : 'use';
+    }
+
+    function entryIsFlat() {
+        return FLAT.indexOf(entryDirection()) >= 0;
     }
 
     // Accruing is a date and a figure, so the toggle, the whole-day machinery
     // and the range fields have nothing to say - and the cap comes off,
     // because a grant is not measured in days.
     function syncEntryDirection() {
-        var adding = entryDirection() === 'accrue';
+        var adding = entryIsFlat();
+        var prior = entryDirection() === 'prior';
         var hours = el('loaf-entry-hours');
 
         el('loaf-entry-span-toggle').style.display = adding ? 'none' : '';
@@ -536,13 +547,21 @@
         // The heading follows the direction too. "Book Time Off" over a form
         // that is handing hours back reads as a mistake.
         var editing = !!el('loaf-entry-id').value;
-        el('loaf-entry-title').textContent = adding
+        el('loaf-entry-title').textContent = prior
+            ? (editing ? 'Edit Time Already Taken' : 'Record Time Already Taken')
+            : adding
             ? (editing ? 'Edit Added Hours' : 'Add Hours')
             : (editing ? 'Edit Time Off' : 'Book Time Off');
         el('loaf-entry-submit').textContent = editing
-            ? 'Save' : (adding ? 'Add Hours' : 'Book It');
+            ? 'Save' : (prior ? 'Record It' : adding ? 'Add Hours' : 'Book It');
         el('loaf-entry-hours-label').style.display = '';
-        el('loaf-entry-hours-tip').textContent = adding
+        el('loaf-entry-hours-tip').textContent = prior
+            ? 'Time off you took before Loaf was keeping track. It comes off '
+              + 'the balance, but is not counted against what you accrue next '
+              + '- the days it actually happened on are not known, and '
+              + 'charging a year of it to this pay period would be worse than '
+              + 'charging it to none.'
+            : adding
             ? 'How many hours were added, and on the day they arrived. Not '
               + 'taken off anything - this is hours arriving, not hours spent.'
             : 'Filled in from your working week, and capped at what that day '
@@ -551,7 +570,7 @@
         if (adding) {
             setEntrySpan('single');
             hours.removeAttribute('max');
-            hours.placeholder = 'Hours to add';
+            hours.placeholder = prior ? 'Hours already taken' : 'Hours to add';
         } else {
             // 0 on a day the week does not cover, which is what makes the box
             // refuse a figure there. The server refuses it too.
@@ -687,7 +706,7 @@
         // Adding hours is a date and a figure, and nothing else. No range,
         // no times, and always the person's own number - the working week has
         // no opinion about hours it did not produce.
-        if (entrySpan === 'single' && entryDirection() === 'accrue') {
+        if (entrySpan === 'single' && entryIsFlat()) {
             common.all_day = '1';
             common.end_date = '';
             common.start_time = '';
