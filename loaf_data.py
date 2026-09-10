@@ -52,6 +52,7 @@ import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+import loaf_holidays
 import redis_manager
 from redis_manager import get_table_cache, set_table_cache
 from db_connections import get_db_pool
@@ -78,6 +79,7 @@ BASKET_COLUMNS = (
     'year_start_month', 'year_start_day',
     'carryover_mode', 'carryover_cap_hours', 'low_balance_hours',
     'starting_hours', 'starting_date', 'accrual_only_weekdays',
+    'accrual_basis', 'holidays', 'custom_holidays',
 ) + tuple(
     '%s_%s' % (day, part)
     for day in WEEKDAY_PREFIXES
@@ -489,6 +491,12 @@ ENTRY_STATUSES = ('planned', 'taken', 'cancelled')
 # this table held before; 'accrue' is a credit - hours handed over, recorded
 # on the day they arrived. An accrual is never costed against the working
 # week, so it is always one date and always the figure the person typed.
+# How a basket earns. 'flat' hands over the same figure every pay period
+# whatever you did; 'worked' pro-rates it by the hours actually on the clock,
+# so any absence shrinks the next one. Flat is the default because it is what
+# most employers do - see add_loaf_accrual_basis.sql.
+ACCRUAL_BASES = ('flat', 'worked')
+
 ENTRY_DIRECTIONS = ('use', 'accrue', 'prior')
 
 # The two that are a figure on a date rather than a range costed against the
@@ -681,7 +689,18 @@ def clean_basket(payload):
     # Counted for accrual, never attended - see attends(). Same parser and
     # same storage shape as `weekdays` directly above, and a completely
     # different subject: that one is when the pay lands.
-    values['accrual_only_weekdays'] = _weekday_list(payload.get('accrual_only_weekdays'))
+    values['accrual_only_weekdays'] = _weekday_list(
+        payload.get('accrual_only_weekdays'))
+
+    basis = str(payload.get('accrual_basis') or 'flat').strip().lower()
+    if basis not in ACCRUAL_BASES:
+        return None, 'That is not a way Loaf knows how to accrue.'
+    values['accrual_basis'] = basis
+
+    values['holidays'] = ','.join(
+        loaf_holidays.as_list(payload.get('holidays'))) or None
+    values['custom_holidays'] = loaf_holidays.format_custom(
+        payload.get('custom_holidays'))
     values['monthly_days'] = _monthly_day_list(payload.get('monthly_days'))
     values['hidden'] = 1 if str(payload.get('hidden') or '') in ('1', 'true', 'on') else 0
 
