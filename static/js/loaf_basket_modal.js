@@ -112,6 +112,25 @@
     // A plain show/hide rather than the side menu's .menu-collapse, which
     // animates a max-height fixed per list - this section changes height when
     // the carry-over cap appears, and a fixed maximum would clip it.
+    // "None", the one name, or a count - never a list long enough to
+    // outgrow the button and wrap it onto three lines.
+    function syncHolidays() {
+        var picked = $('.basket-holiday:checked');
+        var text = 'None';
+        if (picked.length === 1) {
+            text = $.trim(picked.first().closest('label').text());
+        } else if (picked.length) {
+            text = picked.length + ' selected';
+        }
+        el('basket-holiday-summary').textContent = text;
+    }
+
+    function showHolidays(open) {
+        el('basket-holiday-menu').hidden = !open;
+        el('basket-holiday-toggle').setAttribute(
+            'aria-expanded', open ? 'true' : 'false');
+    }
+
     function showAdvanced(open) {
         var panel = el('basket-advanced');
         var button = el('basket-advanced-toggle');
@@ -173,6 +192,8 @@
         $('.basket-weekday').prop('checked', false);
         el('basket-accrual-basis').value = 'flat';
         $('.basket-holiday').prop('checked', false);
+        syncHolidays();
+        showHolidays(false);
         showAdvanced(false);
         el('basket-no-accrual').checked = false;
         el('basket-no-grant').checked = false;
@@ -265,6 +286,7 @@
         $('.basket-holiday').each(function () {
             this.checked = shut.indexOf(this.value) >= 0;
         });
+        syncHolidays();
 
         // Opened for anybody who has something in there worth seeing, so an
         // unusual basket does not look like an ordinary one until you go
@@ -425,6 +447,20 @@
     $('#basket-advanced-toggle').on('click', function () {
         showAdvanced(el('basket-advanced').hidden);
     });
+
+    $('#basket-holiday-toggle').on('click', function () {
+        showHolidays(el('basket-holiday-menu').hidden);
+    });
+    $('.basket-holiday').on('change', syncHolidays);
+
+    // Clicking away closes the panel and nothing else. Scoped to the modal so
+    // it cannot interfere with the page behind it, and it must not reach the
+    // modal's own backdrop handler - that closes the whole form.
+    modal.addEventListener('click', function (event) {
+        if (!event.target.closest('.loaf-holiday-picker')) {
+            showHolidays(false);
+        }
+    }, true);
     $('.loaf-schedule-off').on('change', function () {
         syncDay(this.id.replace('basket-', '').replace('-off', ''));
     });

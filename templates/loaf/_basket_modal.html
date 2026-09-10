@@ -237,13 +237,28 @@
                             nothing, because the office is already shut.</span>
                     </span>
                 </label>
-                <div class="loaf-holiday-grid">
-                    {% for slug, label, _rule in holidays %}
-                    <label class="loaf-holiday">
-                        <input type="checkbox" class="basket-holiday" value="{{ slug }}">
-                        {{ label }}
-                    </label>
-                    {% endfor %}
+                {# A dropdown of checkboxes rather than fifteen of them on the
+                   page. The panel is .category-dropdown, the same one the
+                   category pickers open, so it comes with its own scrolling,
+                   shadow and hover rows. The trigger is NOT .styled-dropdown-
+                   trigger: that one is deliberately transparent and
+                   borderless for the month and year headers, where this has
+                   to look like the selects above and below it. #}
+                <div class="loaf-holiday-picker">
+                    <button type="button" id="basket-holiday-toggle"
+                            class="loaf-holiday-trigger" aria-haspopup="true"
+                            aria-expanded="false" aria-controls="basket-holiday-menu">
+                        <span id="basket-holiday-summary">None</span>
+                        <i class="fa-solid fa-chevron-down"></i>
+                    </button>
+                    <div id="basket-holiday-menu" class="category-dropdown" hidden>
+                        {% for slug, label, _rule in holidays %}
+                        <label class="category-dropdown-item loaf-holiday">
+                            <input type="checkbox" class="basket-holiday" value="{{ slug }}">
+                            {{ label }}
+                        </label>
+                        {% endfor %}
+                    </div>
                 </div>
 
                 {# Everything most people never touch. Collapsed, and NOT the

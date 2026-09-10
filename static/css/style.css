@@ -19510,31 +19510,60 @@ input.loaf-schedule-counted {
     cursor: pointer;
 }
 
-/* The holidays. A two-column grid of checkboxes rather than a multi-select,
-   because fifteen options with a dozen unticked is a thing to scan, not a
-   thing to scroll. Two columns keep it inside the modal without scrolling
-   for the common case. */
-.loaf-holiday-grid {
-    /* Multi-column rather than a two-track grid: the list is chronological,
-       and a grid fills across, so reading down a column would skip every
-       other holiday. Columns fill downward, and adapt if the list grows -
-       where a grid would need its row count hardcoded. */
-    columns: 2;
-    column-gap: 10px;
+/* The holidays, as a dropdown of checkboxes rather than fifteen of them
+   sitting open on the form. The panel is .category-dropdown, borrowed whole
+   from the category pickers - it already scrolls, floats above what follows
+   it, and hovers its rows.
+
+   Only the trigger is new, and it is new because .styled-dropdown-trigger is
+   deliberately transparent and borderless for the month and year headers,
+   where this one has to match the selects above and below it in a form. */
+.loaf-holiday-picker {
+    position: relative;
     margin: 5px 0 10px;
-    padding: 8px 10px;
-    background-color: var(--accent-lighter);
-    border: 1px solid var(--accent-hover);
+}
+
+.loaf-holiday-trigger {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 12px;
+    background-color: var(--white);
+    border: 1px solid var(--secondary-hover);
     border-radius: 8px;
+    color: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.2s ease;
     box-sizing: border-box;
+}
+
+.loaf-holiday-trigger:hover,
+.loaf-holiday-trigger[aria-expanded="true"] {
+    border-color: var(--primary);
+}
+
+.loaf-holiday-trigger i {
+    flex: none;
+    color: var(--secondary);
+    font-size: 11px;
+}
+
+/* Capped, because fifteen rows would run off a short modal and the container
+   they sit in scrolls rather than growing. */
+#basket-holiday-menu {
+    max-height: 240px;
 }
 
 label.loaf-holiday {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     margin: 0 !important;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 400 !important;
     cursor: pointer;
 }
