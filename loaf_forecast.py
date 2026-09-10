@@ -212,10 +212,28 @@ def usage_by_date(basket, entries):
     for entry in entries:
         if int(entry.get('basket_id') or 0) != basket_id:
             continue
-        if str(entry.get('direction') or 'use') != 'use':
+        if str(entry.get('status') or 'planned') == 'cancelled':
             continue
-        _accumulate(total, _entry_split(basket, entry))
+
+        # 'prior' comes off the balance exactly as time off does - it IS time
+        # off - and differs only in being invisible to the pro-rate below.
+        direction = str(entry.get('direction') or 'use')
+        if direction == 'prior':
+            _accumulate(total, _flat_split(entry))
+        elif direction == 'use':
+            _accumulate(total, _entry_split(basket, entry))
     return total
+
+
+def _flat_split(entry):
+    """A figure on its start date, for the directions with no range to cost.
+
+    'accrue' and 'prior' are both a number somebody typed against a day. There
+    is nothing for the working week to say about either, so neither goes near
+    hours_by_date.
+    """
+    when = _as_date(str(entry.get('starts_at') or '')[:10])
+    return {when: _as_float(entry.get('hours'))} if when else {}
 
 
 def credit_by_date(basket, entries):
@@ -234,9 +252,7 @@ def credit_by_date(basket, entries):
             continue
         if str(entry.get('status') or 'planned') == 'cancelled':
             continue
-        when = _as_date(str(entry.get('starts_at') or '')[:10])
-        if when is not None:
-            _accumulate(total, {when: _as_float(entry.get('hours'))})
+        _accumulate(total, _flat_split(entry))
     return total
 
 
@@ -251,9 +267,12 @@ def absence_by_date(baskets, entries):
     by_id = {int(b.get('id') or 0): b for b in baskets}
     total = {}
     for entry in entries:
-        # A credit is not an absence. Being handed eight hours is not eight
-        # hours away from work, and counting it as such would shrink the very
-        # accrual it was meant to top up.
+        # Only real, dated time off is absence. A credit is not - being handed
+        # eight hours is not eight hours away from work, and counting it would
+        # shrink the very accrual it topped up. Nor is 'prior', for the
+        # opposite reason: those hours WERE taken, but their dates are the
+        # thing nobody knows, so charging them all to whichever period the
+        # entry sits in is not a better guess than charging them to none.
         if str(entry.get('direction') or 'use') != 'use':
             continue
         basket = by_id.get(int(entry.get('basket_id') or 0))
@@ -289,6 +308,45 @@ def _year_turns(basket, after, through):
     return out
 
 
+def _one_period_back(when, interval, unit):
+    """One cadence earlier. An exact multiple, which is what keeps the phase
+    for the cadences that have no intrinsic one."""
+    from dateutil.relativedelta import relativedelta
+
+    if unit == 'weeks':
+        return when - timedelta(weeks=interval)
+    if unit == 'months':
+        return when - relativedelta(months=interval)
+    if unit == 'years':
+        return when - relativedelta(years=interval)
+    return when - timedelta(days=interval)
+
+
+def _generate_from(anchor, start, interval, unit):
+    """Where to begin generating pay dates so none between start and the
+    anchor is missed.
+
+    The anchor is the NEXT pay date, so on a basket whose balance was stated
+    earlier - anybody who told Loaf what they had at the start of their leave
+    year - every pay date in between is in the past and BEHIND the anchor.
+    Generating from the anchor finds none of them, and the whole stretch
+    accrues nothing.
+
+    Walks back in whole cadence periods rather than jumping to `start`,
+    because that is what keeps the phase: "every 14 days" generated from an
+    arbitrary earlier date lands on a different set of days entirely and may
+    never land on the anchor at all. Overshooting is free - occurrences before
+    `start` are filtered out of the paid set, and only ever serve as the
+    period start for the first one that is not.
+    """
+    when = anchor
+    guard = 0
+    while when > start and guard < 3000:
+        when = _one_period_back(when, interval, unit)
+        guard += 1
+    return when
+
+
 def _pay_date_before(when, interval, unit, **pattern):
     """The pay date one period before `when`.
 
@@ -316,17 +374,7 @@ def _pay_date_before(when, interval, unit, **pattern):
     Falls back to the stepped-back date when the pattern yields nothing before
     `when`, which is the best available answer and still a real period.
     """
-    from dateutil.relativedelta import relativedelta
-
-    if unit == 'weeks':
-        back = when - timedelta(weeks=interval)
-    elif unit == 'months':
-        back = when - relativedelta(months=interval)
-    elif unit == 'years':
-        back = when - relativedelta(years=interval)
-    else:
-        back = when - timedelta(days=interval)
-
+    back = _one_period_back(when, interval, unit)
     earlier = [d for d in recurring_occurrence_dates(
         interval, unit, back, when, **pattern) if d < when]
     return earlier[-1] if earlier else back
@@ -402,7 +450,7 @@ def project(basket, usage, absence, through, today=None, credits=None):
     if accrual_hours is not None and anchor:
         occurrences = recurring_occurrence_dates(
             interval, unit,
-            anchor, through,
+            _generate_from(anchor, start, interval, unit), through,
             weekdays=_as_list(basket.get('weekdays')),
             monthly_days=_as_list(basket.get('monthly_days')),
             yearly_day=basket.get('yearly_day'),
