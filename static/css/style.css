@@ -20063,12 +20063,29 @@ label.loaf-holiday {
     display: none;
 }
 
+.loaf-range-anchor {
+    position: relative;
+}
+
+/* Floating over what follows rather than pushing it down the form - which
+   is what a dropdown is, and what an in-flow panel is not. The z-index and
+   the shadow are .category-dropdown's, so this and the holiday list open
+   the same way.
+
+   Still no display of its own: it is toggled with the hidden attribute, and
+   position is safe where display would not be. */
 .loaf-range {
-    margin: 5px 0 10px;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    z-index: 1000;
+    margin-top: 2px;
     padding: 8px;
     background-color: var(--white);
-    border: 1px solid var(--secondary-hover);
+    border: 1px solid var(--text-dark);
     border-radius: 8px;
+    box-shadow: 0 4px 6px var(--shadow-sm);
     box-sizing: border-box;
     user-select: none;
 }
@@ -20156,6 +20173,55 @@ label.loaf-holiday {
 
 /* Rounded on the outside of the run only, which is what makes a range look
    like one selection with two ends rather than two selections. */
+/* The two ends are draggable, so they say so - grab rather than pointer,
+   and the row of days does not turn into a smear of selected text when one
+   is pulled across it. */
+.loaf-range-day.is-start,
+.loaf-range-day.is-end {
+    cursor: grab;
+}
+
+.loaf-range-day.is-start:active,
+.loaf-range-day.is-end:active {
+    cursor: grabbing;
+}
+
+.loaf-range-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--secondary-lighter);
+    color: var(--secondary-dark);
+    font-size: 12px;
+}
+
+/* The same circle the add-a-holiday tick uses, for the same reason: it
+   confirms rather than destroys. */
+.loaf-range-done {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    background-color: var(--primary);
+    border: none;
+    border-radius: 50%;
+    color: var(--white);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.loaf-range-done:hover {
+    background-color: var(--primary-hover);
+    transform: scale(1.1);
+}
+
 .loaf-range-day.is-start { border-radius: 6px 0 0 6px; }
 .loaf-range-day.is-end { border-radius: 0 6px 6px 0; }
 .loaf-range-day.is-start.is-end { border-radius: 6px; }
