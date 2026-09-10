@@ -8,6 +8,13 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.28.1 — 2026-09-10
+
+### Changed
+- **Clicking a field in the basket form selects what is already in it**, so a
+  figure can be replaced by typing rather than swept over first. Click a
+  second time to put the caret somewhere instead.
+
 ## 1.28.0 — 2026-09-10
 
 ### Added
