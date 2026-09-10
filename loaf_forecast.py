@@ -289,6 +289,49 @@ def _year_turns(basket, after, through):
     return out
 
 
+def _pay_date_before(when, interval, unit, **pattern):
+    """The pay date one period before `when`.
+
+    The anchor is the NEXT pay date, so the period it closes began at the pay
+    date before it - and that one is not in the generated series, because
+    generation starts AT the anchor. Without this the first occurrence ends up
+    as its own period start, the window is zero days long, nothing is
+    scheduled in it, and the guard on `scheduled > 0` quietly earns nothing.
+    The symptom is a first pay date that pays out zero and a forecast that
+    only starts accruing on the second.
+
+    Walks the same pattern from exactly one cadence earlier rather than just
+    subtracting a span. Two reasons, and both bite:
+
+      A semi-monthly basket paid on the 1st and the 15th, anchored on 15
+      September, has a previous pay date of 1 September - not 15 August, which
+      is what subtracting one month gives. The window would otherwise be twice
+      its real length, and the pro-rate wrong for any absence inside it.
+
+      Stepping back an exact multiple of the interval keeps the phase for the
+      cadences that have no intrinsic one. "Every 14 days" generated from 14
+      days earlier lands back on the anchor; from 21 days earlier it never
+      lands on it at all.
+
+    Falls back to the stepped-back date when the pattern yields nothing before
+    `when`, which is the best available answer and still a real period.
+    """
+    from dateutil.relativedelta import relativedelta
+
+    if unit == 'weeks':
+        back = when - timedelta(weeks=interval)
+    elif unit == 'months':
+        back = when - relativedelta(months=interval)
+    elif unit == 'years':
+        back = when - relativedelta(years=interval)
+    else:
+        back = when - timedelta(days=interval)
+
+    earlier = [d for d in recurring_occurrence_dates(
+        interval, unit, back, when, **pattern) if d < when]
+    return earlier[-1] if earlier else back
+
+
 def _scheduled_hours_between(basket, after, through):
     """Hours this basket's week says are worked in (after, through].
 
@@ -343,16 +386,22 @@ def project(basket, usage, absence, through, today=None, credits=None):
     if through is None or through < start:
         through = start
 
-    # Accrual dates are generated from the anchor, not from the start, so the
-    # first one we actually apply has a predecessor to measure its period
-    # against. Walk wider than you write - the same trick the interest
-    # reconciler uses when it starts three statement dates early and only
-    # reconciles inside the window it was asked about.
+    # Accrual dates are generated from the anchor rather than from the start,
+    # so a basket adopted mid-year still lands its pay dates on the employer's
+    # rhythm instead of on the day somebody typed a balance in.
+    #
+    # The anchor is the NEXT pay date, so it is one to pay and not one to
+    # skip. It has no predecessor in this series - it is the first element -
+    # and _pay_date_before supplies one below. This comment used to claim the
+    # first occurrence already had one, which is what made the first pay date
+    # earn nothing.
+    interval = int(_as_float(basket.get('cadence_interval'), 1)) or 1
+    unit = str(basket.get('cadence_unit') or 'weeks')
+
     occurrences = []
     if accrual_hours is not None and anchor:
         occurrences = recurring_occurrence_dates(
-            int(_as_float(basket.get('cadence_interval'), 1)) or 1,
-            str(basket.get('cadence_unit') or 'weeks'),
+            interval, unit,
             anchor, through,
             weekdays=_as_list(basket.get('weekdays')),
             monthly_days=_as_list(basket.get('monthly_days')),
@@ -360,7 +409,17 @@ def project(basket, usage, absence, through, today=None, credits=None):
             yearly_month=basket.get('yearly_month'))
 
     period_start = {}
-    previous = anchor
+    if occurrences:
+        # The first one needs a predecessor that the series does not contain -
+        # see _pay_date_before. Everything after it has a real one.
+        previous = _pay_date_before(
+            occurrences[0], interval, unit,
+            weekdays=_as_list(basket.get('weekdays')),
+            monthly_days=_as_list(basket.get('monthly_days')),
+            yearly_day=basket.get('yearly_day'),
+            yearly_month=basket.get('yearly_month'))
+    else:
+        previous = anchor
     for occurrence in occurrences:
         period_start[occurrence] = previous
         previous = occurrence
