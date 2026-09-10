@@ -186,22 +186,89 @@
                         </label>
                     </div>
 
-                    <label for="loaf-entry-start-date">From</label>
-                    <div class="cadence-row">
-                        <input type="date" id="loaf-entry-start-date">
-                        <input type="time" id="loaf-entry-start-time" class="loaf-entry-time">
-                    </div>
+                {# The two date fields and the calendar that drops
+                   from them, wrapped so the panel can be placed
+                   against the pair rather than against the whole
+                   block - and so it floats over what follows
+                   instead of shoving it down the form. #}
+                <div class="loaf-range-anchor">
+                        <label for="loaf-entry-start-date">From</label>
+                        <div class="cadence-row">
+                            <input type="date" id="loaf-entry-start-date">
+                            <input type="time" id="loaf-entry-start-time" class="loaf-entry-time">
+                        </div>
 
-                    <label for="loaf-entry-end-date">Until
-                        <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                            <span class="info-tip-text">Leave blank for a single day. The end date
-                                is included.</span>
-                        </span>
-                    </label>
-                    <div class="cadence-row">
-                        <input type="date" id="loaf-entry-end-date">
-                        <input type="time" id="loaf-entry-end-time" class="loaf-entry-time">
-                    </div>
+                        <label for="loaf-entry-end-date">Until
+                            <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                                <span class="info-tip-text">Leave blank for a single day. The end date
+                                    is included.</span>
+                            </span>
+                        </label>
+                        <div class="cadence-row">
+                            <input type="date" id="loaf-entry-end-date">
+                            <input type="time" id="loaf-entry-end-time" class="loaf-entry-time">
+                        </div>
+
+                        {# Both ends of the range from one calendar: click a day
+                           for the start, click another for the end, and the
+                           stretch between fills in.
+
+                           The two date inputs above stay, and stay editable -
+                           they are the source of truth, this writes into them,
+                           and typing into them moves this. A calendar alone
+                           would take away typing a date and tabbing to it, which
+                           is faster than clicking for anybody who knows the
+                           date they want. #}
+                        <div id="loaf-range" class="loaf-range" hidden>
+                            {# Two months at once, because a booking that
+                               crosses the turn of one is the case a single
+                               month makes worst - you lose sight of the
+                               start while looking for the end. The arrows
+                               move the pair. #}
+                            <div class="loaf-range-months">
+                                {% for slot in [0, 1] %}
+                                <div class="loaf-range-month">
+                                    <div class="loaf-range-head">
+                                        {% if slot == 0 %}
+                                        <button type="button" id="loaf-range-prev"
+                                                aria-label="Previous month">
+                                            <i class="fa-solid fa-chevron-left"></i>
+                                        </button>
+                                        {% else %}<span class="loaf-range-gap"></span>{% endif %}
+                                        <span class="loaf-range-label"
+                                              data-slot="{{ slot }}"></span>
+                                        {% if slot == 1 %}
+                                        <button type="button" id="loaf-range-next"
+                                                aria-label="Next month">
+                                            <i class="fa-solid fa-chevron-right"></i>
+                                        </button>
+                                        {% else %}<span class="loaf-range-gap"></span>{% endif %}
+                                    </div>
+                                    <div class="loaf-range-days" aria-hidden="true">
+                                        <span>M</span><span>T</span><span>W</span>
+                                        <span>T</span><span>F</span><span>S</span>
+                                        <span>S</span>
+                                    </div>
+                                    <div class="loaf-range-grid"
+                                         data-slot="{{ slot }}"></div>
+                                </div>
+                                {% endfor %}
+                            </div>
+
+                            {# Either end can be dragged, so the panel cannot
+                               shut itself the moment a second day is clicked
+                               - there would be nothing left to drag. The
+                               tick is how it closes. #}
+                            <div class="loaf-range-foot">
+                                <span id="loaf-range-summary"></span>
+                                <button type="button" id="loaf-range-done"
+                                        class="loaf-range-done"
+                                        title="Done" aria-label="Done">
+                                    <i class="fa-solid fa-check"></i>
+                                </button>
+                            </div>
+                        </div>
+                </div>
 
                     <div class="date-checkbox-row">
                         <input type="checkbox" id="loaf-entry-override">
@@ -586,6 +653,197 @@
         syncEntryFields();
     }
 
+    // ------------------------------------------------ the range picker ----
+    //
+    // One calendar for both ends of a booking: click a day for the start,
+    // click another for the end, and the stretch between fills in.
+    //
+    // The two date inputs above it are the source of truth, not this. It
+    // writes into them and reads back out of them, so everything that
+    // already collects, validates or reopens a booking is untouched - and
+    // typing a date still works, which is faster than clicking for anybody
+    // who knows the date they want.
+    var rangeMonth = null;          // the month on show, as a Date on the 1st
+    var rangeHover = null;          // the day under the cursor, for a preview
+    var rangeBuilt = null;          // which month the 42 buttons belong to
+    var rangeEnd = false;           // is the next click the end of the range?
+    var rangeDrag = null;           // 'start' or 'end' while one is dragged
+    var rangeDragged = false;       // suppress the click a drag ends with
+    var rangeFrom = null;           // a day pressed on, before it is a drag
+    var rangeOpenedAt = 0;          // when, so the opening click cannot shut it
+
+    // Scrolled into view AFTER the click that opened it, never during.
+    //
+    // Doing it on focus moved the form 104px between mousedown and mouseup,
+    // so the two landed on different elements, the browser fired the click
+    // at their common ancestor instead of the field, and the handler that
+    // closes on an outside click took it for one. The panel opened and shut
+    // again in the same gesture - and only the first time, because by the
+    // second the form was already scrolled and nothing moved.
+    function revealRange() {
+        var panel = el('loaf-range');
+        if (panel && !panel.hidden) {
+            panel.scrollIntoView({block: 'nearest'});
+        }
+    }
+
+    function isoOf(when) {
+        return when.getFullYear() + '-'
+            + ('0' + (when.getMonth() + 1)).slice(-2) + '-'
+            + ('0' + when.getDate()).slice(-2);
+    }
+
+    function dateFrom(iso) {
+        var bits = String(iso || '').split('-');
+        if (bits.length !== 3) { return null; }
+        var when = new Date(+bits[0], +bits[1] - 1, +bits[2]);
+        return isNaN(when.getTime()) ? null : when;
+    }
+
+    // Monday first, matching the day names above the grid and the rest of
+    // Loaf. getDay() is Sunday-first, hence the shuffle.
+    function mondayIndex(when) {
+        return (when.getDay() + 6) % 7;
+    }
+
+    // Building and painting are separate, and that is not tidiness.
+    //
+    // Rebuilding the grid on hover replaced the button under the cursor
+    // between mousedown and mouseup, and a click needs the same element for
+    // both - so no click event ever fired and the calendar did nothing at
+    // all. It looked fine under test because a probe calling .click()
+    // dispatches the event straight at the element and never goes near that
+    // sequence. Hover now only repaints classes on buttons that stay put.
+    function buildRange() {
+        var key = rangeMonth.getFullYear() + '-' + rangeMonth.getMonth();
+        if (rangeBuilt === key) { return; }
+        rangeBuilt = key;
+
+        // Two of them, this month and the next. Each grid still holds its
+        // own 42 days, so a date can appear in both - painting keys off the
+        // date and not the cell, so the two agree without being told to.
+        [0, 1].forEach(function (slot) {
+            var grid = document.querySelector(
+                '.loaf-range-grid[data-slot="' + slot + '"]');
+            var label = document.querySelector(
+                '.loaf-range-label[data-slot="' + slot + '"]');
+            if (!grid) { return; }
+
+            var shown = new Date(rangeMonth.getFullYear(),
+                                 rangeMonth.getMonth() + slot, 1);
+            label.textContent = shown.toLocaleDateString(
+                undefined, {month: 'short', year: 'numeric'});
+
+            var day = new Date(shown);
+            day.setDate(1 - mondayIndex(shown));
+
+            grid.innerHTML = '';
+            for (var i = 0; i < 42; i += 1) {
+                var cell;
+                if (day.getMonth() === shown.getMonth()) {
+                    cell = document.createElement('button');
+                    cell.type = 'button';
+                    cell.className = 'loaf-range-day';
+                    cell.textContent = day.getDate();
+                    cell.setAttribute('data-date', isoOf(day));
+                } else {
+                    // Nothing at all, not a greyed-out day. With the next
+                    // month sat beside this one its 1st would otherwise be
+                    // drawn twice - once here as a spill-over and once in
+                    // its own grid - and two cells with the same date is
+                    // one too many for anything that looks a date up.
+                    cell = document.createElement('span');
+                    cell.className = 'loaf-range-blank';
+                }
+                grid.appendChild(cell);
+                day = new Date(day.getFullYear(), day.getMonth(),
+                               day.getDate() + 1);
+            }
+        });
+    }
+
+    function paintRange() {
+        var panel = el('loaf-range');
+        if (!panel) { return; }
+
+        var from = dateFrom(el('loaf-entry-start-date').value);
+        var to = dateFrom(el('loaf-entry-end-date').value);
+
+        // Hovering past the start shows what the range would be, which is
+        // what makes two clicks feel like one gesture.
+        var end = to || (from && rangeHover && rangeHover > from
+                         ? rangeHover : null);
+        var today = isoOf(new Date());
+
+        var summary = el('loaf-range-summary');
+        if (summary) {
+            var shape = {day: 'numeric', month: 'short'};
+            summary.textContent = !from ? 'Pick a day'
+                : !to ? from.toLocaleDateString(undefined, shape) + ' \u2013 ?'
+                : from.toLocaleDateString(undefined, shape) + ' \u2013 '
+                  + to.toLocaleDateString(undefined, shape);
+        }
+
+        panel.querySelectorAll('.loaf-range-day').forEach(function (cell) {
+            var iso = cell.getAttribute('data-date');
+            var when = dateFrom(iso);
+            cell.className = 'loaf-range-day'
+                + (iso === today ? ' is-today' : '')
+                + (from && iso === isoOf(from) ? ' is-start' : '')
+                + (end && iso === isoOf(end) ? ' is-end' : '')
+                + (from && end && when > from && when < end ? ' is-between' : '');
+        });
+    }
+
+    function drawRange() {
+        if (!rangeMonth) {
+            var seed = dateFrom(el('loaf-entry-start-date').value) || new Date();
+            rangeMonth = new Date(seed.getFullYear(), seed.getMonth(), 1);
+        }
+        buildRange();
+        paintRange();
+    }
+
+    function showRange(open) {
+        var panel = el('loaf-range');
+        if (!panel) { return; }
+        panel.hidden = !open;
+        if (!open) { return; }
+        drawRange();
+        rangeOpenedAt = Date.now();
+    }
+
+    // A click is either the start of a new range or the end of the one being
+    // built. Picking a day before the start makes it the new start rather
+    // than refusing - it is what somebody who clicked the wrong one first
+    // means, and refusing would leave them to work out why nothing happened.
+    function pickRangeDay(iso) {
+        var picked = dateFrom(iso);
+        var from = dateFrom(el('loaf-entry-start-date').value);
+        if (!picked) { return; }
+
+        // The first click sets the start and the next one ends the range,
+        // unless it lands earlier - which is what somebody who clicked the
+        // wrong day first means, so it becomes the new start rather than
+        // being refused with no explanation.
+        if (!rangeEnd || !from || picked < from) {
+            el('loaf-entry-start-date').value = iso;
+            el('loaf-entry-end-date').value = '';
+            rangeEnd = true;
+            rangeHover = null;
+            paintRange();
+            return;
+        }
+
+        el('loaf-entry-end-date').value = iso;
+        rangeEnd = false;
+        rangeHover = null;
+        paintRange();
+        // Left open on purpose: either end can be dragged from here, and
+        // shutting the moment the second day lands would take that away
+        // before anybody could reach it. The tick closes it.
+    }
+
     function setEntrySpan(span) {
         entrySpan = span === 'multi' ? 'multi' : 'single';
         var multi = entrySpan === 'multi';
@@ -693,8 +951,18 @@
             hoursTouched = !!entry.hours_overridden;
         }
 
+        // Opened on the month of the day that was clicked, not on today -
+        // booking next March from a March cell should not start in
+        // September.
+        var opening = dateFrom(el('loaf-entry-start-date').value) || new Date();
+        rangeMonth = new Date(opening.getFullYear(), opening.getMonth(), 1);
+        rangeHover = null;
+
+        rangeBuilt = null;          // a new booking, so rebuild the grid
+        rangeEnd = false;
         setEntrySpan(span);
         syncEntryDirection();
+        showRange(false);
         el('loaf-entry-modal').style.display = 'flex';
     }
 
@@ -831,6 +1099,136 @@
     });
     $('#loaf-entry-all-day, #loaf-entry-override').on('change', syncEntryFields);
     $('#loaf-entry-direction').on('change', syncEntryDirection);
+
+    $('#loaf-range-prev').on('click', function () {
+        rangeMonth = new Date(rangeMonth.getFullYear(),
+                              rangeMonth.getMonth() - 1, 1);
+        drawRange();
+    });
+    $('#loaf-range-done').on('click', function () { showRange(false); });
+
+    $('#loaf-range-next').on('click', function () {
+        rangeMonth = new Date(rangeMonth.getFullYear(),
+                              rangeMonth.getMonth() + 1, 1);
+        drawRange();
+    });
+
+    // The calendar belongs to the date fields, so it opens from them. Which
+    // one was clicked decides what the next click means: From starts a new
+    // range, Until finishes the one already begun.
+    $('#loaf-entry-start-date').on('focus click', function () {
+        rangeEnd = false;
+        showRange(true);
+    });
+    $('#loaf-entry-end-date').on('focus click', function () {
+        rangeEnd = !!el('loaf-entry-start-date').value;
+        showRange(true);
+    });
+    // Once the click is over and the layout has stopped moving.
+    $('#loaf-entry-start-date, #loaf-entry-end-date').on('click', revealRange);
+
+    // Clicking away puts it back. Scoped to the modal, and it must not reach
+    // the backdrop handler that closes the whole form.
+    el('loaf-entry-modal').addEventListener('click', function (event) {
+        if (event.target.closest('#loaf-range')
+            || event.target.closest('#loaf-entry-start-date')
+            || event.target.closest('#loaf-entry-end-date')) {
+            return;
+        }
+        // Belt as well as braces: the click that opened it can never be the
+        // click that shuts it, whatever the layout did in between.
+        if (Date.now() - rangeOpenedAt < 300) { return; }
+        showRange(false);
+    }, true);
+
+    // Delegated, because the grid is rebuilt whenever the month changes.
+    $('#loaf-range').on('click', '.loaf-range-day', function () {
+        // A drag ends in a click on whatever it finished over, and acting on
+        // that would throw away the range just dragged.
+        if (rangeDragged) { rangeDragged = false; return; }
+        pickRangeDay(this.getAttribute('data-date'));
+    });
+
+    // Either end can be taken hold of and moved. preventDefault stops the
+    // browser starting a text selection across the grid, which makes a drag
+    // look like a smear of highlighted numbers.
+    $('#loaf-range').on('mousedown', '.loaf-range-day', function (event) {
+        rangeDragged = false;
+        rangeFrom = null;
+        if (this.classList.contains('is-start')) { rangeDrag = 'start'; }
+        else if (this.classList.contains('is-end')) { rangeDrag = 'end'; }
+        else {
+            // Not a handle, so it might be a press-and-drag to sweep out a
+            // new range - or it might be an ordinary click. Which it is is
+            // not known until the mouse moves, so nothing is committed here
+            // and the click handler still does its job if it never does.
+            rangeFrom = this.getAttribute('data-date');
+        }
+        event.preventDefault();
+    });
+
+    $(document).on('mouseup', function () {
+        rangeDrag = null;
+        rangeFrom = null;
+    });
+    $('#loaf-range').on('mouseover', '.loaf-range-day', function () {
+        // Dragging one end moves that end, and only as far as the other -
+        // a start dragged past its end would leave a range running
+        // backwards, which is not a range.
+        // The mouse has moved with a day held down, so that press was a
+        // drag after all: it sweeps out a range from where it started to
+        // wherever it is let go. Dragged backwards, the two swap - the day
+        // pressed on is one end of the range either way.
+        if (rangeFrom && this.getAttribute('data-date') !== rangeFrom) {
+            var began = dateFrom(rangeFrom);
+            var now = dateFrom(this.getAttribute('data-date'));
+            rangeFrom = null;
+            if (!began || !now) { return; }
+            el('loaf-entry-start-date').value = isoOf(now < began ? now : began);
+            el('loaf-entry-end-date').value = isoOf(now < began ? began : now);
+            rangeDrag = now < began ? 'start' : 'end';
+            rangeDragged = true;
+            rangeEnd = false;
+            rangeHover = null;
+            paintRange();
+            return;
+        }
+
+        if (rangeDrag) {
+            var over = dateFrom(this.getAttribute('data-date'));
+            var from = dateFrom(el('loaf-entry-start-date').value);
+            var to = dateFrom(el('loaf-entry-end-date').value);
+            if (!over) { return; }
+            if (rangeDrag === 'start' && (!to || over <= to)) {
+                el('loaf-entry-start-date').value = isoOf(over);
+            } else if (rangeDrag === 'end' && from && over >= from) {
+                el('loaf-entry-end-date').value = isoOf(over);
+            }
+            rangeDragged = true;
+            paintRange();
+            return;
+        }
+
+        if (!el('loaf-entry-start-date').value || el('loaf-entry-end-date').value) {
+            return;
+        }
+        rangeHover = dateFrom(this.getAttribute('data-date'));
+        // paintRange, never drawRange: hovering must not rebuild the grid.
+        // It happens to be safe today because buildRange returns early on
+        // an unchanged month, and relying on that is how this breaks again.
+        paintRange();
+    });
+    $('#loaf-range').on('mouseleave', function () {
+        if (rangeHover) { rangeHover = null; paintRange(); }
+    });
+
+    // Typing a date has to move the calendar, or the two disagree about
+    // what is selected and only one of them is right.
+    $('#loaf-entry-start-date, #loaf-entry-end-date').on('change', function () {
+        var when = dateFrom(this.value);
+        if (when) { rangeMonth = new Date(when.getFullYear(), when.getMonth(), 1); }
+        drawRange();
+    });
     $('.loaf-span-toggle .graph-toggle-btn').on('click', function () {
         setEntrySpan(this.getAttribute('data-span'));
     });

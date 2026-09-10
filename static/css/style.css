@@ -20047,6 +20047,213 @@ label.loaf-holiday {
     text-align: center;
 }
 
+/* The range picker: one calendar, both ends of a booking. Its own small
+   styles rather than dashboard_m's - that grid is a table sized to a page,
+   where this is 42 buttons inside a 375px modal. What it does borrow is the
+   colours, so a selected day here is the same orange as a booked day there.
+
+   No display on .loaf-range: the multi-day block it sits in is toggled with
+   the hidden attribute, and a display here would beat the UA rule that
+   works through. Same trap .loaf-holiday-new fell into. */
+/* The browser's own picker would open on top of this one and set the same
+   field, so its icon goes. The segmented editor still takes a typed date,
+   which is the half worth keeping. */
+#loaf-entry-start-date::-webkit-calendar-picker-indicator,
+#loaf-entry-end-date::-webkit-calendar-picker-indicator {
+    display: none;
+}
+
+.loaf-range-anchor {
+    position: relative;
+}
+
+/* Floating over what follows rather than pushing it down the form - which
+   is what a dropdown is, and what an in-flow panel is not. The z-index and
+   the shadow are .category-dropdown's, so this and the holiday list open
+   the same way.
+
+   Still no display of its own: it is toggled with the hidden attribute, and
+   position is safe where display would not be. */
+.loaf-range {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    z-index: 1000;
+    margin-top: 2px;
+    padding: 8px 6px;
+    background-color: var(--white);
+    border: 1px solid var(--text-dark);
+    border-radius: 8px;
+    box-shadow: 0 4px 6px var(--shadow-sm);
+    box-sizing: border-box;
+    user-select: none;
+}
+
+/* Two months, side by side. min-width: 0 is not decoration - a grid child
+   of a flex row defaults to min-content, which for a 7-column grid is
+   whatever the widest '30' needs, and the pair would push the panel wider
+   than the form rather than sharing it. */
+.loaf-range-months {
+    display: flex;
+    gap: 8px;
+}
+
+.loaf-range-month {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+/* Stands in for the arrow the other month has, so both labels sit in the
+   middle of their own month rather than one being shunted across. */
+.loaf-range-gap {
+    width: 22px;
+}
+
+.loaf-range-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.loaf-range-head button {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 50%;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.loaf-range-head button:hover {
+    background-color: var(--secondary-lighter);
+    color: var(--primary);
+}
+
+.loaf-range-days,
+.loaf-range-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+}
+
+.loaf-range-days {
+    margin-bottom: 2px;
+    color: var(--secondary);
+    font-size: 9px;
+    font-weight: 700;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+/* No padding of its own: at two months to a form this narrow a cell is
+   about 19px across, and aspect-ratio makes the height follow the width,
+   so padding would only push the number out of a box it already fills. */
+.loaf-range-day {
+    padding: 0;
+    background: none;
+    border: none;
+    /* Square-ish cells that still add up to the width, whatever it is. */
+    aspect-ratio: 1 / 1;
+    color: inherit;
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.loaf-range-day:hover {
+    background-color: var(--secondary-lighter);
+}
+
+/* An empty square where a day of another month would have been, holding
+   the shape of the week without drawing a date that belongs next door. */
+.loaf-range-blank {
+    aspect-ratio: 1 / 1;
+}
+
+.loaf-range-day.is-today {
+    font-weight: 700;
+    text-decoration: underline;
+}
+
+/* The stretch between the two ends. Square, so the run reads as one bar
+   rather than a row of separate days. */
+.loaf-range-day.is-between {
+    background-color: var(--accent-lighter);
+}
+
+.loaf-range-day.is-start,
+.loaf-range-day.is-end {
+    background-color: var(--accent);
+    color: var(--white);
+    font-weight: 600;
+}
+
+/* Rounded on the outside of the run only, which is what makes a range look
+   like one selection with two ends rather than two selections. */
+/* The two ends are draggable, so they say so - grab rather than pointer,
+   and the row of days does not turn into a smear of selected text when one
+   is pulled across it. */
+.loaf-range-day.is-start,
+.loaf-range-day.is-end {
+    cursor: grab;
+}
+
+.loaf-range-day.is-start:active,
+.loaf-range-day.is-end:active {
+    cursor: grabbing;
+}
+
+.loaf-range-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--secondary-lighter);
+    color: var(--secondary-dark);
+    font-size: 12px;
+}
+
+/* The same circle the add-a-holiday tick uses, for the same reason: it
+   confirms rather than destroys. */
+.loaf-range-done {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    background-color: var(--primary);
+    border: none;
+    border-radius: 50%;
+    color: var(--white);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.loaf-range-done:hover {
+    background-color: var(--primary-hover);
+    transform: scale(1.1);
+}
+
+.loaf-range-day.is-start { border-radius: 6px 0 0 6px; }
+.loaf-range-day.is-end { border-radius: 0 6px 6px 0; }
+.loaf-range-day.is-start.is-end { border-radius: 6px; }
+
 /* The booking form. Times sit beside their date in a .cadence-row, so they are
    sized by it; disabling rather than hiding them when whole days are ticked
    keeps the form from jumping height as the box is toggled.
