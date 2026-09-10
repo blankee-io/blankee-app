@@ -489,7 +489,14 @@ ENTRY_STATUSES = ('planned', 'taken', 'cancelled')
 # this table held before; 'accrue' is a credit - hours handed over, recorded
 # on the day they arrived. An accrual is never costed against the working
 # week, so it is always one date and always the figure the person typed.
-ENTRY_DIRECTIONS = ('use', 'accrue')
+ENTRY_DIRECTIONS = ('use', 'accrue', 'prior')
+
+# The two that are a figure on a date rather than a range costed against the
+# working week. Neither is absence: 'accrue' is hours arriving, and 'prior' is
+# leave taken before Loaf was watching, whose real dates are exactly what is
+# not known - so charging a year of it to whichever period it was entered in
+# would be a worse guess than charging it to none.
+FLAT_DIRECTIONS = ('accrue', 'prior')
 
 # The same lowercase names the recurring forms emit and auto_balance validates,
 # so a cadence written here is one bucket_utils recognises. It skips a name it
@@ -730,7 +737,16 @@ def clean_entry(payload):
         return None, 'Pick a basket for these hours.'
     values['basket_id'] = basket_id
 
-    all_day = str(payload.get('all_day') or '') in ('1', 'true', 'on')
+    # Read before anything it governs. A flat direction has no range at all -
+    # it is a figure on a date - so the block below demanding a start and an
+    # end time of one refused every edit of it.
+    direction = str(payload.get('direction') or 'use').strip().lower()
+    if direction not in ENTRY_DIRECTIONS:
+        return None, 'That is not something Loaf can do with hours.'
+    values['direction'] = direction
+
+    all_day = (direction in FLAT_DIRECTIONS
+               or str(payload.get('all_day') or '') in ('1', 'true', 'on'))
     values['all_day'] = 1 if all_day else 0
 
     start_date, ok = _opt_date(payload.get('start_date'))
@@ -773,11 +789,6 @@ def clean_entry(payload):
         return None, 'That status is not one Loaf understands.'
     values['status'] = status
 
-    direction = str(payload.get('direction') or 'use').strip().lower()
-    if direction not in ENTRY_DIRECTIONS:
-        return None, 'That is not something Loaf can do with hours.'
-    values['direction'] = direction
-
     note = str(payload.get('note') or '').strip()
     if len(note) > 255:
         return None, 'That note is too long.'
@@ -801,9 +812,10 @@ def clean_entry(payload):
     # working week and no schedule that knows how big it should be - somebody
     # was handed some hours, and the only source for the figure is them. So it
     # is always its own override, and always the one date it arrived on.
-    if direction == 'accrue':
+    if direction in FLAT_DIRECTIONS:
         if typed is None or typed <= 0:
-            return None, 'How many hours were added?'
+            return None, ('How many hours were added?' if direction == 'accrue'
+                          else 'How many hours have already been taken?')
         values['hours'] = typed
         values['hours_overridden'] = 1
         values['all_day'] = 1

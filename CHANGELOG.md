@@ -8,6 +8,46 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.27.0 — 2026-09-09
+
+### Added
+- **A basket started part-way through the year fills in the year behind it.**
+  Adopting Loaf in September used to leave everything before today blank — no
+  accruals on the calendar, and no way to enter last spring's holiday without
+  the balance coming out wrong.
+
+  A new basket is now dated back to the start of its leave year, so every pay
+  date since lands on its own, and one entry accounts for the leave taken
+  before Loaf was keeping track. The balance today is still exactly the figure
+  you typed. Loaf says what it did, and what it assumed.
+
+  That entry is yours to do as you like with. Split it into your real days off
+  and delete it, or leave it exactly where it is — both work. What it will not
+  do is shrink on its own as you add real days beside it, so trim it as you go
+  or the two will both come off.
+
+  If your hours come to **more** than the accruals can account for, Loaf fills
+  in nothing and says so, rather than inventing the difference — it usually
+  means the accrual figure, the pay dates or the leave-year start is not what
+  you think.
+
+- **Hours taken before Loaf was tracking** are a third kind of entry, on the
+  booking form beside taking time off and adding hours. They come off the
+  balance but are not counted against what you accrue next, because the days
+  they happened on are exactly what is not known.
+
+### Fixed
+- **Pay dates between your stated balance and your next pay date now accrue.**
+  If you told Loaf what you had at some earlier date, every pay date in
+  between was silently skipped and nothing accrued until the next one. This is
+  what made the year behind a basket impossible to fill in.
+
+  **Balances may go up** for a basket whose starting date is more than one pay
+  period before its next pay date. Nothing needs re-entering.
+
+- **Editing an entry that has no times** — hours added, or hours taken before
+  Loaf — was refused for not having any.
+
 ## 1.26.1 — 2026-09-09
 
 ### Fixed
