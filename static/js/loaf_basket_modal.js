@@ -503,6 +503,14 @@
     function close() { modal.style.display = 'none'; }
 
     function collect() {
+        // Nothing should be left as text: a field still being edited when
+        // Save is clicked would be read as one, and the row that stores it
+        // does not care - but the next open would find a type it did not
+        // put there.
+        $('#basket-form input[data-was-number]').each(function () {
+            backToNumber(this);
+        });
+
         var payload = {
             name: val('basket-name'),
             basket_type: val('basket-type'),
@@ -703,6 +711,73 @@
             syncDay(prefix);
         });
         el('basket-break').value = '0';
+    });
+
+    // Clicking a field selects what is already in it, so typing replaces the
+    // figure rather than landing next to it.
+    //
+    // Two halves, and the second is the one that is easy to leave out. A
+    // click fires mousedown, then focus, then mouseup - and mouseup is what
+    // places the caret, which throws away whatever focus just selected. So
+    // focus selects, and the mouseup that belongs to the SAME click is
+    // suppressed. A second click on a field already focused is left alone,
+    // which is how somebody puts the caret somewhere or drags over part of
+    // the value.
+    //
+    // text and number only. A date or time input is a set of segments, and
+    // select() does not apply to them - clicking a segment already selects
+    // that segment.
+    // A number input cannot be selected at all - measured, not assumed:
+    // select() on one is a no-op in Chrome and selectionStart reads null,
+    // because the selection API does not apply to that type. The only thing
+    // that works is to make it a text input for as long as it is being
+    // edited, and put it back on the way out.
+    //
+    // What that costs while focused: the spinner arrows, and the browser's
+    // own min/step checking. inputmode keeps a numeric keypad on a phone,
+    // and the field is a number again by the time anything validates it.
+    // Type something that is not a number and it comes back empty, which is
+    // what a number input does with nonsense anyway.
+    var selectingIn = null;
+
+    function editAsText(node) {
+        if (node.type !== 'number') { return; }
+        node.dataset.wasNumber = '1';
+        node.type = 'text';
+        node.inputMode = 'decimal';
+    }
+
+    function backToNumber(node) {
+        if (!node.dataset || node.dataset.wasNumber !== '1') { return; }
+        delete node.dataset.wasNumber;
+        node.type = 'number';
+    }
+
+    modal.addEventListener('focusin', function (event) {
+        var node = event.target;
+        if (!node.matches || !node.matches('input[type="text"], '
+                                           + 'input[type="number"]')) {
+            return;
+        }
+        editAsText(node);
+        selectingIn = node;
+        try {
+            node.select();
+        } catch (err) {
+            selectingIn = null;     // not a control that can be selected
+        }
+    });
+
+    modal.addEventListener('mouseup', function (event) {
+        if (selectingIn && event.target === selectingIn) {
+            event.preventDefault();
+            selectingIn = null;
+        }
+    });
+
+    modal.addEventListener('focusout', function (event) {
+        selectingIn = null;
+        if (event.target && event.target.dataset) { backToNumber(event.target); }
     });
 
     // Backdrop and Escape, the way every other modal on the site closes.
