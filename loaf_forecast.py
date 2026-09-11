@@ -427,6 +427,15 @@ def _holiday_hours_between(shelf, after, through):
     Read per basket rather than folded into absence_by_date, because that dict
     is shared by every basket and two baskets naming Christmas would subtract
     it twice.
+
+    A holiday landing on a day nobody attends costs nothing, which is why
+    attends() belongs here and emphatically not in
+    _scheduled_hours_between. On a week where some days are counted for
+    accrual but not worked, such a day is already not an hour worked - the
+    schedule says so. Subtracting it again as a shut day would charge the
+    same absence twice and quietly deflate every accrual that happens to
+    contain one. Thanksgiving is the case that makes this concrete: it is
+    always a Thursday, so a Thursday-off week would lose it every year.
     """
     if not shelf.get('holidays') and not shelf.get('custom_holidays'):
         return 0.0
@@ -434,6 +443,8 @@ def _holiday_hours_between(shelf, after, through):
     for when in loaf_holidays.dates_between(shelf.get('holidays'),
                                             after + timedelta(days=1), through,
                                             shelf.get('custom_holidays')):
+        if not attends(shelf, when.weekday()):
+            continue
         minutes += scheduled_minutes(shelf, when.weekday())
     return round(minutes / 60.0, 2)
 

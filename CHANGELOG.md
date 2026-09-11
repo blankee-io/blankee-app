@@ -8,6 +8,34 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.32.0 — 2026-09-11
+
+### Added
+- **Loaf: tell a shelf how many hours your employer counts in a pay period.**
+  Payroll divides by one flat figure all year — 86.67 paid twice a month, 80
+  paid fortnightly — where Loaf had been counting the real weekdays in each
+  period, which is honest and is not what a payslip does: a semi-monthly
+  period holds ten, eleven or twelve of them, so identical months accrued
+  different amounts. Tick **"My employer counts the same hours in every pay
+  period"** in the shelf's Advanced section and the figure appears, worked out
+  from your week and cadence and ready to type over if your payslip disagrees.
+  Left unticked, nothing changes.
+
+### Fixed
+- **Loaf: that setting could not be reached.** The field has been in the shelf
+  form since shelves were split out of baskets, but it only appeared when the
+  accrual basis was "per hour worked" — and the basis moved to the basket in
+  the same change, leaving the check reading a control that is not on the
+  form. It was never true, so the field never showed. One shelf can hold
+  baskets on either basis, so the shelf is not the place that question can be
+  answered at all; it is no longer asked there.
+- **Loaf: a holiday on a day you are counted for but not at work no longer
+  costs you an accrual.** On a week where some days count toward accrual
+  without being worked, such a day is already not an hour worked — the
+  schedule says so — and subtracting it again as a public holiday charged the
+  same absence twice. Thanksgiving is the case that makes it concrete: it is
+  always a Thursday, so a Thursday-off job lost it every year.
+
 ## 1.31.2 — 2026-09-10
 
 ### Fixed
