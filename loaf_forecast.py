@@ -444,7 +444,8 @@ def _hours_between(by_date, after, through):
                      if after < day <= through), 2)
 
 
-def project(shelf, basket, usage, absence, through, today=None, credits=None):
+def project(shelf, basket, usage, absence, through, today=None, credits=None,
+            opening_turn=False):
     """Walk one pool of hours forward and report what happens to its balance.
 
     shelf    the job it hangs off: the working week, the days the office is
@@ -461,6 +462,15 @@ def project(shelf, basket, usage, absence, through, today=None, credits=None):
              they appear here and NOT in absence: a credit adds to the balance
              without anybody having been away, so it must not touch the
              pro-rate.
+    opening_turn
+             whether the leave year turning ON the first day counts. Off by
+             default, and it has to be: a starting balance is a statement of
+             what somebody has on that date, and if their year began that
+             morning the figure already includes the grant. Granting it again
+             would hand them the year twice.
+
+             The backfill turns it on, because it starts the basket at zero on
+             purpose and asks the engine to work the year out from there.
 
     Returns {'events', 'checkpoints', 'summary'}.
     """
@@ -517,8 +527,19 @@ def project(shelf, basket, usage, absence, through, today=None, credits=None):
         period_start[occurrence] = previous
         previous = occurrence
 
+    # Strictly after: a pay date ON the first day pays for the period that
+    # ended there, and that period ran before this walk began. Nothing is
+    # known about it, so paying it in full would invent the hours.
     accrual_dates = sorted(set(d for d in occurrences if d > start))
-    turn_dates = sorted(set(_year_turns(shelf, start, through)))
+
+    turn_dates = set(_year_turns(shelf, start, through))
+
+    # _year_turns reports turns in (after, through], so it cannot report one
+    # on the first day of the walk. Only a caller replaying from nothing wants
+    # it to - see opening_turn.
+    if opening_turn and accrual_year_bounds(shelf, start)[0] == start:
+        turn_dates.add(start)
+    turn_dates = sorted(turn_dates)
 
     # Every date the balance can move on, gathered before the loop so the loop
     # itself is pure arithmetic - the property that makes Blankee's walks
@@ -879,6 +900,11 @@ def month_rows(shelf, basket, result, absence, first, last, taken_by=None):
         rows.append({
             'date': day,
             'non_working': scheduled == 0,
+            # Which of the three reasons, so a form can say it out loud rather
+            # than capping a box at zero and leaving the browser to mutter
+            # "Value must be 0."
+            'closed': day in shut,
+            'unattended': not attends(shelf, day.weekday()),
             'scheduled': scheduled,
             'worked': round(max(0.0, scheduled - away), 2),
             # From the split, not from the projection's events. The two

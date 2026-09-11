@@ -8,6 +8,24 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.31.1 — 2026-09-10
+
+### Fixed
+- **No accrual on the first day of your leave year.** If one of your pay dates
+  falls on the day your leave year opens, an accrual was landing there for the
+  period that *ended* that day — which ran entirely in the year before, a year
+  Loaf has no record of, so it accrued as though every day of it had been
+  worked. Introduced in 1.31.0 while making an annual grant land correctly;
+  the grant still lands, and the phantom accrual does not.
+
+  This takes effect when a basket is created. **A basket made before this
+  update keeps the starting date it was given** — delete and re-add it to pick
+  up the fix.
+- **A day with no hours now says why.** Booking on a public holiday, on a day
+  you are counted for but not at work, or on a day you simply do not work,
+  gave you an hours box that refused everything and a browser message reading
+  "Value must be 0." It now says which of the three it is.
+
 ## 1.31.0 — 2026-09-10
 
 ### Added

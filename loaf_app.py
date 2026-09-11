@@ -321,26 +321,36 @@ def _backfill_year(user_id, basket_id, stated_hours, today):
     if year_start >= today:
         return None                 # the year began today; nothing to catch up
 
-    # Re-date to the DAY BEFORE the year start and replay from nothing, so
-    # the engine - not arithmetic repeated here - decides what the accruals,
-    # the grant, the carryover and the ceiling come to. Anything computed by
-    # hand would be a second implementation of the walk, drifting the day
-    # either changes.
+    # Re-date to the year start and replay from nothing, so the engine - not
+    # arithmetic repeated here - decides what the accruals, the grant, the
+    # carryover and the ceiling come to. Anything computed by hand would be a
+    # second implementation of the walk, drifting the day either changes.
     #
-    # The day before, not the day itself, because _year_turns reports turns in
-    # (after, through] - so replaying from the year start excludes the turn AT
-    # the year start, and with it the grant that lands there. An accruing
-    # basket hid that: its pay dates fall inside the year and produce events
-    # whatever happens at the boundary. A basket that is only granted has
-    # nothing else, so it replayed to nothing, kept today as its starting date
-    # and put its whole year outside the projection.
-    from datetime import timedelta as _td
+    # The year start itself, not the day before it. Backing off a day did make
+    # the year-turn grant land, but it also made a pay date falling ON the
+    # year start eligible - and that one pays for the period that ENDED there,
+    # which ran entirely in the year before this basket existed. project()
+    # recognises a turn on its first day now, so the day before is not needed
+    # and would only buy back that phantom accrual.
     loaf_data.update_basket(user_id, basket_id, {
-        'starting_hours': 0,
-        'starting_date': (year_start - _td(days=1)).isoformat()})
+        'starting_hours': 0, 'starting_date': year_start.isoformat()})
     replayed = loaf_data.get_basket(user_id, basket_id)
-    result = loaf_forecast.project(shelf, replayed, {}, {}, today, today=today)
+    # opening_turn: this walk starts the basket at zero on the first day of
+    # its leave year, so the turn that opens that year - the carryover, and
+    # any annual grant - belongs to it. Nobody else gets that, because a
+    # stated starting balance already counts whatever landed that morning.
+    result = loaf_forecast.project(shelf, replayed, {}, {}, today, today=today,
+                                   opening_turn=True)
     earned = loaf_forecast.balance_on(result, today)
+
+    # What the basket was worth the moment its year opened - the grant, for
+    # anything granted. That becomes the stored starting balance, so every
+    # later projection reproduces this same series without needing to be told
+    # about the opening turn: the grant is inside the opening figure rather
+    # than waiting at a boundary the walk starts on and therefore never
+    # crosses. Read off the replay, not worked out here, so it stays the
+    # engine's answer.
+    opening = loaf_forecast.balance_on(result, year_start)
 
     if not result.get('events'):
         # No pay date has come round yet inside this year. Put the basket back.
@@ -364,7 +374,12 @@ def _backfill_year(user_id, basket_id, stated_hours, today):
                 'starts.' % (year_start.strftime('%-d %B'), earned))
 
     if spent < 0.005:
-        return None                 # nothing was spent; the accruals alone fit
+        # Nothing was spent; the accruals alone fit. The opening balance still
+        # has to be stored, or a granted basket would sit at zero all year.
+        loaf_data.update_basket(user_id, basket_id, {'starting_hours': opening})
+        return None
+
+    loaf_data.update_basket(user_id, basket_id, {'starting_hours': opening})
 
     loaf_data.create_entry(user_id, {
         'basket_id': basket_id,
@@ -808,6 +823,8 @@ def _month_payload(user_id, basket, year, month, today):
             'in_month': first <= row['date'] <= last,
             'is_today': row['date'] == today,
             'non_working': row['non_working'],
+            'closed': row['closed'],
+            'unattended': row['unattended'],
             # What the working week says the day is worth. The booking modal
             # seeds its hours box with it, so a whole day off needs no sum.
             'scheduled': row['scheduled'],
