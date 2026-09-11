@@ -97,6 +97,7 @@ EXPECTED_COLUMNS = (
     ('loaf_shelves', 'holidays'),
     ('loaf_shelves', 'mon_start'),
     ('loaf_shelves', 'accrual_only_weekdays'),
+    ('loaf_shelves', 'uncharged_weekdays'),
     ('loaf_entries', 'computed_hours'),
     ('loaf_entries', 'direction'),
 )
