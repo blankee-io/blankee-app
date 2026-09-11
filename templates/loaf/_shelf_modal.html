@@ -274,24 +274,37 @@
                     <input type="number" id="shelf-year-start-day" min="1" max="31" value="1">
                 </div>
 
-                {# Only meaningful for the per-hour basis, so only shown for
-                   it - a flat accrual has no denominator to disagree about. #}
-                <div id="shelf-period-hours-row" style="display:none;">
-                    <label for="shelf-period-hours">Hours your employer counts
-                        in a pay period
+                {# Asked as a yes/no first. The figure is the thing that makes a
+                   pro-rate match a payslip, but almost nobody knows it as a number
+                   and everybody knows whether their employer uses the same one
+                   every period - so the question people can answer comes first and
+                   the number follows from it, already filled in. #}
+                <div id="shelf-period-hours-row">
+                    <label class="loaf-amount-none" for="shelf-same-period-hours">
+                        <input type="checkbox" id="shelf-same-period-hours">
+                        My employer counts the same hours in every pay period
                         <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                            <span class="info-tip-text">Leave it empty and Loaf counts the
+                            <span class="info-tip-text">Leave it unticked and Loaf counts the
                                 weekdays in each period, which is honest and is not what
                                 payroll does - a semi-monthly period holds ten, eleven or
                                 twelve of them. Most employers divide by one flat figure all
-                                year: 86.67 paid twice a month, 80 paid fortnightly. Setting
+                                year: 86.67 paid twice a month, 80 paid fortnightly. Ticking
                                 it makes the pro-rate match your payslip rather than come
                                 close.</span>
                         </span>
                     </label>
-                    <input type="number" id="shelf-period-hours"
-                           class="recurring-amount" step="0.01" min="0"
-                           placeholder="Count the weekdays">
+                    <div id="shelf-period-hours-amount">
+                        <label for="shelf-period-hours">Hours your employer counts
+                            in a pay period</label>
+                        {# Worked out from the week and the cadence, and still typed
+                           over: the arithmetic is a guess about payroll, not a fact
+                           about it, and it is the payslip that settles it. Stored
+                           rather than recomputed for the same reason - payroll's
+                           figure does not move when a Friday finishes an hour
+                           earlier, and a recomputed one would. #}
+                        <input type="number" id="shelf-period-hours"
+                               class="recurring-amount" step="0.01" min="0">
+                    </div>
                 </div>
                 </div>
 
