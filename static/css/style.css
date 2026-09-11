@@ -19407,7 +19407,7 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
    two of them. 360px leaves it 99.5 and clips; 375 leaves 107, which puts
    the picker just past the AM/PM with about 7px to spare - enough that a
    machine metering the font a shade wider does not lose it. */
-#basket-modal .income-form-container {
+#shelf-modal .income-form-container {
     width: 375px;
 }
 
@@ -19456,7 +19456,7 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
    display:none takes a grid item out of flow entirely, so the four-column
    template below still applies as written while it is away - no placeholder
    track, no shift. */
-#basket-modal:not(.loaf-counted-week) .loaf-schedule-counted {
+#shelf-modal:not(.loaf-counted-week) .loaf-schedule-counted {
     display: none;
 }
 
@@ -19468,12 +19468,12 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 
    40 rather than the 26px the Off column uses: "Not in" has to be legible at
    10px uppercase with letter-spacing, and Off does not. */
-#basket-modal.loaf-counted-week .loaf-schedule-head,
-#basket-modal.loaf-counted-week .loaf-schedule-row {
+#shelf-modal.loaf-counted-week .loaf-schedule-head,
+#shelf-modal.loaf-counted-week .loaf-schedule-row {
     grid-template-columns: 38px 1fr 1fr 26px 40px;
 }
 
-#basket-modal.loaf-counted-week .income-form-container {
+#shelf-modal.loaf-counted-week .income-form-container {
     width: 421px;
 }
 
@@ -19484,8 +19484,8 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
    is (0,2,1) and outranks a bare class. That rule is new; the number one has
    always been there, which is why the break field was rendering at the form's
    10px padding while the times beside it used the grid's 4px. */
-#basket-modal .loaf-schedule-time,
-#basket-modal .loaf-schedule-break {
+#shelf-modal .loaf-schedule-time,
+#shelf-modal .loaf-schedule-break {
     width: 100%;
     min-width: 0;
     padding: 4px 6px;
@@ -19563,7 +19563,7 @@ input.loaf-schedule-counted {
 
 /* Capped, because fifteen rows would run off a short modal and the container
    they sit in scrolls rather than growing. */
-#basket-holiday-menu {
+#shelf-holiday-menu {
     max-height: 240px;
 }
 
@@ -19651,8 +19651,8 @@ label.loaf-holiday {
 /* Half each. MM-DD needs far less room than a name does, but an even split
    reads as one control in two parts rather than a field with an
    afterthought bolted on. */
-#basket-holiday-name,
-#basket-holiday-date {
+#shelf-holiday-name,
+#shelf-holiday-date {
     flex: 1 1 0;
 
     /* The shared form rule gives every text input margin: 5px 0 10px, and
@@ -19663,7 +19663,7 @@ label.loaf-holiday {
     margin: 0;
 }
 
-#basket-holiday-date {
+#shelf-holiday-date {
     text-align: center;
 }
 
@@ -19900,8 +19900,8 @@ label.loaf-holiday {
        do lose the width this column takes. Accepted rather than solved: this
        is a console-only column for one person's schedule, and the rule below
        already hides the picker button to buy back most of it. */
-    #basket-modal.loaf-counted-week .loaf-schedule-head,
-    #basket-modal.loaf-counted-week .loaf-schedule-row {
+    #shelf-modal.loaf-counted-week .loaf-schedule-head,
+    #shelf-modal.loaf-counted-week .loaf-schedule-row {
         grid-template-columns: 34px 1fr 1fr 28px 32px;
     }
 
@@ -20012,8 +20012,15 @@ label.loaf-holiday {
 
 /* A day with something booked against it. A left edge rather than a fill, so
    it survives on top of the non-working and out-of-month treatments. */
-.dashboard-m-date.loaf-booked {
-    box-shadow: inset 3px 0 0 var(--accent);
+/* A booked day is marked by the pool dots under its date, not by a bar down
+   the side. The bar was an inset shadow on .dashboard-m-date, which is
+   transparent and carries a 1px side margin - so it drew a floating orange
+   line in the gutter BETWEEN two days and appeared to belong to neither.
+
+   The class stays: it is what says a day has something on it, and the date
+   number leans on it. */
+.dashboard-m-date.loaf-booked .dashboard-m-date-number {
+    font-weight: 700;
 }
 
 /* Single day or several. .graph-toggle-group and .graph-toggle-btn were in
@@ -20061,6 +20068,197 @@ label.loaf-holiday {
 #loaf-entry-start-date::-webkit-calendar-picker-indicator,
 #loaf-entry-end-date::-webkit-calendar-picker-indicator {
     display: none;
+}
+
+/* The job list above the baskets. The week is a subtitle, not a second
+   name: it is there to tell two jobs apart at a glance, and reading at the
+   same weight as the employer made the row a run-on sentence. */
+.loaf-shelf-week {
+    margin-left: 8px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    font-weight: 400;
+}
+
+/* A shelf and its baskets are one thing with parts, drawn the way
+   recurring_i.html draws an income and its raises: the children in the same
+   table, indented under the parent. The shelf row is the heading. */
+.loaf-shelf-row > td {
+    padding-top: 14px;
+    font-weight: 600;
+}
+
+.loaf-shelf-row .basket-name-text {
+    font-size: 15px;
+}
+
+/* The arrow and the tint are the raises treatment, and for the same reason:
+   the indent alone is easy to lose once the rows are tall. */
+.basket-arrow {
+    margin-right: 6px;
+    color: var(--primary);
+    opacity: 0.7;
+}
+
+.loaf-basket-row .basket-name {
+    padding-left: 18px;
+}
+
+.loaf-basket-row > td:first-child {
+    box-shadow: inset 3px 0 0 var(--primary-lighter);
+}
+
+/* A shelf with nothing on it yet says so, rather than the row below it
+   looking like one of its baskets. */
+.loaf-basket-none .basket-none {
+    font-style: italic;
+}
+
+/* Adding a basket sits beside editing and deleting the shelf, so it is drawn
+   like them: a bare icon, not a boxed button. It borrows .edit-recurring-btn's
+   shape rather than restating it, and only differs in colour - this one makes
+   something rather than changing or removing it. */
+.add-basket-btn {
+    position: relative;
+    width: 20px;
+    height: 20px;
+    margin-right: 5px;
+    padding: 0;
+    background-color: transparent;
+    border: none;
+    border-radius: 50%;
+    color: var(--primary);
+    cursor: pointer;
+}
+
+.add-basket-btn:hover {
+    color: var(--primary-hover);
+}
+
+@media (max-width: 600px) {
+    .loaf-shelf-week {
+        display: block;
+        margin-left: 0;
+    }
+}
+
+/* The pools on a job, above the calendar it draws them all on.
+
+   Four colours, from the palette rather than invented: a job with five pools
+   starts repeating, which is better than running out and drawing one of them
+   in nothing. They are the same four the day cells use, and the swatch on the
+   chip is what says which is which. */
+:root {
+    --pool-0: var(--accent);
+    --pool-1: var(--primary);
+    --pool-2: var(--warning);
+    --pool-3: var(--secondary-dark);
+}
+
+.loaf-pools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    /* The calendar's own box, so the chips start where its first column
+       does. #loaf-calendar is max-width 875 with auto margins, and on a wide
+       screen that centres it - a full-width row of chips above it then began
+       at the page edge while everything else was inset by 137px.
+
+       Matching the numbers rather than nesting the chips inside the table's
+       container, because that container is full width too: it is the table
+       that is centred, not the wrapper. */
+    width: 100%;
+    max-width: 875px;
+    min-width: 350px;
+    margin: 0 auto 10px;
+}
+
+.loaf-pools[hidden] { display: none; }
+
+/* A chip is a button because it does something - it moves which pool the
+   running balance counts down. It does NOT change what the calendar draws,
+   so it is deliberately quiet: no border until it is the focused one. */
+.loaf-pool {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background-color: var(--white);
+    border: 1px solid transparent;
+    border-radius: 999px;
+    box-shadow: 0 1px 2px var(--shadow-sm);
+    color: var(--text-dark);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.loaf-pool:hover { background-color: var(--secondary-lighter); }
+
+.loaf-pool.is-focused {
+    border-color: var(--text-dark);
+    font-weight: 600;
+}
+
+.loaf-pool-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: var(--pool-0);
+}
+
+.loaf-pool-1 .loaf-pool-swatch { background-color: var(--pool-1); }
+.loaf-pool-2 .loaf-pool-swatch { background-color: var(--pool-2); }
+.loaf-pool-3 .loaf-pool-swatch { background-color: var(--pool-3); }
+
+/* The add button wears the chip shape so it sits in the row, but it holds
+   no balance and names no pool - so it is the accent colour and nothing
+   else, the way every other plus in this app is. */
+.loaf-pool-add {
+    padding: 5px 9px;
+    color: var(--accent);
+}
+
+.loaf-pool-add:hover { color: var(--accent-hover); }
+
+.loaf-pool-hours { color: var(--secondary-dark); }
+.loaf-pool.is-focused .loaf-pool-hours { color: inherit; }
+.loaf-pool-hours.negative-value { color: var(--danger); }
+
+/* Which pools a day drew on, one dot each, in the colours the chips wear.
+
+   Inside the cell rather than down its edge: .dashboard-m-date is transparent
+   with a 1px side margin and its children carry the card, so an inset shadow
+   on it landed in the gutter between two days and marked neither. */
+.loaf-day-pools {
+    display: flex;
+    justify-content: center;
+    gap: 3px;
+    height: 10px;
+    margin: 0;
+
+    /* The same ground and the same side lines as the rows above and below.
+       Without them this row was transparent, so the page showed through and
+       broke the cell's left and right edges into two - a gap across the
+       middle of every day that had a booking. */
+    background-color: var(--bg-page);
+    border-left: 2px solid var(--secondary);
+    border-right: 2px solid var(--secondary);
+    box-sizing: border-box;
+}
+
+.loaf-day-pool {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--pool-0);
+}
+
+.loaf-day-pool.loaf-pool-1 { background-color: var(--pool-1); }
+.loaf-day-pool.loaf-pool-2 { background-color: var(--pool-2); }
+.loaf-day-pool.loaf-pool-3 { background-color: var(--pool-3); }
+
+@media (max-width: 600px) {
+    .loaf-pool { font-size: 12px; padding: 4px 8px; }
 }
 
 .loaf-range-anchor {

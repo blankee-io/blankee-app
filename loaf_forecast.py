@@ -106,7 +106,7 @@ def _midnight(day):
 
 # --------------------------------------------------- a booking, in hours ----
 
-def hours_by_date(basket, entry):
+def hours_by_date(shelf, entry):
     """What one booking costs, split across the dates it touches.
 
     Split rather than totalled because the accrual pro-rate needs to know which
@@ -126,12 +126,12 @@ def hours_by_date(basket, entry):
     day = starts.date()
     last = ends.date()
 
-    shut = loaf_holidays.dates_between(basket.get('holidays'), starts.date(),
+    shut = loaf_holidays.dates_between(shelf.get('holidays'), starts.date(),
                                        ends.date(),
-                                       basket.get('custom_holidays'))
+                                       shelf.get('custom_holidays'))
 
     while day <= last:
-        shift = None if day in shut else schedule_for(basket, day.weekday())
+        shift = None if day in shut else schedule_for(shelf, day.weekday())
 
         # attends() as well as schedule_for(), and the two are not the same
         # test. schedule_for says the employer counts this day; attends says
@@ -142,7 +142,7 @@ def hours_by_date(basket, entry):
         # Only job A and the calendar mask this way. _scheduled_hours_between
         # below must NOT: it is the denominator the accrual is pro-rated
         # against, and masking it there would quietly inflate every accrual.
-        if shift and attends(basket, day.weekday()):
+        if shift and attends(shelf, day.weekday()):
             full = shift['end'] - shift['start']
             if all_day:
                 minutes = max(0, full - shift['break_minutes'])
@@ -162,12 +162,12 @@ def hours_by_date(basket, entry):
     return out
 
 
-def entry_hours(basket, entry):
+def entry_hours(shelf, entry):
     """One booking's total cost - what loaf_entries.computed_hours holds."""
-    return round(sum(hours_by_date(basket, entry).values()), 2)
+    return round(sum(hours_by_date(shelf, entry).values()), 2)
 
 
-def _entry_split(basket, entry):
+def _entry_split(shelf, entry):
     """A booking's per-date hours, honouring a manual override.
 
     An unedited booking is recomputed from the schedule: the projection owns
@@ -179,7 +179,7 @@ def _entry_split(basket, entry):
     if str(entry.get('status') or 'planned') == 'cancelled':
         return {}
 
-    split = hours_by_date(basket, entry)
+    split = hours_by_date(shelf, entry)
     if not int(entry.get('hours_overridden') or 0):
         return split
 
@@ -204,7 +204,7 @@ def _accumulate(target, split):
         target[day] = round(target.get(day, 0.0) + hours, 2)
 
 
-def usage_by_date(basket, entries):
+def usage_by_date(shelf, basket, entries):
     """One basket's time off as {date: hours}, cancelled ones excluded.
 
     Hours spent, so credits are not here - see credit_by_date. Keeping the two
@@ -226,7 +226,7 @@ def usage_by_date(basket, entries):
         if direction == 'prior':
             _accumulate(total, _flat_split(entry))
         elif direction == 'use':
-            _accumulate(total, _entry_split(basket, entry))
+            _accumulate(total, _entry_split(shelf, entry))
     return total
 
 
@@ -261,13 +261,20 @@ def credit_by_date(basket, entries):
     return total
 
 
-def absence_by_date(baskets, entries):
-    """Every basket's bookings as {date: hours} - the hours NOT worked.
+def absence_by_date(shelf, baskets, entries):
+    """One job's bookings as {date: hours} - the hours NOT worked there.
 
-    Each entry is split against its own basket's schedule, because that is the
-    week it was booked against. This is the figure the accrual pro-rate
-    subtracts, and it deliberately does not care which basket the time came
-    out of: an hour not worked is an hour not worked.
+    `baskets` is every pool on THIS shelf, and that scoping is the whole
+    feature. Within a job it deliberately does not care which pool the time
+    came out of - an hour not worked is an hour not worked, and unpaid leave
+    suppresses an accrual exactly as paid leave does. Across jobs it must care
+    absolutely: time off at one employer says nothing about the hours worked
+    at another, and counting it would quietly suppress that job's accrual.
+
+    Every entry is split against the SHELF's week rather than its own
+    basket's. Those were the same thing while a basket carried its own
+    schedule, and a PTO/UTO pair only costed correctly while somebody kept the
+    two copies identical by hand. Now there is one copy.
     """
     by_id = {int(b.get('id') or 0): b for b in baskets}
     total = {}
@@ -283,21 +290,25 @@ def absence_by_date(baskets, entries):
         basket = by_id.get(int(entry.get('basket_id') or 0))
         if basket is None:
             continue
-        _accumulate(total, _entry_split(basket, entry))
+        _accumulate(total, _entry_split(shelf, entry))
     return total
 
 
 # ------------------------------------------------------------- the walk ----
 
-def _year_turns(basket, after, through):
-    """The dates this basket's accrual year turns over, within (after, through].
+def _year_turns(shelf, after, through):
+    """The dates this JOB's leave year turns over, within (after, through].
 
-    Read from the basket rather than assumed to be 1 January: a hire
+    Read from the shelf rather than assumed to be 1 January: a hire
     anniversary or a fiscal year is at least as common, and hard-coding January
     would be wrong with no visible symptom.
+
+    The boundary is the job's and what happens at it is the pool's - PTO may
+    carry over on the same date UTO resets, which is why carryover_mode stayed
+    on the basket when this moved.
     """
-    month = int(_as_float(basket.get('year_start_month'), 1))
-    day = int(_as_float(basket.get('year_start_day'), 1))
+    month = int(_as_float(shelf.get('year_start_month'), 1))
+    day = int(_as_float(shelf.get('year_start_day'), 1))
     month = min(max(month, 1), 12)
 
     out = []
@@ -385,7 +396,7 @@ def _pay_date_before(when, interval, unit, **pattern):
     return earlier[-1] if earlier else back
 
 
-def _scheduled_hours_between(basket, after, through):
+def _scheduled_hours_between(shelf, after, through):
     """Hours this basket's week says are worked in (after, through].
 
     DO NOT add attends() here. This is the denominator the accrual is
@@ -399,12 +410,12 @@ def _scheduled_hours_between(basket, after, through):
     minutes = 0
     day = after + timedelta(days=1)
     while day <= through:
-        minutes += scheduled_minutes(basket, day.weekday())
+        minutes += scheduled_minutes(shelf, day.weekday())
         day += timedelta(days=1)
     return round(minutes / 60.0, 2)
 
 
-def _holiday_hours_between(basket, after, through):
+def _holiday_hours_between(shelf, after, through):
     """Hours lost to the office being shut in (after, through].
 
     Absence, not a shorter period - which is the whole point and easy to get
@@ -417,13 +428,13 @@ def _holiday_hours_between(basket, after, through):
     is shared by every basket and two baskets naming Christmas would subtract
     it twice.
     """
-    if not basket.get('holidays') and not basket.get('custom_holidays'):
+    if not shelf.get('holidays') and not shelf.get('custom_holidays'):
         return 0.0
     minutes = 0
-    for when in loaf_holidays.dates_between(basket.get('holidays'),
+    for when in loaf_holidays.dates_between(shelf.get('holidays'),
                                             after + timedelta(days=1), through,
-                                            basket.get('custom_holidays')):
-        minutes += scheduled_minutes(basket, when.weekday())
+                                            shelf.get('custom_holidays')):
+        minutes += scheduled_minutes(shelf, when.weekday())
     return round(minutes / 60.0, 2)
 
 
@@ -433,12 +444,17 @@ def _hours_between(by_date, after, through):
                      if after < day <= through), 2)
 
 
-def project(basket, usage, absence, through, today=None, credits=None):
-    """Walk one basket forward and report what happens to its balance.
+def project(shelf, basket, usage, absence, through, today=None, credits=None):
+    """Walk one pool of hours forward and report what happens to its balance.
 
+    shelf    the job it hangs off: the working week, the days the office is
+             shut, when pay lands, and how many hours the employer counts in a
+             period. Everything about the employment rather than the pool.
     usage    {date: hours} for THIS basket - what comes off the balance.
-    absence  {date: hours} for EVERY basket - what reduces hours worked, and
-             therefore what the next accrual is pro-rated by.
+    absence  {date: hours} for every basket ON THIS SHELF - what reduces hours
+             worked, and therefore what the next accrual is pro-rated by. Not
+             every basket the person has: another job's time off says nothing
+             about the hours worked at this one.
     through  the last date to project to. There is no materialised timeline, so
              the horizon is the caller's to choose.
     credits  {date: hours} for THIS basket - hours handed over by hand. Note
@@ -455,7 +471,7 @@ def project(basket, usage, absence, through, today=None, credits=None):
     basis = str(basket.get('accrual_basis') or 'flat')
     grant_hours = basket.get('grant_hours')
     ceiling = basket.get('max_balance_hours')
-    anchor = _as_date(basket.get('accrual_anchor_date'))
+    anchor = _as_date(shelf.get('accrual_anchor_date'))
 
     start = _as_date(basket.get('starting_date')) or anchor or today
     balance = _as_float(basket.get('starting_hours'))
@@ -472,18 +488,18 @@ def project(basket, usage, absence, through, today=None, credits=None):
     # and _pay_date_before supplies one below. This comment used to claim the
     # first occurrence already had one, which is what made the first pay date
     # earn nothing.
-    interval = int(_as_float(basket.get('cadence_interval'), 1)) or 1
-    unit = str(basket.get('cadence_unit') or 'weeks')
+    interval = int(_as_float(shelf.get('cadence_interval'), 1)) or 1
+    unit = str(shelf.get('cadence_unit') or 'weeks')
 
     occurrences = []
     if accrual_hours is not None and anchor:
         occurrences = recurring_occurrence_dates(
             interval, unit,
             _generate_from(anchor, start, interval, unit), through,
-            weekdays=_as_list(basket.get('weekdays')),
-            monthly_days=_as_list(basket.get('monthly_days')),
-            yearly_day=basket.get('yearly_day'),
-            yearly_month=basket.get('yearly_month'))
+            weekdays=_as_list(shelf.get('weekdays')),
+            monthly_days=_as_list(shelf.get('monthly_days')),
+            yearly_day=shelf.get('yearly_day'),
+            yearly_month=shelf.get('yearly_month'))
 
     period_start = {}
     if occurrences:
@@ -491,10 +507,10 @@ def project(basket, usage, absence, through, today=None, credits=None):
         # see _pay_date_before. Everything after it has a real one.
         previous = _pay_date_before(
             occurrences[0], interval, unit,
-            weekdays=_as_list(basket.get('weekdays')),
-            monthly_days=_as_list(basket.get('monthly_days')),
-            yearly_day=basket.get('yearly_day'),
-            yearly_month=basket.get('yearly_month'))
+            weekdays=_as_list(shelf.get('weekdays')),
+            monthly_days=_as_list(shelf.get('monthly_days')),
+            yearly_day=shelf.get('yearly_day'),
+            yearly_month=shelf.get('yearly_month'))
     else:
         previous = anchor
     for occurrence in occurrences:
@@ -502,7 +518,7 @@ def project(basket, usage, absence, through, today=None, credits=None):
         previous = occurrence
 
     accrual_dates = sorted(set(d for d in occurrences if d > start))
-    turn_dates = sorted(set(_year_turns(basket, start, through)))
+    turn_dates = sorted(set(_year_turns(shelf, start, through)))
 
     # Every date the balance can move on, gathered before the loop so the loop
     # itself is pure arithmetic - the property that makes Blankee's walks
@@ -562,12 +578,12 @@ def project(basket, usage, absence, through, today=None, credits=None):
                 # calendar - real hours away on real days - which is the same
                 # shape payroll uses and is what makes the arithmetic agree
                 # with a payslip rather than merely come close.
-                fixed = _as_float(basket.get('period_hours'), 0.0)
+                fixed = _as_float(shelf.get('period_hours'), 0.0)
                 scheduled = (fixed if fixed > 0
-                             else _scheduled_hours_between(basket, window_start,
+                             else _scheduled_hours_between(shelf, window_start,
                                                            when))
                 absent = _hours_between(absence, window_start, when)
-                shut = _holiday_hours_between(basket, window_start, when)
+                shut = _holiday_hours_between(shelf, window_start, when)
                 worked = max(0.0, scheduled - absent - shut)
 
                 if scheduled > 0:
@@ -704,17 +720,17 @@ def _balance_at(checkpoints, when):
 
 # ----------------------------------------------------------- the horizon ----
 
-def accrual_year_bounds(basket, when):
+def accrual_year_bounds(shelf, when):
     """The accrual year a given date falls in, as (first, last).
 
-    Read from the basket, so a fiscal or anniversary year is handled the same
+    Read from the shelf, so a fiscal or anniversary year is handled the same
     way a calendar one is. The last day is the day before the next turn, which
     is what makes "what will be left at the end of the year" a date rather than
     an assumption about December.
     """
     when = _as_date(when) or date.today()
-    month = int(_as_float(basket.get('year_start_month'), 1))
-    day = int(_as_float(basket.get('year_start_day'), 1))
+    month = int(_as_float(shelf.get('year_start_month'), 1))
+    day = int(_as_float(shelf.get('year_start_day'), 1))
     month = min(max(month, 1), 12)
 
     def turn(year):
@@ -734,7 +750,7 @@ def month_bounds(year, month):
             date(year, month, calendar.monthrange(year, month)[1]))
 
 
-def horizon_for(basket, viewing, today=None):
+def horizon_for(shelf, viewing, today=None):
     """How far to project when someone is looking at one month.
 
     Far enough to answer both questions on the screen: what happens in the
@@ -744,7 +760,7 @@ def horizon_for(basket, viewing, today=None):
     """
     today = _as_date(today) or date.today()
     _, month_end = month_bounds(viewing.year, viewing.month)
-    _, year_end = accrual_year_bounds(basket, today)
+    _, year_end = accrual_year_bounds(shelf, today)
     return max(month_end, year_end)
 
 
@@ -762,21 +778,89 @@ def grid_bounds(year, month, week_starts_on=5):
     # Six rows always, so the grid does not change height from month to month.
     return start, start + timedelta(days=41), first, last
 
+def workable_hours(shelf, day):
+    """How many hours of this day could be taken off at all.
+
+    The job's week for that weekday, less nothing - but zero on a day the
+    office is shut and zero on a day counted for accrual that nobody attends.
+    Both of those are days there is no time off to take: the first because
+    everybody is already off, the second because the person is not there.
+
+    One definition, because two would drift. month_rows draws the calendar
+    from it and the booking guard measures against it, and a day the calendar
+    calls empty must be a day a booking is refused for.
+    """
+    day = _as_date(day)
+    shut = loaf_holidays.dates_between(shelf.get('holidays'), day, day,
+                                       shelf.get('custom_holidays'))
+    if day in shut or not attends(shelf, day.weekday()):
+        return 0.0
+    return round(scheduled_minutes(shelf, day.weekday()) / 60.0, 2)
+
+
+def booked_beyond(shelf, baskets, entries, proposed, ignoring=None):
+    """The first day a booking would take more hours off than the day holds.
+
+    Returns (date, already, capacity) or None. Every pool on the shelf counts
+    toward the total, because a day taken half as paid leave and half as
+    unpaid is still one day: the question is whether the hours add up to more
+    than was ever going to be worked.
+
+    `ignoring` is the id of the entry being edited, which must not be counted
+    against itself - re-saving an eight-hour day on an eight-hour schedule is
+    not an overbooking.
+    """
+    # _entry_split, not hours_by_date: a booking with a typed figure costs
+    # that figure, and measuring it as a whole scheduled day would refuse four
+    # hours of leave and four of unpaid on an eight-hour day - which is
+    # exactly the pair this is meant to allow.
+    split = _entry_split(shelf, proposed)
+    if not split:
+        return None
+
+    others = [e for e in entries
+              if ignoring is None or int(e.get('id') or 0) != int(ignoring)]
+    already = absence_by_date(shelf, baskets, others)
+
+    for day in sorted(split):
+        wanted = round(already.get(day, 0.0) + split[day], 2)
+        capacity = workable_hours(shelf, day)
+        # A hair of tolerance, because these are decimals that have been
+        # through a database and a form.
+        if wanted > capacity + 0.005:
+            return day, round(already.get(day, 0.0), 2), capacity
+    return None
+
+
 # ------------------------------------------------- what a calendar shows ----
 
-def month_rows(basket, result, absence, first, last):
+def month_rows(shelf, basket, result, absence, first, last, taken_by=None):
     """One row per day for the detail calendar.
 
-    worked is what the week says, less whatever was taken that day in ANY
-    basket - you are not at work regardless of which pot the time came from.
-    taken is this basket's own hours, since the page shows one basket at a
-    time and a basket is wholly PTO or wholly UTO.
+    worked is what the job's week says, less whatever was taken that day in
+    any pool ON THIS SHELF - you are not at work regardless of which pot the
+    time came from.
+
+    The calendar draws every pool on the job at once, so a day carries two
+    different answers to "how much was taken":
+
+      taken     the FOCUSED pool's hours, which is what the running balance
+                on the cell is a balance of. One pool at a time, because a
+                balance across a paid pot and an unpaid one is not a number
+                anybody wants.
+      taken_by  {basket_id: hours} for every pool, which is what the cell is
+                coloured from. Passed in rather than computed here: the caller
+                already holds each pool's usage split, and doing it again from
+                the entries would be the same walk twice.
+
+    accrued, granted, credited and balance are the focused pool's throughout,
+    for the same reason.
     """
     first, last = _as_date(first), _as_date(last)
     by_date = {e['date']: e for e in result['events']}
 
-    shut = loaf_holidays.dates_between(basket.get('holidays'), first, last,
-                                       basket.get('custom_holidays'))
+    shut = loaf_holidays.dates_between(shelf.get('holidays'), first, last,
+                                       shelf.get('custom_holidays'))
 
     rows = []
     day = first
@@ -787,15 +871,31 @@ def month_rows(basket, result, absence, first, last):
         # non_working below turns true and worked falls to zero. The accrual
         # is unaffected - project() reads the unmasked week through
         # _scheduled_hours_between and never comes through here.
-        scheduled = 0.0 if (day in shut or not attends(basket, day.weekday())) \
-            else round(scheduled_minutes(basket, day.weekday()) / 60.0, 2)
+        #
+        # The same figure the booking guard refuses against, by the same
+        # name - a day this draws as empty is a day nothing can be booked on.
+        scheduled = 0.0 if day in shut else workable_hours(shelf, day)
         away = absence.get(day, 0.0)
         rows.append({
             'date': day,
             'non_working': scheduled == 0,
             'scheduled': scheduled,
             'worked': round(max(0.0, scheduled - away), 2),
-            'taken': (event or {}).get('used', 0.0),
+            # From the split, not from the projection's events. The two
+            # agree inside the window - project() sets used from this very
+            # dict - but a day BEFORE the basket's starting date has no event
+            # at all, and reading the event there reported nothing taken on a
+            # day the calendar was simultaneously colouring as taken.
+            #
+            # The balance is the thing that legitimately does not move there:
+            # a starting balance is what was left AFTER everything before it,
+            # so counting those hours again would take them twice.
+            'taken': round((taken_by or {}).get(int(basket.get('id') or 0), {})
+                           .get(day, 0.0), 2),
+            # {} rather than None for a day nobody booked, so the caller can
+            # read it without asking whether it is there.
+            'taken_by': {bid: hours for bid, split in (taken_by or {}).items()
+                         for hours in [split.get(day, 0.0)] if hours},
             'accrued': (event or {}).get('accrued', 0.0),
             'granted': (event or {}).get('granted', 0.0),
             'credited': (event or {}).get('credited', 0.0),
