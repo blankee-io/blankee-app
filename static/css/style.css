@@ -20220,6 +20220,18 @@ label.loaf-holiday {
 
 .loaf-pool-add:hover { color: var(--accent-hover); }
 
+/* The sentence a day with no hours gets instead of a box capped at zero. */
+.loaf-entry-why {
+    margin: -6px 0 14px;
+    padding: 10px 12px;
+    background-color: var(--accent-lighter);
+    border-radius: 8px;
+    color: var(--text-dark);
+    font-size: 13px;
+}
+
+.loaf-entry-why[hidden] { display: none; }
+
 .loaf-pool-hours { color: var(--secondary-dark); }
 .loaf-pool.is-focused .loaf-pool-hours { color: inherit; }
 .loaf-pool-hours.negative-value { color: var(--danger); }
