@@ -8,6 +8,27 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.31.2 — 2026-09-10
+
+### Fixed
+- **Reordering categories on Manage Categories no longer springs back.** The
+  page saved the group order and the category order at the same moment. Both
+  saves read your whole category list and write the whole list back, so the
+  group one worked from a copy taken before the other had finished and landed
+  after it, restoring the order you had just dragged away from. Both saves
+  reported success, which is why the row simply appeared not to move. They now
+  run one after the other. The dashboards were already doing this; this page
+  was missed.
+- **A recurring category whose first entry falls today can be edited.** Adding
+  one and then editing that first entry behaved differently each time: it span
+  and failed, or it added a second entry for the day instead of editing the one
+  there, or it edited but left the entry no longer holding the rest of the
+  month's planned amount. One cause underneath all three — the new category and
+  its entries were answered with temporary ids that were replaced moments later,
+  so the page was holding ids that had stopped naming anything. The ids handed
+  back are now the real ones. Applies to recurring expenses, income and credit
+  account expenses alike.
+
 ## 1.31.1 — 2026-09-10
 
 ### Fixed
