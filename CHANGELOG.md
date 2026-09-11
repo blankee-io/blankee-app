@@ -8,6 +8,25 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.33.1 — 2026-09-11
+
+### Fixed
+- **Saying a forecast entry is not going to happen now sticks.** Answering
+  **No** to one of the evening's "did this happen?" prompts removed it from
+  the screen, and it came back the next time the server restarted — every
+  time, however many times you answered.
+
+  The removal reached the cache but never the database. The entry tables are
+  written back by replacing what the cache holds and deleting only what is
+  explicitly named for deletion, and the answer was naming nothing — so the
+  row survived, and the next time the cache was rebuilt from the database it
+  was rebuilt with the entry still in it. The same applies to the case where
+  moving one to tomorrow finds tomorrow already has it.
+
+  Affects expenses, income and credit account expenses alike. An entry you
+  already answered No to before this update is still in the database and will
+  come back once more; answering it again after updating removes it for good.
+
 ## 1.33.0 — 2026-09-11
 
 ### Added
