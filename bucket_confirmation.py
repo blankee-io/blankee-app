@@ -448,6 +448,33 @@ def _save_entries(table, user_id, entries):
     return redis_manager.set_table_cache(table, user_id, entries, mark_dirty=True)
 
 
+def _forget_entry(table, user_id, entry_id):
+    """Register a removed row for deletion in MySQL as well as in Redis.
+
+    Dropping it from the cached list and marking the table dirty is not enough
+    for the entry tables. The flush worker does not reconcile them by
+    comparing ids - it UPSERTs what Redis holds and deletes only what this set
+    names - so a row removed from the list alone is simply not written about.
+    It survives in MySQL, and the next hydration puts it back: answering "no"
+    appeared to work until something restarted, and then the bucket returned.
+
+    The recurring tables DO reconcile by id, which is why this is easy to
+    forget - the same removal is durable there and vanishes here.
+
+    Same idiom as bucket_utils, deliberately: one set per table, the same
+    seven-day expiry as the cache it shadows.
+    """
+    if not redis_manager._redis_client or entry_id is None:
+        return
+    key = f"pending_deletes:{table}:{user_id}"
+    try:
+        redis_manager._redis_client.sadd(key, str(entry_id))
+        redis_manager._redis_client.expire(key, 604800)
+    except Exception as e:
+        log_warning(logger, 'BUCKET_CONFIRM',
+                    f"Could not mark {table} row {entry_id} for deletion: {e}")
+
+
 def _record_key(bucket_table, user_id):
     return f"{bucket_table}:v1:{user_id}"
 
@@ -629,6 +656,7 @@ def resolve(user_id, table, entry_id, action, amount=None):
 
         if collision is not None:
             entries.remove(target)
+            _forget_entry(table, user_id, target.get('id'))
             _apply_to_record(table, user_id, category_id, bucket_date,
                              lambda r, rs: False)
             _save_entries(table, user_id, entries)
@@ -659,6 +687,7 @@ def resolve(user_id, table, entry_id, action, amount=None):
 
     # skip
     entries.remove(target)
+    _forget_entry(table, user_id, target.get('id'))
     _apply_to_record(table, user_id, category_id, bucket_date, lambda r, rs: False)
     _save_entries(table, user_id, entries)
     return True, 'Removed.', _state(removed=True)
