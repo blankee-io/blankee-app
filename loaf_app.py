@@ -405,7 +405,8 @@ def _backfill_year(user_id, basket_id, stated_hours, today):
 SHELF_FIELDS = ('cadence_unit', 'cadence_interval', 'weekdays', 'monthly_days',
                 'yearly_day', 'yearly_month', 'accrual_anchor_date',
                 'year_start_month', 'year_start_day', 'period_hours',
-                'holidays', 'custom_holidays', 'accrual_only_weekdays') + tuple(
+                'holidays', 'custom_holidays', 'accrual_only_weekdays',
+                'uncharged_weekdays') + tuple(
     '%s_%s' % (day, part)
     for day in loaf_data.WEEKDAY_PREFIXES
     for part in ('start', 'end', 'break_minutes'))
@@ -472,7 +473,12 @@ def api_update_shelf(shelf_id):
     #
     # A payload that DOES send one, empty or not, is still obeyed - so both
     # stay clearable on purpose.
-    for absent_means_keep in ('accrual_only_weekdays', 'period_hours'):
+    # uncharged_weekdays joins them: the Free column is on screen for
+    # everybody, so the current form always sends the key - but a browser still
+    # holding the previous release's script does not, and during an update
+    # window that is exactly a payload that would silently clear it.
+    for absent_means_keep in ('accrual_only_weekdays', 'uncharged_weekdays',
+                              'period_hours'):
         if absent_means_keep not in payload:
             values.pop(absent_means_keep, None)
 
@@ -686,7 +692,8 @@ def api_update_basket(basket_id):
         shelf_values, shelf_error = loaf_data.clean_shelf(payload)
         if shelf_error:
             return jsonify({'status': 'error', 'message': shelf_error}), 400
-        for absent_means_keep in ('accrual_only_weekdays', 'period_hours'):
+        for absent_means_keep in ('accrual_only_weekdays',
+                                  'uncharged_weekdays', 'period_hours'):
             if absent_means_keep not in payload:
                 shelf_values.pop(absent_means_keep, None)
         shelf_values.pop('source_basket_id', None)
