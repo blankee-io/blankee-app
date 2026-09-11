@@ -1,0 +1,61 @@
+-- =========================================================================
+-- Migration: days that cost no leave, but are still days you were away
+-- =========================================================================
+-- Purpose: loaf_shelves.accrual_only_weekdays already names days the employer
+--          counts that nobody attends - the compressed week, four ten-hour
+--          days accrued as five eights. It answers "were you at work?" with
+--          no, permanently, and everything downstream follows from that: the
+--          day costs nothing to book, a holiday landing on it costs nothing
+--          either, and a booking that spans it does not reduce hours worked,
+--          because there were never any hours to lose.
+--
+--          A different arrangement wears the same shape and wants the
+--          opposite answer. Some employers do not charge leave for one
+--          weekday - take Monday to Friday off and you are billed for four
+--          days, not five - while you work that day like any other. Were you
+--          at work? Yes, ordinarily. Were you at work on the Thursday in the
+--          middle of a week you took off? No, and payroll knows it: the
+--          period accrues as though eight hours were not worked, because they
+--          were not.
+--
+--          Put that on accrual_only_weekdays and the balance comes out right
+--          while the accrual comes out high, silently, because Loaf has been
+--          told you are never there and concludes you worked the day you were
+--          away. One column cannot hold both answers.
+--
+-- WHAT THE COLUMN HOLDS
+--   The weekdays that never draw from a balance. The 21 schedule columns keep
+--   their meaning untouched, the day is worked, counted and drawn as normal,
+--   and the only thing that changes is the price of booking it.
+--
+-- HOW IT DIFFERS FROM accrual_only_weekdays, IN ONE LINE EACH
+--   accrual_only: never there.   Costs nothing. Not absence. Holidays on it
+--                                are free, because no day was lost.
+--   uncharged:    there, usually. Costs nothing. IS absence when a booking
+--                                covers it. Holidays on it cost an accrual,
+--                                exactly as they do on any other working day.
+--
+-- WHY NOT A FLAG ON THE EXISTING COLUMN
+--   Because the two can coexist on one shelf - a compressed week whose
+--   employer also gives a free day - and because a flag changing what a list
+--   means is how a setting comes to be read wrong. Two lists, two questions,
+--   neither needing to know about the other.
+--
+-- CAREFUL: THIS IS NOT `weekdays`
+--   loaf_shelves.weekdays means which days the PAY lands on. Same varchar,
+--   same comma-separated lowercase names, same parser, unrelated subject.
+--
+-- NULL MEANS THE ORDINARY CASE
+--   Every existing shelf gets NULL and keeps precisely the figures it shows
+--   today. Nothing switches on until a day is named.
+--
+-- Run on: each environment in turn, production last
+-- =========================================================================
+
+-- Beside accrual_only_weekdays, which is the column it will be confused with.
+-- Next to it they read as a pair and the difference is visible in a DESCRIBE;
+-- appended at the end it reads as an afterthought nobody compares.
+ALTER TABLE `loaf_shelves`
+  ADD COLUMN `uncharged_weekdays` varchar(255) DEFAULT NULL
+    COMMENT 'Weekdays that never draw from a balance: worked and counted as normal, but booking one is free. NOT accrual_only_weekdays - that is the day nobody attends. NOT the pay cadence - that is `weekdays`.'
+    AFTER `accrual_only_weekdays`;

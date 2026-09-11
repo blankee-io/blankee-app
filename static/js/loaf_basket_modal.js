@@ -457,12 +457,20 @@
     function syncDay(prefix) {
         var off = el(P + '-' + prefix + '-off').checked;
         var notIn = el(P + '-' + prefix + '-notin');
+        var free = el(P + '-' + prefix + '-free');
 
         // Off wins, because the two are different states and not degrees of
         // one. Off means the employer does not count the day at all; Not in
         // means it counts the day and nobody is there for it. Holding both
         // would name an accrual-only weekday with no hours behind it.
         if (off && notIn.checked) { notIn.checked = false; }
+
+        // Off wins over Free for the same reason, and Not in wins over Free
+        // because it already answers the question Free asks. A day nobody is
+        // ever at costs nothing without needing to be told it is not billed,
+        // and holding both would leave two settings to disagree about one day.
+        if ((off || notIn.checked) && free.checked) { free.checked = false; }
+        free.disabled = off || notIn.checked;
 
         ['start', 'end'].forEach(function (part) {
             var field = el(P + '-' + prefix + '-' + part);
@@ -503,6 +511,7 @@
             el(P + '-' + prefix + '-end').value = '';
             el(P + '-' + prefix + '-off').checked = false;
             el(P + '-' + prefix + '-notin').checked = false;
+            el(P + '-' + prefix + '-free').checked = false;
         });
         syncAmounts();
         syncWeek();
@@ -662,6 +671,7 @@
         // Different column, same shape: these are days counted for accrual and
         // never attended, not days the pay lands on.
         var accrualOnly = (row.attr('data-accrual-only-weekdays') || '').split(',');
+        var uncharged = (row.attr('data-uncharged-weekdays') || '').split(',');
         $('.' + P + '-weekday').each(function () {
             this.checked = days.indexOf(this.value) !== -1;
         });
@@ -679,6 +689,8 @@
             el(P + '-' + prefix + '-off').checked = !start;
             el(P + '-' + prefix + '-notin').checked =
                 accrualOnly.indexOf(WEEKDAY_NAMES[WEEKDAY_PREFIXES.indexOf(prefix)]) >= 0;
+            el(P + '-' + prefix + '-free').checked =
+                uncharged.indexOf(WEEKDAY_NAMES[WEEKDAY_PREFIXES.indexOf(prefix)]) >= 0;
             longest = Math.max(longest,
                 parseInt(row.attr('data-' + prefix + '-break-minutes') || '0', 10) || 0);
         });
@@ -772,6 +784,7 @@
         }).join(';');
 
         var accrualOnly = [];
+        var uncharged = [];
         WEEKDAY_PREFIXES.forEach(function (prefix, index) {
             var off = el(P + '-' + prefix + '-off').checked;
             payload[prefix + '_start'] = off ? '' : val(P + '-' + prefix + '-start');
@@ -779,6 +792,9 @@
             payload[prefix + '_break_minutes'] = off ? '0' : brk;
             if (!off && el(P + '-' + prefix + '-notin').checked) {
                 accrualOnly.push(WEEKDAY_NAMES[index]);
+            }
+            if (!off && el(P + '-' + prefix + '-free').checked) {
+                uncharged.push(WEEKDAY_NAMES[index]);
             }
         });
 
@@ -788,6 +804,11 @@
         // that has it. Shown means the key is present - an empty list included,
         // which is how the setting is turned back off.
         if (countedWeekOn()) { payload.accrual_only_weekdays = accrualOnly; }
+
+        // Always sent, unlike the line above: the Free column is not behind a
+        // flag, so it is always on screen and an empty list always means the
+        // user cleared it rather than never having been shown it.
+        if (at(P + '-mon-free')) { payload.uncharged_weekdays = uncharged; }
 
         return payload;
     }
@@ -901,9 +922,16 @@
             showHolidays(false);
         }
     }, true);
-    $('.loaf-schedule-off').on('change', function () {
-        syncDay(this.id.replace(P + '-', '').replace('-off', ''));
-    });
+    // All three boxes, not just Off. They constrain each other now - Off
+    // clears and disables Free, and so does Not in, because a day nobody
+    // attends is already free and two settings for one day is two settings
+    // that can disagree. Wired to Off alone, ticking Not in left Free set and
+    // enabled, and the row said two contradictory things at once.
+    $('.loaf-schedule-off, .loaf-schedule-counted, .loaf-schedule-free')
+        .on('change', function () {
+            syncDay(this.id.replace(P + '-', '')
+                        .replace(/-(off|notin|free)$/, ''));
+        });
 
     // Times and Off, but NOT the counted-week box. The day somebody is absent
     // is never the day being copied from, so carrying the flag across would
@@ -929,6 +957,7 @@
         WEEKDAY_PREFIXES.forEach(function (prefix) {
             el(P + '-' + prefix + '-off').checked = false;
             el(P + '-' + prefix + '-notin').checked = false;
+            el(P + '-' + prefix + '-free').checked = false;
             el(P + '-' + prefix + '-start').value = '';
             el(P + '-' + prefix + '-end').value = '';
             syncDay(prefix);
