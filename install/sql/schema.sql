@@ -573,6 +573,40 @@ CREATE TABLE `linked_transactions` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `loaf_shelves` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `source_basket_id` int DEFAULT NULL COMMENT 'The basket this shelf was split out of when shelves arrived. Provenance only.',
+  `period_hours` decimal(7,2) DEFAULT NULL COMMENT 'Hours the employer counts in one pay period, the pro-rate denominator. NULL walks the working week instead.',
+  `cadence_interval` int NOT NULL DEFAULT '2',
+  `cadence_unit` enum('days','weeks','months','years') NOT NULL DEFAULT 'weeks',
+  `weekdays` varchar(255) DEFAULT NULL COMMENT 'Days PAY lands, lowercase names. Not the work week.',
+  `monthly_days` varchar(255) DEFAULT NULL COMMENT '1-31 and/or the literal Last Day',
+  `yearly_day` int DEFAULT NULL,
+  `yearly_month` int DEFAULT NULL,
+  `accrual_anchor_date` date DEFAULT NULL COMMENT 'Which week a bi-weekly period lands on',
+  `year_start_month` tinyint NOT NULL DEFAULT '1',
+  `year_start_day` tinyint NOT NULL DEFAULT '1',
+  `holidays` varchar(255) DEFAULT NULL COMMENT 'Public holidays the office closes for, as slugs.',
+  `custom_holidays` varchar(1000) DEFAULT NULL COMMENT 'Holidays this employer gives that Loaf has no rule for.',
+  `accrual_only_weekdays` varchar(255) DEFAULT NULL COMMENT 'Weekdays worked on paper only: cost 0 to book, still counted for accrual.',
+  `mon_start` time DEFAULT NULL, `mon_end` time DEFAULT NULL, `mon_break_minutes` int NOT NULL DEFAULT '0',
+  `tue_start` time DEFAULT NULL, `tue_end` time DEFAULT NULL, `tue_break_minutes` int NOT NULL DEFAULT '0',
+  `wed_start` time DEFAULT NULL, `wed_end` time DEFAULT NULL, `wed_break_minutes` int NOT NULL DEFAULT '0',
+  `thu_start` time DEFAULT NULL, `thu_end` time DEFAULT NULL, `thu_break_minutes` int NOT NULL DEFAULT '0',
+  `fri_start` time DEFAULT NULL, `fri_end` time DEFAULT NULL, `fri_break_minutes` int NOT NULL DEFAULT '0',
+  `sat_start` time DEFAULT NULL, `sat_end` time DEFAULT NULL, `sat_break_minutes` int NOT NULL DEFAULT '0',
+  `sun_start` time DEFAULT NULL, `sun_end` time DEFAULT NULL, `sun_break_minutes` int NOT NULL DEFAULT '0',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `last_modified` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_loaf_shelves_user` (`user_id`),
+  CONSTRAINT `loaf_shelves_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `loaf_baskets` (
   `id` int NOT NULL AUTO_INCREMENT,
   `user_id` int NOT NULL,

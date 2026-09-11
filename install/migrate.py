@@ -51,7 +51,7 @@ EXPECTED_TABLES = (
     'widget_tokens',
     'instance_apps',
     'bundles', 'bundle_items',
-    'loaf_baskets', 'loaf_entries',
+    'loaf_shelves', 'loaf_baskets', 'loaf_entries',
 )
 EXPECTED_COLUMNS = (
     ('users', 'is_admin'),
@@ -88,6 +88,15 @@ EXPECTED_COLUMNS = (
     ('loaf_baskets', 'period_hours'),
     ('loaf_baskets', 'holidays'),
     ('loaf_baskets', 'custom_holidays'),
+    # The job a pool of hours belongs to. Nullable this release - see the
+    # header of add_loaf_shelves.sql on why NOT NULL would turn the
+    # update window, where new schema serves old code, into an outage.
+    ('loaf_baskets', 'shelf_id'),
+    ('loaf_shelves', 'source_basket_id'),
+    ('loaf_shelves', 'period_hours'),
+    ('loaf_shelves', 'holidays'),
+    ('loaf_shelves', 'mon_start'),
+    ('loaf_shelves', 'accrual_only_weekdays'),
     ('loaf_entries', 'computed_hours'),
     ('loaf_entries', 'direction'),
 )

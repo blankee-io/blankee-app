@@ -8,6 +8,51 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.31.0 — 2026-09-10
+
+### Added
+- **A shelf is the job; baskets are the pools of hours on it.** The working
+  week, the days the office is shut, when pay lands and the hours your
+  employer counts in a period all describe the *job* — and they used to sit on
+  every basket separately. Two baskets only costed the same while you kept two
+  copies of the week identical by hand, and nothing checked.
+
+  Manage Baskets is now **Manage Shelves**: each shelf is a row with its
+  baskets nested underneath, and the plus in a shelf's row adds a basket to
+  that shelf. A basket you do not name is called after the shelf — "Acme Corp
+  PTO".
+
+  **Your existing baskets each become their own shelf**, carrying the schedule
+  they already had, so nothing about them changes. Put two on one shelf when
+  you want them to share a week.
+
+- **One calendar for every pool on a job.** The month view switches *shelves*
+  now, and draws every basket on the one grid with a coloured dot per pool.
+  A chip above it shows what each holds; clicking a chip moves which balance
+  the days count down, without changing what is drawn.
+
+- **A day can be split between pools.** Take a morning as paid leave and the
+  afternoon unpaid — switch chip, click the day, book it. The total is capped
+  at the hours that day actually holds, counted across the whole shelf, so you
+  cannot take more off a day than was ever going to be worked. Another job's
+  day off does not count against it.
+
+### Fixed
+- **A basket that is granted rather than accrued now covers its year.** It
+  kept the day you created it as its starting date, so its whole year sat
+  outside the forecast: a day booked in it changed no balance while the
+  calendar still showed the booking. As part of the same fix, **an accruing
+  basket with an annual grant has been quietly missing that grant** — the
+  replay began on the first day of the leave year and the grant lands *on*
+  that day, one moment before the window opened.
+- **Hours taken now show on days before a basket's starting date.** The
+  calendar marked the day and reported nothing on it. The balance still does
+  not move there, and should not: a starting balance is what was left after
+  everything before it, so counting those hours again would take them twice.
+- The Add Shelf button on the month view threw instead of opening the form.
+- A booked day was marked with a line that landed in the gap *between* two
+  days rather than on either of them.
+
 ## 1.30.0 — 2026-09-10
 
 ### Added

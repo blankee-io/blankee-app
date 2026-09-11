@@ -35,9 +35,18 @@
             <h2 id="basket-modal-title">Add a Basket</h2>
             <form id="basket-form" autocomplete="off">
                 <input type="hidden" id="basket-id" value="">
+                {# Which shelf this pool of hours belongs to. Never asked
+                   for: adding a basket starts from a shelf's row, so the
+                   answer is already known and a picker would only be a
+                   chance to get it wrong. #}
+                <input type="hidden" id="basket-on-shelf" value="">
 
+                {# Optional. Left empty it becomes the shelf's name and what
+                   the pool is - "Acme Corp PTO" - which is what most people
+                   would have typed anyway. #}
                 <label for="basket-name">Name</label>
-                <input type="text" id="basket-name" class="category-input" maxlength="255" required>
+                <input type="text" id="basket-name" class="category-input"
+                       maxlength="255" placeholder="Named after the shelf">
 
                 <label for="basket-type">Paid or unpaid
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
@@ -118,213 +127,8 @@
                     </label>
                 </div>
 
-                <label for="basket-accrual-anchor-date">Next pay date
-                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                        <span class="info-tip-text">The next one coming, which is what fixes the
-                            rhythm - every pay date after it is counted forward from here.</span>
-                    </span>
-                </label>
-                {# Future only. A date already gone is not a next one, and an
-                   anchor in the past silently changes which week a fortnightly
-                   cadence lands on. #}
-                <input type="date" id="basket-accrual-anchor-date" min="{{ today.isoformat() }}">
-
-                {# The cadence widget, in the markup the recurring forms use, so
-                   it inherits their CSS untouched. This is the PAY cadence -
-                   the work schedule is the grid further down, and the two must
-                   not be confused. #}
-                <label for="basket-cadence-interval">Pay lands every</label>
-                <div class="cadence-row">
-                    <input type="number" id="basket-cadence-interval" min="1" value="2">
-                    <select id="basket-cadence-unit">
-                        <option value="days">Day(s)</option>
-                        <option value="weeks" selected>Week(s)</option>
-                        <option value="months">Month(s)</option>
-                        <option value="years">Year(s)</option>
-                    </select>
-                </div>
-
-                <div id="basket-weekly" class="cadence-weekly" style="display:none;">
-                    <label>On:</label>
-                    {% for prefix in weekday_prefixes %}
-                    <div class="weekday">
-                        <input type="checkbox" class="basket-weekday"
-                               value="{{ weekday_names[loop.index0] }}">
-                        {{ weekday_names[loop.index0][:2]|capitalize }}
-                    </div>
-                    {% endfor %}
-                </div>
-
-                <div id="basket-monthly" class="cadence-monthly" style="display:none;">
-                    <label>Days of the month:</label>
-                    <div id="basket-monthly-container" class="cadence-monthly-container"></div>
-                    <button type="button" id="basket-add-day" class="add-day-btn">+ Add Another Day</button>
-                </div>
-
-                <div id="basket-yearly" class="cadence-yearly" style="display:none;">
-                    <label for="basket-yearly-day">Day of the year:</label>
-                    <input type="number" id="basket-yearly-day" min="1" max="31">
-                    <label for="basket-yearly-month">Month of the year:</label>
-                    <select id="basket-yearly-month">
-                        {% for month in ['January','February','March','April','May','June',
-                                         'July','August','September','October','November','December'] %}
-                        <option value="{{ loop.index }}">{{ month }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
 
                 </div>
-                <button type="button" class="loaf-section-toggle"
-                        id="basket-section-week-toggle"
-                        data-section="week"
-                        aria-expanded="false"
-                        aria-controls="basket-section-week">
-                    <i class="fa-solid fa-chevron-right"></i>
-                    <span>Your working week</span>
-                </button>
-                <div id="basket-section-week" class="loaf-section" data-section="week" hidden>
-
-                {# Times rather than a total per day, because "off Tuesday from
-                   1pm" cannot be costed without them. Off is a checkbox rather
-                   than "clear both boxes": two empty fields read as unfinished,
-                   and the engine treats them as a day not worked either way -
-                   so the box says out loud what the blanks only implied.
-
-                   One unpaid break for the whole week. The columns are still
-                   per day, and the projection still reads them per day, so a
-                   week with genuinely different breaks stays expressible - this
-                   form just writes the same figure to all seven. #}
-                {# The fourth column is hidden unless the counted-week flag is
-                   set from the browser console - see loafBasketModal.countedWeek.
-                   It is for one shape of schedule: a compressed week that the
-                   employer accrues as a standard one. Off and Not in are
-                   different states, and the difference is the whole feature:
-                   Off is not counted at all, Not in is counted for accrual but
-                   costs nothing to book. #}
-                <div class="loaf-schedule-grid">
-                    <div class="loaf-schedule-head">
-                        <span></span><span>Start</span><span>End</span><span>Off</span>
-                        <span class="loaf-schedule-counted">Not in</span>
-                    </div>
-                    {% for prefix in weekday_prefixes %}
-                    <div class="loaf-schedule-row" data-prefix="{{ prefix }}">
-                        <label class="loaf-schedule-day" for="basket-{{ prefix }}-start">
-                            {{ weekday_names[loop.index0][:3]|capitalize }}
-                        </label>
-                        <input type="time" id="basket-{{ prefix }}-start" class="loaf-schedule-time">
-                        <input type="time" id="basket-{{ prefix }}-end" class="loaf-schedule-time">
-                        <input type="checkbox" id="basket-{{ prefix }}-off"
-                               class="loaf-schedule-off"
-                               aria-label="{{ weekday_names[loop.index0]|capitalize }} off">
-                        <input type="checkbox" id="basket-{{ prefix }}-notin"
-                               class="loaf-schedule-counted"
-                               data-weekday="{{ weekday_names[loop.index0] }}"
-                               aria-label="Counted for accrual but not attended on {{ weekday_names[loop.index0]|capitalize }}">
-                    </div>
-                    {% endfor %}
-
-                    <div class="loaf-schedule-break-row">
-                        <label for="basket-break">Unpaid break
-                            <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                                <span class="info-tip-text">Minutes, off every working day. Taken
-                                    off a whole day booked as time off, and left on a part day -
-                                    subtracting a lunch from a two-hour afternoon would be wrong
-                                    more often than right.</span>
-                            </span>
-                        </label>
-                        <input type="number" id="basket-break" class="loaf-schedule-break"
-                               min="0" step="5" value="0">
-                        <span class="loaf-schedule-break-unit">min</span>
-                    </div>
-
-                    <div class="loaf-schedule-tools">
-                        <button type="button" id="basket-copy-monday" class="add-day-btn">
-                            Copy Monday to Tue&ndash;Fri
-                        </button>
-                        <button type="button" id="basket-clear-week" class="loaf-icon-btn"
-                                title="Clear every day" aria-label="Clear every day">
-                            <i class="fa-solid fa-broom"></i>
-                        </button>
-                    </div>
-                </div>
-
-                </div>
-                <button type="button" class="loaf-section-toggle"
-                        id="basket-section-shut-toggle"
-                        data-section="shut"
-                        aria-expanded="false"
-                        aria-controls="basket-section-shut">
-                    <i class="fa-solid fa-chevron-right"></i>
-                    <span>Days the office is shut</span>
-                </button>
-                <div id="basket-section-shut" class="loaf-section" data-section="shut" hidden>
-
-                {# Rules rather than dates, computed per year - see
-                   loaf_holidays.py. A holiday is not leave: it costs nothing
-                   to book because there is nothing to book, and on a basket
-                   that accrues per hour worked it reduces the accrual, since
-                   a paid holiday is not an hour worked. On a flat basket it
-                   changes no arithmetic at all. #}
-                <label>Public holidays you get off
-                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                        <span class="info-tip-text">Loaf works out when each one falls, including
-                            the shift when it lands on a weekend. Booking time off on one costs
-                            nothing, because the office is already shut.</span>
-                    </span>
-                </label>
-                {# A dropdown of checkboxes rather than fifteen of them on the
-                   page. The panel is .category-dropdown, the same one the
-                   category pickers open, so it comes with its own scrolling,
-                   shadow and hover rows. The trigger is NOT .styled-dropdown-
-                   trigger: that one is deliberately transparent and
-                   borderless for the month and year headers, where this has
-                   to look like the selects above and below it. #}
-                <div class="loaf-holiday-picker">
-                    <button type="button" id="basket-holiday-toggle"
-                            class="loaf-holiday-trigger" aria-haspopup="true"
-                            aria-expanded="false" aria-controls="basket-holiday-menu">
-                        <span id="basket-holiday-summary">None</span>
-                        <i class="fa-solid fa-chevron-down"></i>
-                    </button>
-                    <div id="basket-holiday-menu" class="category-dropdown" hidden>
-                        {% for slug, label, _rule in holidays %}
-                        <label class="category-dropdown-item loaf-holiday">
-                            <input type="checkbox" class="basket-holiday" value="{{ slug }}">
-                            {{ label }}
-                        </label>
-                        {% endfor %}
-
-                        {# Whatever this employer gives that Loaf has no rule
-                           for. Drawn by the JS from custom_holidays so the
-                           list survives an edit. #}
-                        <div id="basket-custom-holidays"></div>
-
-                        {# .create-new-category is the row the category
-                           pickers already use to add one from inside the
-                           list - top border, own hover, plus icon. #}
-                        <div id="basket-holiday-add"
-                             class="category-dropdown-item create-new-category">
-                            <i class="fa-solid fa-plus"></i>Add a holiday
-                        </div>
-
-                        <div id="basket-holiday-new" class="loaf-holiday-new" hidden>
-                            <input type="text" id="basket-holiday-name"
-                                   maxlength="60" placeholder="Name">
-                            <input type="text" id="basket-holiday-date"
-                                   maxlength="5" placeholder="MM-DD"
-                                   inputmode="numeric">
-                            <button type="button" id="basket-holiday-save"
-                                    class="loaf-holiday-save"
-                                    title="Add this holiday"
-                                    aria-label="Add this holiday">
-                                <i class="fa-solid fa-check"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                </div>
-
-
                 {# Everything most people never touch. Collapsed, and NOT the
                    .menu-collapse the side menu uses: that animates a
                    max-height fixed per list, and this section changes height
@@ -337,21 +141,6 @@
 
                 <div id="basket-advanced" class="loaf-advanced" hidden>
 
-                <label for="basket-year-start-month">The year starts on
-                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                        <span class="info-tip-text">A hire anniversary or a fiscal year, not
-                            necessarily 1 January.</span>
-                    </span>
-                </label>
-                <div class="cadence-row">
-                    <select id="basket-year-start-month">
-                        {% for month in ['January','February','March','April','May','June',
-                                         'July','August','September','October','November','December'] %}
-                        <option value="{{ loop.index }}">{{ month }}</option>
-                        {% endfor %}
-                    </select>
-                    <input type="number" id="basket-year-start-day" min="1" max="31" value="1">
-                </div>
 
                 <label for="basket-carryover-mode">Unused hours</label>
                 <select id="basket-carryover-mode">
@@ -366,6 +155,11 @@
                            step="0.01" min="0" placeholder="0.00">
                 </div>
 
+                {# Only a basket that accrues has an accrual to reduce. With
+                   "No accrual" ticked this question has no answer that means
+                   anything, so it is not asked - the same treatment the
+                   carry-over cap gets above. #}
+                <div id="basket-accrual-basis-row">
                 <label for="basket-accrual-basis">Does time off reduce what you accrue next?
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
                         <span class="info-tip-text">Most employers hand over the same figure every
@@ -379,26 +173,8 @@
                     <option value="flat">No - the same every pay period</option>
                     <option value="worked">Yes - it is earned per hour worked</option>
                 </select>
-
-                {# Only meaningful for the per-hour basis, so only shown for
-                   it - a flat accrual has no denominator to disagree about. #}
-                <div id="basket-period-hours-row" style="display:none;">
-                    <label for="basket-period-hours">Hours your employer counts
-                        in a pay period
-                        <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
-                            <span class="info-tip-text">Leave it empty and Loaf counts the
-                                weekdays in each period, which is honest and is not what
-                                payroll does - a semi-monthly period holds ten, eleven or
-                                twelve of them. Most employers divide by one flat figure all
-                                year: 86.67 paid twice a month, 80 paid fortnightly. Setting
-                                it makes the pro-rate match your payslip rather than come
-                                close.</span>
-                        </span>
-                    </label>
-                    <input type="number" id="basket-period-hours"
-                           class="recurring-amount" step="0.01" min="0"
-                           placeholder="Count the weekdays">
                 </div>
+
 
                 <label for="basket-low-balance-hours">Warn me when hour balance goes below
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>

@@ -59,6 +59,7 @@
 .fa-plus-large { --fa: "\+"; --fa-style: 900; }  /* fa-plus */
 .fa-regular-piggy-bank-sync-bl { --fa: "\f4d3"; --fa-style: 900; }  /* fa-piggy-bank */
 .fa-right { --fa: "\f35a"; --fa-style: 900; }  /* fa-circle-right */
+.fa-shelves { --fa: "\f5fd"; --fa-style: 900; }  /* fa-layer-group */
 .fa-shield-check { --fa: "\f3ed"; --fa-style: 900; }  /* fa-shield-halved */
 .fa-siren-on { --fa: "\f071"; --fa-style: 900; }  /* fa-triangle-exclamation */
 .fa-solid-arrows-repeat-circle-plus { --fa: "\f021"; --fa-style: 900; }  /* fa-arrows-rotate */
@@ -101,7 +102,6 @@
 .fa-regular.fa-percent, .far.fa-percent { --fa-style: 900; }  /* fa-percent is solid-only */
 .fa-regular.fa-piggy-bank, .far.fa-piggy-bank { --fa-style: 900; }  /* fa-piggy-bank is solid-only */
 .fa-regular.fa-seedling, .far.fa-seedling { --fa-style: 900; }  /* fa-seedling is solid-only */
-.fa-regular.fa-sliders, .far.fa-sliders { --fa-style: 900; }  /* fa-sliders is solid-only */
 .fa-regular.fa-trash, .far.fa-trash { --fa-style: 900; }  /* fa-trash is solid-only */
 .fa-regular.fa-user-gear, .far.fa-user-gear { --fa-style: 900; }  /* fa-user-gear is solid-only */
 

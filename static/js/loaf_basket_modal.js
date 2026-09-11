@@ -22,10 +22,11 @@
 (function () {
     'use strict';
 
-    var modal = document.getElementById('basket-modal');
-    if (!modal) { return; }
+    function build(P, cfg) {
+    var modal = document.getElementById(P + '-modal');
+    if (!modal) { return null; }
 
-    var form = document.getElementById('basket-form');
+    var form = document.getElementById(P + '-form');
     var WEEKDAY_PREFIXES = JSON.parse(modal.getAttribute('data-weekday-prefixes'));
 
     // Both lists are Monday-first and index-aligned - loaf_data.WEEKDAY_PREFIXES
@@ -58,8 +59,47 @@
         modal.classList.toggle('loaf-counted-week', countedWeekOn());
     }
 
-    function el(id) { return document.getElementById(id); }
-    function val(id) { return el(id).value; }
+    // A control the OPEN modal does not have. The job's settings live on one
+    // form and the pool's on the other, and both are driven from here - so
+    // roughly a third of the lines below address something that is not on the
+    // page this time. Writing to this is a no-op and reading it gives the
+    // empty answer, which is what "not asked" should mean.
+    //
+    // It is not a way to survive typos: a mistyped id would fail silently and
+    // that is the cost. The alternative was a second copy of the working week
+    // grid and the holiday picker, and the note at the top of this file
+    // records what two copies of a form did to recurring_i.html.
+    // A FRESH one every call, never a shared singleton. Sharing it was a real
+    // bug and a quiet one: openAdd sets el('...-warn-negative-only').checked =
+    // true, and with one object behind every absent control that wrote `true`
+    // onto all of them - so collect() then read "no accrual" as ticked and
+    // posted accrual_hours: '' from a form that has no such field. Writing to
+    // a thing that is not there has to actually go nowhere.
+    function nowhere() {
+        return {
+            value: '', checked: false, textContent: '', innerHTML: '',
+            disabled: false, selectionStart: null, style: {},
+            classList: {add: noop, remove: noop, toggle: noop,
+                        contains: function () { return false; }},
+            setAttribute: noop, removeAttribute: noop,
+            getAttribute: function () { return null; },
+            focus: noop, blur: noop, select: noop, setSelectionRange: noop,
+            addEventListener: noop, appendChild: noop, remove: noop,
+            querySelectorAll: function () { return []; },
+            querySelector: function () { return null; },
+            closest: function () { return null; }
+        };
+    }
+
+    function noop() {}
+    function at(id) { return document.getElementById(id); }
+    function el(id) { return at(id) || nowhere(); }
+
+    // undefined, not '', for a control that is not here - JSON.stringify drops
+    // an undefined value, so collect() sends only the fields this form
+    // actually asked about. An empty string would be a claim that the user
+    // cleared it, and clearing a working week is not nothing.
+    function val(id) { var node = at(id); return node ? node.value : undefined; }
 
     // The monthly day picker, in the markup the recurring forms use so it
     // inherits .monthly-day-select-container and .remove-day-btn unchanged.
@@ -82,7 +122,7 @@
         remove.className = 'remove-day-btn';
         remove.textContent = '-';
         remove.addEventListener('click', function () {
-            var container = el('basket-monthly-container');
+            var container = el(P + '-monthly-container');
             if (container.querySelectorAll('.monthly-day-select-container').length <= 1) {
                 showToast('At least one day must be selected.', 'warning');
                 return;
@@ -98,14 +138,14 @@
     // Weekly shows as flex and monthly as block. Not a typo - it is what the
     // stylesheet expects, and swapping them collapses the weekday row.
     function syncCadence() {
-        var unit = val('basket-cadence-unit');
-        el('basket-weekly').style.display = unit === 'weeks' ? 'flex' : 'none';
-        el('basket-monthly').style.display = unit === 'months' ? 'block' : 'none';
-        el('basket-yearly').style.display = unit === 'years' ? 'block' : 'none';
+        var unit = val(P + '-cadence-unit');
+        el(P + '-weekly').style.display = unit === 'weeks' ? 'flex' : 'none';
+        el(P + '-monthly').style.display = unit === 'months' ? 'block' : 'none';
+        el(P + '-yearly').style.display = unit === 'years' ? 'block' : 'none';
 
         if (unit === 'months' &&
-            !el('basket-monthly-container').querySelector('.monthly-day-select')) {
-            el('basket-monthly-container').appendChild(monthlyDaySelect(null));
+            !el(P + '-monthly-container').querySelector('.monthly-day-select')) {
+            el(P + '-monthly-container').appendChild(monthlyDaySelect(null));
         }
     }
 
@@ -123,18 +163,18 @@
     // And only once each. Reopen a section afterwards and it stays open,
     // however much you edit - being marched forward a second time is worse
     // than not being marched at all.
-    var SECTIONS = ['holds', 'fills', 'week', 'shut'];
+    var SECTIONS = cfg.sections;
     var advanced = {};
 
     function sectionOpen(key) {
-        var panel = el('basket-section-' + key);
+        var panel = el(P + '-section-' + key);
         return panel && !panel.hidden;
     }
 
     function showSection(key) {
         SECTIONS.forEach(function (other) {
-            var panel = el('basket-section-' + other);
-            var button = el('basket-section-' + other + '-toggle');
+            var panel = el(P + '-section-' + other);
+            var button = el(P + '-section-' + other + '-toggle');
             if (!panel || !button) { return; }
             var open = other === key;
             panel.hidden = !open;
@@ -149,25 +189,25 @@
     // purpose: a section nobody has to fill in should not trap anybody in it.
     function sectionDone(key) {
         if (key === 'holds') {
-            return $.trim(val('basket-starting-hours')) !== '';
+            return $.trim(val(P + '-starting-hours')) !== '';
         }
         if (key === 'fills') {
-            var earns = el('basket-no-accrual').checked
-                || $.trim(val('basket-accrual-hours')) !== '';
-            var granted = el('basket-no-grant').checked
-                || $.trim(val('basket-grant-hours')) !== '';
+            var earns = el(P + '-no-accrual').checked
+                || $.trim(val(P + '-accrual-hours')) !== '';
+            var granted = el(P + '-no-grant').checked
+                || $.trim(val(P + '-grant-hours')) !== '';
             // Nothing arriving at all is a complete answer too - a pot topped
             // up by hand needs no pay date.
-            if (el('basket-no-accrual').checked && el('basket-no-grant').checked) {
+            if (el(P + '-no-accrual').checked && el(P + '-no-grant').checked) {
                 return true;
             }
             return earns && granted
-                && $.trim(val('basket-accrual-anchor-date')) !== '';
+                && $.trim(val(P + '-accrual-anchor-date')) !== '';
         }
         if (key === 'week') {
             return WEEKDAY_PREFIXES.some(function (prefix) {
-                return el('basket-' + prefix + '-off').checked
-                    || $.trim(val('basket-' + prefix + '-start')) !== '';
+                return el(P + '-' + prefix + '-off').checked
+                    || $.trim(val(P + '-' + prefix + '-start')) !== '';
             });
         }
         return true;            // the holidays are nobody's obligation
@@ -195,7 +235,7 @@
     var customHolidays = [];
 
     function drawCustomHolidays() {
-        var host = el('basket-custom-holidays');
+        var host = el(P + '-custom-holidays');
         host.innerHTML = '';
         customHolidays.forEach(function (entry) {
             var row = document.createElement('div');
@@ -225,16 +265,16 @@
     }
 
     function showNewHoliday(open) {
-        el('basket-holiday-new').hidden = !open;
-        el('basket-holiday-add').hidden = open;
-        if (open) { el('basket-holiday-name').focus(); }
+        el(P + '-holiday-new').hidden = !open;
+        el(P + '-holiday-add').hidden = open;
+        if (open) { el(P + '-holiday-name').focus(); }
     }
 
     // MM-DD, and a real day of a real month. February is checked against a
     // leap year so the 29th is allowed - loaf_holidays does the same.
     function readNewHoliday() {
-        var name = $.trim(el('basket-holiday-name').value);
-        var bits = $.trim(el('basket-holiday-date').value).split('-');
+        var name = $.trim(el(P + '-holiday-name').value);
+        var bits = $.trim(el(P + '-holiday-date').value).split('-');
         if (bits.length !== 2) { return null; }
         var month = parseInt(bits[0], 10);
         var day = parseInt(bits[1], 10);
@@ -251,7 +291,7 @@
     // the button and wrap it onto three lines. Counts both kinds: to somebody
     // reading it there is only one list.
     function syncHolidays() {
-        var picked = $('.basket-holiday:checked');
+        var picked = $('.' + P + '-holiday:checked');
         var total = picked.length + customHolidays.length;
         var text = 'None';
         if (total === 1) {
@@ -261,18 +301,18 @@
         } else if (total) {
             text = total + ' selected';
         }
-        el('basket-holiday-summary').textContent = text;
+        el(P + '-holiday-summary').textContent = text;
     }
 
     function showHolidays(open) {
-        el('basket-holiday-menu').hidden = !open;
-        el('basket-holiday-toggle').setAttribute(
+        el(P + '-holiday-menu').hidden = !open;
+        el(P + '-holiday-toggle').setAttribute(
             'aria-expanded', open ? 'true' : 'false');
     }
 
     function showAdvanced(open) {
-        var panel = el('basket-advanced');
-        var button = el('basket-advanced-toggle');
+        var panel = el(P + '-advanced');
+        var button = el(P + '-advanced-toggle');
         panel.hidden = !open;
         button.setAttribute('aria-expanded', open ? 'true' : 'false');
         button.querySelector('i').className = open
@@ -284,15 +324,15 @@
     function weeklyMinutes() {
         var total = 0;
         WEEKDAY_PREFIXES.forEach(function (prefix) {
-            if (el('basket-' + prefix + '-off').checked) { return; }
-            var from = val('basket-' + prefix + '-start');
-            var to = val('basket-' + prefix + '-end');
+            if (el(P + '-' + prefix + '-off').checked) { return; }
+            var from = val(P + '-' + prefix + '-start');
+            var to = val(P + '-' + prefix + '-end');
             if (!from || !to) { return; }
             var a = from.split(':'), b = to.split(':');
             var span = (Number(b[0]) * 60 + Number(b[1]))
                 - (Number(a[0]) * 60 + Number(a[1]));
             if (span > 0) {
-                total += span - (Number(val('basket-break')) || 0);
+                total += span - (Number(val(P + '-break')) || 0);
             }
         });
         return total;
@@ -300,16 +340,16 @@
 
     // How many times a year the cadence comes round.
     function periodsPerYear() {
-        var every = Number(val('basket-cadence-interval')) || 1;
-        var unit = val('basket-cadence-unit');
+        var every = Number(val(P + '-cadence-interval')) || 1;
+        var unit = val(P + '-cadence-unit');
         if (unit === 'days') { return 365 / every; }
         if (unit === 'weeks') {
             return (52 / every)
-                * ($('.basket-weekday:checked').length || 1);
+                * ($('.' + P + '-weekday:checked').length || 1);
         }
         if (unit === 'months') {
             return (12 / every)
-                * ($('#basket-monthly-container .monthly-day-select').length || 1);
+                * ($('#' + P + '-monthly-container .monthly-day-select').length || 1);
         }
         return 1 / every;
     }
@@ -335,17 +375,33 @@
     // would be telling somebody the opposite of what is happening. Clearing
     // it is still how you ask for that.
     function syncBasis() {
-        var worked = val('basket-accrual-basis') === 'worked';
-        el('basket-period-hours-row').style.display = worked ? '' : 'none';
-        if (worked && !$.trim(val('basket-period-hours'))) {
+        var worked = val(P + '-accrual-basis') === 'worked';
+        el(P + '-period-hours-row').style.display = worked ? '' : 'none';
+        if (worked && !$.trim(val(P + '-period-hours'))) {
             var guess = suggestedPeriodHours();
-            if (guess) { el('basket-period-hours').value = guess; }
+            if (guess) { el(P + '-period-hours').value = guess; }
         }
     }
 
+    // The name a new basket opens with: the shelf's, and what the pool is.
+    // "Acme Corp PTO" - which is what most people would have typed, and what
+    // the server would have filled in had the field been left empty.
+    //
+    // It follows the type picker until somebody types their own, and then
+    // never again: a name being rewritten under the cursor because the type
+    // changed is the sort of thing that loses a word somebody meant.
+    var shelfStem = '';
+    var nameTouched = false;
+
+    function suggestName() {
+        if (nameTouched || !shelfStem) { return; }
+        var kind = val(P + '-type') === 'uto' ? 'UTO' : 'PTO';
+        el(P + '-name').value = (shelfStem + ' ' + kind).trim();
+    }
+
     function syncCarryover() {
-        el('basket-carryover-cap-row').style.display =
-            val('basket-carryover-mode') === 'capped' ? 'block' : 'none';
+        el(P + '-carryover-cap-row').style.display =
+            val(P + '-carryover-mode') === 'capped' ? 'block' : 'none';
     }
 
     // A ticked box greys its figure out and clears it, so what is submitted is
@@ -359,17 +415,25 @@
     }
 
     function syncAmounts() {
-        syncNone('basket-no-accrual', 'basket-accrual-hours');
-        syncNone('basket-no-grant', 'basket-grant-hours');
-        syncNone('basket-warn-negative-only', 'basket-low-balance-hours');
+        syncNone(P + '-no-accrual', P + '-accrual-hours');
+        syncNone(P + '-no-grant', P + '-grant-hours');
+        syncNone(P + '-warn-negative-only', P + '-low-balance-hours');
+
+        // Whether time off reduces the next accrual is a question about an
+        // accrual. A basket that does not have one is not being asked it -
+        // and the stored answer is left alone rather than reset, so ticking
+        // "No accrual" and changing your mind does not quietly flip a basket
+        // from per-hour-worked back to flat.
+        el(P + '-accrual-basis-row').style.display =
+            el(P + '-no-accrual').checked ? 'none' : '';
     }
 
     // Off is the same idea for a day: the engine reads a missing start as a day
     // not worked, and the box says so rather than leaving two blanks that read
     // as unfinished.
     function syncDay(prefix) {
-        var off = el('basket-' + prefix + '-off').checked;
-        var notIn = el('basket-' + prefix + '-notin');
+        var off = el(P + '-' + prefix + '-off').checked;
+        var notIn = el(P + '-' + prefix + '-notin');
 
         // Off wins, because the two are different states and not degrees of
         // one. Off means the employer does not count the day at all; Not in
@@ -378,7 +442,7 @@
         if (off && notIn.checked) { notIn.checked = false; }
 
         ['start', 'end'].forEach(function (part) {
-            var field = el('basket-' + prefix + '-' + part);
+            var field = el(P + '-' + prefix + '-' + part);
             field.disabled = off;
             if (off) { field.value = ''; }
         });
@@ -390,62 +454,89 @@
 
     function clearForm() {
         form.reset();
-        el('basket-id').value = '';
-        el('basket-monthly-container').innerHTML = '';
-        $('.basket-weekday').prop('checked', false);
-        el('basket-accrual-basis').value = 'flat';
-        el('basket-period-hours').value = '';
+        el(P + '-id').value = '';
+        el(P + '-monthly-container').innerHTML = '';
+        $('.' + P + '-weekday').prop('checked', false);
+        el(P + '-accrual-basis').value = 'flat';
+        el(P + '-period-hours').value = '';
         syncBasis();
         advanced = {};
         showSection('holds');
-        $('.basket-holiday').prop('checked', false);
+        $('.' + P + '-holiday').prop('checked', false);
         customHolidays = [];
         drawCustomHolidays();
         showNewHoliday(false);
         syncHolidays();
         showHolidays(false);
         showAdvanced(false);
-        el('basket-no-accrual').checked = false;
-        el('basket-no-grant').checked = false;
-        el('basket-warn-negative-only').checked = false;
-        el('basket-break').value = '0';
+        el(P + '-no-accrual').checked = false;
+        el(P + '-no-grant').checked = false;
+        el(P + '-warn-negative-only').checked = false;
+        el(P + '-break').value = '0';
         WEEKDAY_PREFIXES.forEach(function (prefix) {
-            el('basket-' + prefix + '-start').value = '';
-            el('basket-' + prefix + '-end').value = '';
-            el('basket-' + prefix + '-off').checked = false;
-            el('basket-' + prefix + '-notin').checked = false;
+            el(P + '-' + prefix + '-start').value = '';
+            el(P + '-' + prefix + '-end').value = '';
+            el(P + '-' + prefix + '-off').checked = false;
+            el(P + '-' + prefix + '-notin').checked = false;
         });
         syncAmounts();
         syncWeek();
     }
 
-    function openAdd() {
+    function openAdd(seed) {
         clearForm();
+        seed = seed || {};
+
+        // The shelf's name is not a field - it fills the basket's name, so
+        // the form opens saying what this will be called rather than blank
+        // with a placeholder promising it later.
+        shelfStem = seed.shelf_name || '';
+        delete seed.shelf_name;
+
+        // Named on the form as `on-shelf`, so that it reads as "which shelf
+        // this is on" beside the basket's own id. The generic key-to-id rule
+        // below would have looked for `shelf-id` and found nothing, and a
+        // basket created from this form went out carrying no shelf at all -
+        // which the server only survived while there was exactly one to fall
+        // back to.
+        if (seed.shelf_id !== undefined) {
+            el(P + '-on-shelf').value = seed.shelf_id;
+            delete seed.shelf_id;
+        }
+
+        // What the caller already knows. Adding a basket begins at the shelf
+        // it will sit on, so that shelf arrives here rather than being asked
+        // for on a form that has no business guessing.
+        Object.keys(seed).forEach(function (key) {
+            el(P + '-' + key.replace(/_/g, '-')).value = seed[key];
+        });
+        nameTouched = false;
+        suggestName();
         syncCountedWeek();
-        el('basket-modal-title').textContent = 'Add a Basket';
-        el('basket-submit').textContent = 'Add Basket';
-        el('basket-starting-hours').value = '0.00';
-        el('basket-cadence-interval').value = '2';
-        el('basket-cadence-unit').value = 'weeks';
-        el('basket-year-start-month').value = '1';
-        el('basket-year-start-day').value = '1';
-        el('basket-carryover-mode').value = 'reset';
+        el(P + '-modal-title').textContent = 'Add a ' + cfg.noun;
+        el(P + '-submit').textContent = 'Add ' + cfg.noun;
+        el(P + '-starting-hours').value = '0.00';
+        el(P + '-cadence-interval').value = '2';
+        el(P + '-cadence-unit').value = 'weeks';
+        el(P + '-year-start-month').value = '1';
+        el(P + '-year-start-day').value = '1';
+        el(P + '-carryover-mode').value = 'reset';
         // No threshold by default, which IS "only when negative" - so the box
         // starts ticked rather than the field starting blank with nothing
         // saying what blank means.
-        el('basket-warn-negative-only').checked = true;
+        el(P + '-warn-negative-only').checked = true;
         // A sensible week rather than a blank grid: Mon-Fri, nine to five, with
         // an unpaid half hour. Every part is editable, and a blank grid would
         // silently mean "I never work", which no basket wants.
         ['mon', 'tue', 'wed', 'thu', 'fri'].forEach(function (prefix) {
-            el('basket-' + prefix + '-start').value = '09:00';
-            el('basket-' + prefix + '-end').value = '17:00';
+            el(P + '-' + prefix + '-start').value = '09:00';
+            el(P + '-' + prefix + '-end').value = '17:00';
         });
         ['sat', 'sun'].forEach(function (prefix) {
-            el('basket-' + prefix + '-off').checked = true;
+            el(P + '-' + prefix + '-off').checked = true;
         });
-        el('basket-break').value = '30';
-        $('.basket-weekday[value="friday"]').prop('checked', true);
+        el(P + '-break').value = '30';
+        $('.' + P + '-weekday[value="friday"]').prop('checked', true);
         syncCadence();
         syncCarryover();
         syncAmounts();
@@ -453,49 +544,58 @@
         modal.style.display = 'flex';
     }
 
-    function openEdit(basketId) {
+    function openEdit(rowId) {
         syncCountedWeek();
-        var row = $('tr[data-basket-id="' + basketId + '"]');
+        // Both forms hydrate from the same table. Its rows carry the job's
+        // settings as well as the pool's - see the comment on the <tr> in
+        // baskets.html - so the only difference is which attribute identifies
+        // the row wanted.
+        var row = $('tr[' + cfg.rowKey + '="' + rowId + '"]').first();
         if (!row.length) { return; }
+        var basketId = rowId;
         clearForm();
 
-        el('basket-modal-title').textContent = 'Edit Basket';
-        el('basket-submit').textContent = 'Save Basket';
-        el('basket-id').value = basketId;
+        el(P + '-modal-title').textContent = 'Edit ' + cfg.noun;
+        el(P + '-submit').textContent = 'Save ' + cfg.noun;
+        el(P + '-id').value = basketId;
 
         // Straight off the row's data-* attributes. The cells hold formatted
         // strings; these hold the figures.
-        el('basket-name').value = row.attr('data-name') || '';
-        el('basket-type').value = row.attr('data-basket-type') || 'pto';
-        el('basket-starting-hours').value = row.attr('data-starting-hours') || '0';
+        el(P + '-name').value = row.attr('data-name') || '';
+        // Stays where it is. A basket is moved between shelves deliberately,
+        // not as a side effect of saving an edit, so the form carries the
+        // shelf it arrived on straight back out again.
+        el(P + '-on-shelf').value = row.attr('data-on-shelf') || '';
+        el(P + '-type').value = row.attr('data-basket-type') || 'pto';
+        el(P + '-starting-hours').value = row.attr('data-starting-hours') || '0';
         var warn = row.attr('data-low-balance-hours') || '';
-        el('basket-low-balance-hours').value = warn;
-        el('basket-warn-negative-only').checked = warn === '';
+        el(P + '-low-balance-hours').value = warn;
+        el(P + '-warn-negative-only').checked = warn === '';
 
         // An empty figure IS "does not accrue" - that is what the NULL means -
         // so the box comes back ticked rather than the field coming back blank
         // with nothing saying why.
         var accrual = row.attr('data-accrual-hours') || '';
         var grant = row.attr('data-grant-hours') || '';
-        el('basket-accrual-hours').value = accrual;
-        el('basket-grant-hours').value = grant;
-        el('basket-no-accrual').checked = accrual === '';
-        el('basket-no-grant').checked = grant === '';
-        el('basket-accrual-anchor-date').value = row.attr('data-accrual-anchor-date') || '';
-        el('basket-cadence-interval').value = row.attr('data-cadence-interval') || '1';
-        el('basket-cadence-unit').value = row.attr('data-cadence-unit') || 'weeks';
-        el('basket-yearly-day').value = row.attr('data-yearly-day') || '';
-        el('basket-yearly-month').value = row.attr('data-yearly-month') || '1';
-        el('basket-year-start-month').value = row.attr('data-year-start-month') || '1';
-        el('basket-year-start-day').value = row.attr('data-year-start-day') || '1';
-        el('basket-carryover-mode').value = row.attr('data-carryover-mode') || 'reset';
-        el('basket-accrual-basis').value =
+        el(P + '-accrual-hours').value = accrual;
+        el(P + '-grant-hours').value = grant;
+        el(P + '-no-accrual').checked = accrual === '';
+        el(P + '-no-grant').checked = grant === '';
+        el(P + '-accrual-anchor-date').value = row.attr('data-accrual-anchor-date') || '';
+        el(P + '-cadence-interval').value = row.attr('data-cadence-interval') || '1';
+        el(P + '-cadence-unit').value = row.attr('data-cadence-unit') || 'weeks';
+        el(P + '-yearly-day').value = row.attr('data-yearly-day') || '';
+        el(P + '-yearly-month').value = row.attr('data-yearly-month') || '1';
+        el(P + '-year-start-month').value = row.attr('data-year-start-month') || '1';
+        el(P + '-year-start-day').value = row.attr('data-year-start-day') || '1';
+        el(P + '-carryover-mode').value = row.attr('data-carryover-mode') || 'reset';
+        el(P + '-accrual-basis').value =
             row.attr('data-accrual-basis') || 'flat';
-        el('basket-period-hours').value = row.attr('data-period-hours') || '';
+        el(P + '-period-hours').value = row.attr('data-period-hours') || '';
         syncBasis();
 
         var shut = (row.attr('data-holidays') || '').split(',');
-        $('.basket-holiday').each(function () {
+        $('.' + P + '-holiday').each(function () {
             this.checked = shut.indexOf(this.value) >= 0;
         });
 
@@ -520,17 +620,17 @@
         // unusual basket does not look like an ordinary one until you go
         // hunting. A default basket stays shut.
         showAdvanced(shut.length > 0 && shut[0] !== ''
-            || el('basket-accrual-basis').value !== 'flat'
+            || el(P + '-accrual-basis').value !== 'flat'
             || (row.attr('data-carryover-mode') || 'reset') !== 'reset'
             || !!row.attr('data-low-balance-hours')
             || !!row.attr('data-period-hours'));
-        el('basket-carryover-cap-hours').value = row.attr('data-carryover-cap-hours') || '';
+        el(P + '-carryover-cap-hours').value = row.attr('data-carryover-cap-hours') || '';
 
         var days = (row.attr('data-weekdays') || '').split(',');
         // Different column, same shape: these are days counted for accrual and
         // never attended, not days the pay lands on.
         var accrualOnly = (row.attr('data-accrual-only-weekdays') || '').split(',');
-        $('.basket-weekday').each(function () {
+        $('.' + P + '-weekday').each(function () {
             this.checked = days.indexOf(this.value) !== -1;
         });
 
@@ -542,15 +642,15 @@
             // Stored as HH:MM:SS; an input[type=time] wants HH:MM.
             var start = row.attr('data-' + prefix + '-start') || '';
             var end = row.attr('data-' + prefix + '-end') || '';
-            el('basket-' + prefix + '-start').value = start ? start.substring(0, 5) : '';
-            el('basket-' + prefix + '-end').value = end ? end.substring(0, 5) : '';
-            el('basket-' + prefix + '-off').checked = !start;
-            el('basket-' + prefix + '-notin').checked =
+            el(P + '-' + prefix + '-start').value = start ? start.substring(0, 5) : '';
+            el(P + '-' + prefix + '-end').value = end ? end.substring(0, 5) : '';
+            el(P + '-' + prefix + '-off').checked = !start;
+            el(P + '-' + prefix + '-notin').checked =
                 accrualOnly.indexOf(WEEKDAY_NAMES[WEEKDAY_PREFIXES.indexOf(prefix)]) >= 0;
             longest = Math.max(longest,
                 parseInt(row.attr('data-' + prefix + '-break-minutes') || '0', 10) || 0);
         });
-        el('basket-break').value = String(longest);
+        el(P + '-break').value = String(longest);
 
         syncCadence();
         syncCarryover();
@@ -558,8 +658,8 @@
         syncWeek();
 
         var monthly = (row.attr('data-monthly-days') || '').split(',').filter(Boolean);
-        if (val('basket-cadence-unit') === 'months') {
-            var container = el('basket-monthly-container');
+        if (val(P + '-cadence-unit') === 'months') {
+            var container = el(P + '-monthly-container');
             container.innerHTML = '';
             (monthly.length ? monthly : ['1']).forEach(function (day) {
                 container.appendChild(monthlyDaySelect(day));
@@ -576,54 +676,55 @@
         // Save is clicked would be read as one, and the row that stores it
         // does not care - but the next open would find a type it did not
         // put there.
-        $('#basket-form input[data-was-number]').each(function () {
+        $('#' + P + '-form input[data-was-number]').each(function () {
             backToNumber(this);
         });
 
         var payload = {
-            name: val('basket-name'),
-            basket_type: val('basket-type'),
-            starting_hours: val('basket-starting-hours'),
+            name: val(P + '-name'),
+            shelf_id: val(P + '-on-shelf'),
+            basket_type: val(P + '-type'),
+            starting_hours: val(P + '-starting-hours'),
             // No starting_date and no max_balance_hours: the server stamps the
             // first whenever the balance changes, and nothing sets the second
             // any more. See the note at the top of _basket_modal.html.
-            low_balance_hours: el('basket-warn-negative-only').checked
-                ? '' : val('basket-low-balance-hours'),
-            accrual_hours: el('basket-no-accrual').checked
-                ? '' : val('basket-accrual-hours'),
-            grant_hours: el('basket-no-grant').checked
-                ? '' : val('basket-grant-hours'),
-            accrual_anchor_date: val('basket-accrual-anchor-date'),
-            cadence_interval: val('basket-cadence-interval'),
-            cadence_unit: val('basket-cadence-unit'),
-            year_start_month: val('basket-year-start-month'),
-            year_start_day: val('basket-year-start-day'),
-            carryover_mode: val('basket-carryover-mode'),
-            carryover_cap_hours: val('basket-carryover-cap-hours'),
+            low_balance_hours: el(P + '-warn-negative-only').checked
+                ? '' : val(P + '-low-balance-hours'),
+            accrual_hours: el(P + '-no-accrual').checked
+                ? '' : val(P + '-accrual-hours'),
+            grant_hours: el(P + '-no-grant').checked
+                ? '' : val(P + '-grant-hours'),
+            accrual_anchor_date: val(P + '-accrual-anchor-date'),
+            cadence_interval: val(P + '-cadence-interval'),
+            cadence_unit: val(P + '-cadence-unit'),
+            year_start_month: val(P + '-year-start-month'),
+            year_start_day: val(P + '-year-start-day'),
+            carryover_mode: val(P + '-carryover-mode'),
+            carryover_cap_hours: val(P + '-carryover-cap-hours'),
             weekdays: [],
             monthly_days: []
         };
 
         if (payload.cadence_unit === 'weeks') {
-            $('.basket-weekday:checked').each(function () {
+            $('.' + P + '-weekday:checked').each(function () {
                 payload.weekdays.push(this.value);
             });
         } else if (payload.cadence_unit === 'months') {
-            $('#basket-monthly-container .monthly-day-select').each(function () {
+            $('#' + P + '-monthly-container .monthly-day-select').each(function () {
                 if (this.value) { payload.monthly_days.push(this.value); }
             });
         } else if (payload.cadence_unit === 'years') {
-            payload.yearly_day = val('basket-yearly-day');
-            payload.yearly_month = val('basket-yearly-month');
+            payload.yearly_day = val(P + '-yearly-day');
+            payload.yearly_month = val(P + '-yearly-month');
         }
 
         // One break, written to all seven columns. They stay per day in the
         // schema and the projection still reads them per day; this form simply
         // does not offer that.
-        var brk = val('basket-break') || '0';
-        payload.accrual_basis = val('basket-accrual-basis');
-        payload.period_hours = val('basket-period-hours');
-        payload.holidays = $('.basket-holiday:checked')
+        var brk = val(P + '-break') || '0';
+        payload.accrual_basis = val(P + '-accrual-basis');
+        payload.period_hours = val(P + '-period-hours');
+        payload.holidays = $('.' + P + '-holiday:checked')
             .map(function () { return this.value; }).get();
         payload.custom_holidays = customHolidays.map(function (h) {
             return h.date + '|' + h.name;
@@ -631,11 +732,11 @@
 
         var accrualOnly = [];
         WEEKDAY_PREFIXES.forEach(function (prefix, index) {
-            var off = el('basket-' + prefix + '-off').checked;
-            payload[prefix + '_start'] = off ? '' : val('basket-' + prefix + '-start');
-            payload[prefix + '_end'] = off ? '' : val('basket-' + prefix + '-end');
+            var off = el(P + '-' + prefix + '-off').checked;
+            payload[prefix + '_start'] = off ? '' : val(P + '-' + prefix + '-start');
+            payload[prefix + '_end'] = off ? '' : val(P + '-' + prefix + '-end');
             payload[prefix + '_break_minutes'] = off ? '0' : brk;
-            if (!off && el('basket-' + prefix + '-notin').checked) {
+            if (!off && el(P + '-' + prefix + '-notin').checked) {
                 accrualOnly.push(WEEKDAY_NAMES[index]);
             }
         });
@@ -652,10 +753,10 @@
 
     form.addEventListener('submit', function (event) {
         event.preventDefault();
-        var basketId = el('basket-id').value;
-        var url = basketId ? '/loaf/api/baskets/' + basketId : '/loaf/api/baskets';
+        var basketId = el(P + '-id').value;
+        var url = basketId ? cfg.api + '/' + basketId : cfg.api;
 
-        el('basket-submit').disabled = true;
+        el(P + '-submit').disabled = true;
         $.ajax({
             url: url,
             method: 'POST',
@@ -665,30 +766,38 @@
                 if (response.status === 'success') {
                     location.reload();
                 } else {
-                    el('basket-submit').disabled = false;
-                    showToast(response.message || 'Could not save that basket.', 'error');
+                    el(P + '-submit').disabled = false;
+                    showToast(response.message
+                        || ('Could not save that ' + cfg.noun.toLowerCase() + '.'),
+                        'error');
                 }
             },
             error: function (xhr) {
-                el('basket-submit').disabled = false;
+                el(P + '-submit').disabled = false;
                 var body = xhr.responseJSON || {};
                 showToast(body.message || 'Could not save that basket.', 'error');
             }
         });
     });
 
-    $('#basket-cadence-unit').on('change', syncCadence);
-    $('#basket-carryover-mode').on('change', syncCarryover);
-    $('#basket-add-day').on('click', function () {
-        el('basket-monthly-container').appendChild(monthlyDaySelect(null));
+    $('#' + P + '-cadence-unit').on('change', syncCadence);
+    $('#' + P + '-carryover-mode').on('change', syncCarryover);
+
+    // The suggested name follows the type - PTO to UTO rewrites it - right
+    // up until somebody types their own, at which point it never touches
+    // the field again.
+    $('#' + P + '-type').on('change', suggestName);
+    $('#' + P + '-name').on('input', function () { nameTouched = true; });
+    $('#' + P + '-add-day').on('click', function () {
+        el(P + '-monthly-container').appendChild(monthlyDaySelect(null));
     });
 
-    $('#basket-no-accrual, #basket-no-grant, #basket-warn-negative-only')
+    $('#' + P + '-no-accrual, ' + P + '-no-grant, ' + P + '-warn-negative-only')
         .on('change', syncAmounts);
-    $('#basket-accrual-basis').on('change', syncBasis);
+    $('#' + P + '-accrual-basis').on('change', syncBasis);
 
-    $('#basket-advanced-toggle').on('click', function () {
-        showAdvanced(el('basket-advanced').hidden);
+    $('#' + P + '-advanced-toggle').on('click', function () {
+        showAdvanced(el(P + '-advanced').hidden);
     });
 
     // A header opens its own section and shuts the rest. Clicking the one
@@ -704,7 +813,7 @@
     // section is never pulled out from under the field being typed in.
     // relatedTarget is where focus went - still inside means stay put.
     SECTIONS.forEach(function (key) {
-        var panel = el('basket-section-' + key);
+        var panel = el(P + '-section-' + key);
         if (!panel) { return; }
         panel.addEventListener('focusout', function (event) {
             if (panel.contains(event.relatedTarget)) { return; }
@@ -714,31 +823,31 @@
         });
     });
 
-    $('#basket-holiday-toggle').on('click', function () {
-        showHolidays(el('basket-holiday-menu').hidden);
+    $('#' + P + '-holiday-toggle').on('click', function () {
+        showHolidays(el(P + '-holiday-menu').hidden);
     });
-    $('.basket-holiday').on('change', syncHolidays);
+    $('.' + P + '-holiday').on('change', syncHolidays);
 
-    $('#basket-holiday-add').on('click', function () { showNewHoliday(true); });
-    $('#basket-holiday-save').on('click', function () {
+    $('#' + P + '-holiday-add').on('click', function () { showNewHoliday(true); });
+    $('#' + P + '-holiday-save').on('click', function () {
         var entry = readNewHoliday();
         if (!entry) {
             showToast('Give the holiday a date as MM-DD, like 03-17.', 'error');
             return;
         }
         customHolidays.push(entry);
-        el('basket-holiday-name').value = '';
-        el('basket-holiday-date').value = '';
+        el(P + '-holiday-name').value = '';
+        el(P + '-holiday-date').value = '';
         showNewHoliday(false);
         drawCustomHolidays();
         syncHolidays();
     });
     // Enter adds the holiday rather than submitting the whole basket, which
     // is what a text input inside a form does otherwise.
-    $('#basket-holiday-name, #basket-holiday-date').on('keydown', function (e) {
+    $('#' + P + '-holiday-name, ' + P + '-holiday-date').on('keydown', function (e) {
         if (e.key === 'Enter') {
             e.preventDefault();
-            $('#basket-holiday-save').trigger('click');
+            $('#' + P + '-holiday-save').trigger('click');
         }
     });
 
@@ -751,22 +860,22 @@
         }
     }, true);
     $('.loaf-schedule-off').on('change', function () {
-        syncDay(this.id.replace('basket-', '').replace('-off', ''));
+        syncDay(this.id.replace(P + '-', '').replace('-off', ''));
     });
 
     // Times and Off, but NOT the counted-week box. The day somebody is absent
     // is never the day being copied from, so carrying the flag across would
     // put it on precisely the four days it does not belong to.
-    $('#basket-copy-monday').on('click', function () {
-        var start = val('basket-mon-start');
-        var end = val('basket-mon-end');
-        var off = el('basket-mon-off').checked;
+    $('#' + P + '-copy-monday').on('click', function () {
+        var start = val(P + '-mon-start');
+        var end = val(P + '-mon-end');
+        var off = el(P + '-mon-off').checked;
         ['tue', 'wed', 'thu', 'fri'].forEach(function (prefix) {
-            el('basket-' + prefix + '-off').checked = off;
+            el(P + '-' + prefix + '-off').checked = off;
             syncDay(prefix);
             if (!off) {
-                el('basket-' + prefix + '-start').value = start;
-                el('basket-' + prefix + '-end').value = end;
+                el(P + '-' + prefix + '-start').value = start;
+                el(P + '-' + prefix + '-end').value = end;
             }
         });
     });
@@ -774,15 +883,15 @@
     // The button says every day, so the counted-week boxes go too. Left
     // behind, they would make a freshly cleared week still cost nothing on a
     // Thursday, with nothing on screen saying why.
-    $('#basket-clear-week').on('click', function () {
+    $('#' + P + '-clear-week').on('click', function () {
         WEEKDAY_PREFIXES.forEach(function (prefix) {
-            el('basket-' + prefix + '-off').checked = false;
-            el('basket-' + prefix + '-notin').checked = false;
-            el('basket-' + prefix + '-start').value = '';
-            el('basket-' + prefix + '-end').value = '';
+            el(P + '-' + prefix + '-off').checked = false;
+            el(P + '-' + prefix + '-notin').checked = false;
+            el(P + '-' + prefix + '-start').value = '';
+            el(P + '-' + prefix + '-end').value = '';
             syncDay(prefix);
         });
-        el('basket-break').value = '0';
+        el(P + '-break').value = '0';
     });
 
     // Clicking a field selects what is already in it, so typing replaces the
@@ -860,7 +969,7 @@
         if (event.key === 'Escape' && modal.style.display === 'flex') { close(); }
     });
 
-    window.loafBasketModal = {
+    return {
         openAdd: openAdd,
         openEdit: openEdit,
         close: close,
@@ -881,4 +990,27 @@
             return countedWeekOn();
         }
     };
+    }
+
+    // One implementation, two forms. The basket form holds a pool of hours;
+    // the shelf form holds the job those hours are earned at - the working
+    // week, the days the office is shut, when pay lands. Both are built from
+    // the same markup with a different id prefix, so neither can drift.
+    window.loafBasketModal = build('basket', {
+        noun: 'Basket',
+        api: '/loaf/api/baskets',
+        rowKey: 'data-basket-id',
+        // The week and the holidays moved to the shelf form with the rest
+        // of the job. What is left here is the pool itself: what it holds
+        // and how it fills.
+        sections: ['holds', 'fills']
+    });
+
+    // "Shelf" is the table; "Job" is the only word the user ever sees.
+    window.loafShelfModal = build('shelf', {
+        noun: 'Shelf',
+        api: '/loaf/api/shelves',
+        rowKey: 'data-shelf-id',
+        sections: ['pays', 'week', 'shut']
+    });
 })();

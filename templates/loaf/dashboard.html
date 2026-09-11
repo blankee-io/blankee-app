@@ -70,24 +70,30 @@
                would spread the three across the line instead of keeping the
                switcher and its button together on the left. #}
             <span class="loaf-basket-pair">
-                <select id="loaf-basket-dropdown" class="loaf-basket-dropdown"
-                        aria-label="Which basket">
-                    {% for option in baskets %}
-                    <option value="{{ option.id }}" {{ 'selected' if option.id == basket.id }}>
+                {# The job, not the pool. Every pool on it is drawn on the one
+                   calendar below, so switching pools is not a switch of view -
+                   it only moves which balance the cells count down. That is
+                   what the chips under this do. #}
+                <select id="loaf-shelf-dropdown" class="loaf-basket-dropdown"
+                        aria-label="Which job">
+                    {% for option in shelves %}
+                    <option value="{{ option.id }}"
+                            {{ 'selected' if shelf and option.id == shelf.id }}>
                         {{ option.name }}
                     </option>
                     {% endfor %}
                 </select>
-                {# The same badge the baskets table and the summary sections
-                   carry, so a basket is labelled the same wherever it appears.
-                   Rewritten by the JS when the switcher changes, because that
-                   swaps basket over a fetch rather than a page load. #}
-                <span id="loaf-basket-kind"
-                      class="basket-kind basket-kind-{{ basket.basket_type }}">
-                    {{ 'PTO' if basket.basket_type == 'pto' else 'UTO' }}
-                </span>
-                <button id="loaf-add-basket" class="add-income-btn" type="button"
-                        title="Add Basket" aria-label="Add Basket">
+                {# No PTO/UTO badge here. The switcher names a SHELF now, and
+                   a shelf is neither - it holds both. The badge belonged
+                   beside a basket's name and said something useful there;
+                   beside an employer it only described whichever pool happened
+                   to be focused. The chips below carry the pools, and the
+                   shelves table still badges every basket. #}
+                {# Beside the switcher, so it adds what the switcher names: a
+                   shelf. The plus for a basket is on the chips below, beside
+                   the pools it would join. #}
+                <button id="loaf-add-shelf" class="add-income-btn" type="button"
+                        title="Add Shelf" aria-label="Add Shelf">
                     <i class="fa-solid fa-plus"></i>
                 </button>
             </span>
@@ -96,6 +102,13 @@
                 <select id="loaf-year-dropdown" class="year-dropdown" aria-label="Year"></select>
             </span>
         </div>
+
+        {# One chip per pool on the job: what it holds today, and which one
+           the calendar is counting down. Filled by the JS from /api/month, so
+           a month change or a new booking restates them without a page load -
+           and so this is one implementation rather than one in Jinja and one
+           in script, the same division the grid itself makes. #}
+        <div id="loaf-pools" class="loaf-pools"></div>
 
         <div class="dashboard-m-calendar-container">
             <table id="loaf-calendar">
@@ -120,9 +133,13 @@
             <form id="loaf-entry-form" autocomplete="off">
                 <input type="hidden" id="loaf-entry-id" value="">
 
+                {# The pools on THIS job only. A day is costed against the
+                   working week of the job it was booked on, so offering a
+                   pool belonging to another one would charge these hours
+                   against a week they were never worked. #}
                 <label for="loaf-entry-basket">Basket</label>
                 <select id="loaf-entry-basket">
-                    {% for option in baskets %}
+                    {% for option in pools %}
                     <option value="{{ option.id }}">{{ option.name }}</option>
                     {% endfor %}
                 </select>
@@ -323,7 +340,12 @@
     </div>
     {% endif %}
 
+    {# Both forms, because this page offers both pluses: one beside the
+       switcher for a shelf, one on the chips for a basket. The script
+       builds a modal only when its markup is here, so leaving the shelf
+       form out made loafShelfModal null and the button throw. #}
     {% if basket %}{% include 'loaf/_basket_modal.html' %}{% endif %}
+    {% if basket %}{% include 'loaf/_shelf_modal.html' %}{% endif %}
 
     {% include 'loading_modals.html' %}
 
@@ -341,9 +363,21 @@
     // Saturday first, matching dashboard_m's default week.
     var DAY_LABELS = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
+    // How many pool colours exist in the stylesheet. More pools than this on
+    // one job and they start repeating, which is better than running out and
+    // drawing some of them in nothing.
+    var POOL_COLOURS = 4;
+
     var TODAY = '{{ today.isoformat() }}';
     var state = {
+        // Which job is on show, and which of its pools the running balance
+        // counts down. Both, because the calendar draws every pool at once:
+        // the shelf decides what is DRAWN and the basket only decides what is
+        // COUNTED.
+        shelfId: {{ shelf.id if shelf else 'null' }},
+        shelfName: {{ (shelf.name if shelf else '') | tojson }},
         basketId: {{ basket.id }},
+        pools: [],
         year: {{ today.year }},
         month: {{ today.month }},
         threshold: {{ basket.low_balance_hours if basket.low_balance_hours is not none else 'null' }}
@@ -391,19 +425,10 @@
     // enhances and resyncs, and is safe to call as often as needed.
     function resyncSelects() {
         if (typeof enhanceSelectAsDropdown !== 'function') { return; }
-        ['loaf-basket-dropdown', 'loaf-month-dropdown', 'loaf-year-dropdown']
+        ['loaf-shelf-dropdown', 'loaf-month-dropdown', 'loaf-year-dropdown']
             .forEach(function (id) { enhanceSelectAsDropdown(el(id)); });
     }
 
-    // The badge belongs to whichever basket is being shown, and the switcher
-    // changes that without reloading - so it is repainted from the response
-    // rather than left as the one Jinja rendered.
-    function paintKind(kind) {
-        var badge = el('loaf-basket-kind');
-        if (!badge) { return; }
-        badge.textContent = kind === 'uto' ? 'UTO' : 'PTO';
-        badge.className = 'basket-kind basket-kind-' + (kind === 'uto' ? 'uto' : 'pto');
-    }
 
     function drawHead() {
         var head = el('loaf-calendar-head');
@@ -457,6 +482,21 @@
         if (row.non_working) { day.classList.add('loaf-nonworking'); }
         if (row.entries.length) { day.classList.add('loaf-booked'); }
 
+        // Which pool the day's hours came out of, as a dot each in the
+        // pool's colour - the same colours the chips wear above.
+        //
+        // Dots rather than a stripe down the cell: .dashboard-m-date is
+        // transparent with a 1px side margin, and the card look comes from
+        // its children, so an inset shadow on it drew a floating line in the
+        // gutter BETWEEN two days instead of marking either.
+        //
+        // One per pool, because a day can draw on more than one - a morning
+        // of paid leave and the afternoon unpaid is still one day.
+        var drew = Object.keys(row.taken_by || {})
+            .map(poolIndex)
+            .filter(function (index) { return index >= 0; })
+            .sort(function (a, b) { return a - b; });
+
         var todayTag = document.createElement('div');
         todayTag.className = 'dashboard-d-today-container';
         if (row.is_today) { todayTag.textContent = 'Today'; }
@@ -477,6 +517,18 @@
         number.textContent = row.day;
         sections.appendChild(number);
 
+        // Always, even with nothing to put in it. The row has a fixed height,
+        // so drawing it only on days that drew made those days taller than
+        // their neighbours and the grid stopped lining up.
+        var dots = document.createElement('div');
+        dots.className = 'loaf-day-pools';
+        drew.forEach(function (index) {
+            var dot = document.createElement('span');
+            dot.className = 'loaf-day-pool loaf-pool-' + (index % POOL_COLOURS);
+            dots.appendChild(dot);
+        });
+        sections.appendChild(dots);
+
         // zero-value is how dashboard_m greys a line that has nothing on it,
         // rather than leaving the cell ragged by omitting the line entirely.
         //
@@ -488,6 +540,10 @@
         sections.appendChild(line('dashboard-m-income-total', 'A',
                                   formatHours(arrived),
                                   arrived ? '' : 'zero-value'));
+        // The focused pool's hours, not the day's total. The balance line
+        // below counts down one pool, so the figure it is counting down had
+        // better be that pool's - a cell reading "8 taken" over a balance that
+        // moved by nothing is how a shared calendar misleads.
         sections.appendChild(line('dashboard-m-expense-total', 'U',
                                   formatHours(row.taken),
                                   row.taken ? '' : 'zero-value'));
@@ -499,6 +555,86 @@
         cell.appendChild(day);
         day.addEventListener('click', function () { openEntry(row); });
         return cell;
+    }
+
+    // One chip per pool on the job. The focused one is marked, and clicking
+    // another moves the focus rather than changing what is drawn - every
+    // pool's bookings stay on the calendar either way.
+    function drawPools(pools) {
+        state.pools = pools || [];
+        var host = el('loaf-pools');
+        if (!host) { return; }
+        host.innerHTML = '';
+
+        // The plus is always here, even with one pool or none - adding a
+        // basket has to stay reachable, and it is the only thing on this row
+        // that is not a chip.
+        host.hidden = false;
+
+        state.pools.forEach(function (pool, index) {
+            var chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'loaf-pool loaf-pool-' + (index % POOL_COLOURS)
+                + (pool.focused ? ' is-focused' : '');
+            chip.setAttribute('data-basket-id', pool.id);
+            chip.setAttribute('aria-pressed', pool.focused ? 'true' : 'false');
+
+            var swatch = document.createElement('span');
+            swatch.className = 'loaf-pool-swatch';
+            chip.appendChild(swatch);
+
+            var name = document.createElement('span');
+            name.className = 'loaf-pool-name';
+            name.textContent = shortPoolName(pool.name);
+            chip.appendChild(name);
+
+            var hours = document.createElement('span');
+            hours.className = 'loaf-pool-hours'
+                + (pool.balance_today < 0 ? ' negative-value' : '');
+            hours.textContent = formatHours(pool.balance_today);
+            chip.appendChild(hours);
+
+            host.appendChild(chip);
+        });
+
+        var add = document.createElement('button');
+        add.type = 'button';
+        add.id = 'loaf-add-pool';
+        add.className = 'loaf-pool loaf-pool-add';
+        add.title = 'Add a basket to this shelf';
+        add.setAttribute('aria-label', 'Add a basket to this shelf');
+        add.innerHTML = '<i class="fa-solid fa-plus"></i>';
+        host.appendChild(add);
+    }
+
+    // A chip sits directly under the shelf's name, so repeating it there is
+    // noise: "Acme Corp" above, "Acme Corp PTO" below. An unnamed basket is
+    // called after its shelf, which makes that the common case rather than an
+    // odd one - but this trims a typed name too, because the repetition reads
+    // the same either way.
+    //
+    // Only as a prefix, and only with something left over. A basket someone
+    // deliberately called exactly the shelf's name keeps it, rather than
+    // having its chip go blank.
+    function shortPoolName(name) {
+        var stem = (state.shelfName || '').trim();
+        var full = (name || '').trim();
+        if (stem && full.length > stem.length
+            && full.slice(0, stem.length).toLowerCase() === stem.toLowerCase()) {
+            var rest = full.slice(stem.length).trim();
+            if (rest) { return rest; }
+        }
+        return full;
+    }
+
+    // Which colour a pool draws in, by its position on the job. Position and
+    // not id, so the first pool is always the first colour rather than
+    // whichever hue an auto-increment happened to land on.
+    function poolIndex(basketId) {
+        for (var i = 0; i < state.pools.length; i += 1) {
+            if (String(state.pools[i].id) === String(basketId)) { return i; }
+        }
+        return -1;
     }
 
     function drawGrid(rows) {
@@ -517,14 +653,23 @@
     function load() {
         $.ajax({
             url: '/loaf/api/month',
-            data: {basket_id: state.basketId, year: state.year, month: state.month},
+            data: {shelf_id: state.shelfId, basket_id: state.basketId,
+                   year: state.year, month: state.month},
             success: function (response) {
                 if (response.status !== 'success') {
                     showToast(response.message || 'Could not load that month.', 'error');
                     return;
                 }
                 state.threshold = response.basket.low_balance_hours;
-                paintKind(response.basket.basket_type);
+                state.basketId = response.basket.id;
+                if (response.shelf) {
+                    state.shelfId = response.shelf.id;
+                    state.shelfName = response.shelf.name || '';
+                }
+
+                // Before the grid: drawCell reads state.pools to colour a day
+                // by the pool its hours came out of.
+                drawPools(response.pools);
                 drawHead();
                 drawGrid(response.rows);
             },
@@ -921,8 +1066,23 @@
         // A day that already has a booking opens that booking rather than
         // stacking another on top of it, which is what a second click on the
         // same cell almost always means.
-        if (row.entries.length) {
-            var entry = row.entries[0];
+        // The calendar shows every pool on the job, so a day can carry
+        // bookings from more than one. The FOCUSED pool's is the one to open;
+        // if that pool has nothing here, this is a NEW booking for it rather
+        // than somebody else's opened by accident.
+        //
+        // That is what makes a second pool reachable on a day already booked:
+        // switch the chip, click the day, and you are adding rather than
+        // editing. The server still refuses a total beyond what the day
+        // holds, so the two together mean "any pool, up to the day's hours".
+        var entry = null;
+        row.entries.forEach(function (candidate) {
+            if (!entry && String(candidate.basket_id) === String(state.basketId)) {
+                entry = candidate;
+            }
+        });
+
+        if (entry) {
             el('loaf-entry-id').value = entry.id;
             el('loaf-entry-title').textContent = 'Edit Time Off';
             el('loaf-entry-submit').textContent = 'Save';
@@ -1063,15 +1223,39 @@
     drawHead();
     load();
 
-    $('#loaf-basket-dropdown').on('change', function () {
-        state.basketId = parseInt(this.value, 10);
-        // In the URL as well, so a reload and a shared link both come back to
-        // the basket being looked at.
-        if (window.history && window.history.replaceState) {
-            window.history.replaceState({}, '', '/loaf/dashboard?basket=' + state.basketId);
-        }
+    $('#loaf-shelf-dropdown').on('change', function () {
+        state.shelfId = parseInt(this.value, 10);
+        // The focus goes with it: a pool on the job just left is not one this
+        // job has. The server picks the first pool on the new job, and the
+        // response says which it chose.
+        state.basketId = null;
+        remember();
         load();
     });
+
+    // Moving the focus. What is DRAWN does not change - every pool on the job
+    // is on the calendar either way - only which pool the balance counts down.
+    //
+    // [data-basket-id] and not just .loaf-pool: the add button wears the chip
+    // shape to sit in the row, so a bare class matched it too and clicking the
+    // plus set the focus to NaN before the handler that opens the form ever
+    // ran.
+    $(document).on('click', '.loaf-pool[data-basket-id]', function () {
+        var picked = parseInt($(this).attr('data-basket-id'), 10);
+        if (picked === state.basketId) { return; }
+        state.basketId = picked;
+        remember();
+        load();
+    });
+
+    // In the URL as well, so a reload and a shared link both come back to what
+    // was being looked at - the job, and which of its pools was in focus.
+    function remember() {
+        if (!window.history || !window.history.replaceState) { return; }
+        var url = '/loaf/dashboard?shelf=' + (state.shelfId || '');
+        if (state.basketId) { url += '&basket=' + state.basketId; }
+        window.history.replaceState({}, '', url);
+    }
     $('#loaf-month-dropdown').on('change', function () {
         state.month = parseInt(this.value, 10); load();
     });
@@ -1079,9 +1263,26 @@
         state.year = parseInt(this.value, 10); load();
     });
 
-    // The same modal Manage Baskets opens, opened the same way. Saving
-    // reloads, which is what brings the new basket into the switcher.
-    $('#loaf-add-basket').on('click', function () { loafBasketModal.openAdd(); });
+    // The same modal Manage Shelves opens, opened the same way. Seeded with
+    // the shelf on show, because a pool of hours needs a job to be earned at
+    // and the one being looked at is the only sensible answer. Saving reloads,
+    // which is what brings the new basket into the chips.
+    // Saving either form reloads, which is what brings the new row into the
+    // switcher or the chips.
+    $('#loaf-add-shelf').on('click', function () {
+        if (!window.loafShelfModal) {
+            showToast('The shelf form is not on this page.', 'error');
+            return;
+        }
+        loafShelfModal.openAdd();
+    });
+
+    // The chips' own plus: a basket joins the shelf on show, which is the one
+    // its pools are sitting in a row under.
+    $(document).on('click', '#loaf-add-pool', function () {
+        loafBasketModal.openAdd({shelf_id: state.shelfId,
+                                 shelf_name: state.shelfName});
+    });
 
     $('#loaf-prev').on('click', function () { shiftMonth(-1); });
     $('#loaf-next').on('click', function () { shiftMonth(1); });

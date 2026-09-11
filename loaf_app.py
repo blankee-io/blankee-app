@@ -120,7 +120,15 @@ def _flat(payload):
     which is not an error anywhere - it just quietly loses days. Anything that
     can legitimately arrive as a list belongs in the tuple below.
     """
-    multi = ('weekdays', 'monthly_days', 'accrual_only_weekdays')
+    #
+    # 'holidays' was missing from here from the day it shipped, and the
+    # basket modal sends it as an array of ticked checkboxes - so every
+    # holiday after the first was thrown away on save, silently, exactly
+    # as the paragraph above warns. A basket set to New Year, Juneteenth
+    # and Independence Day kept New Year and quietly accrued through the
+    # other two.
+    multi = ('weekdays', 'monthly_days', 'accrual_only_weekdays',
+             'holidays')
     out = {}
     for key, value in payload.items():
         out[key] = value if key in multi else _one(payload, key)
@@ -168,10 +176,47 @@ def _pick_basket(wanted):
     return baskets[0]
 
 
+def _focus_basket(shelf_id, basket_id):
+    """The pool the calendar draws its running balance from.
+
+    The month view shows a whole job now - every pool on it, on one grid - so
+    what the caller names is the job. One pool is still focused, because a
+    balance is a balance OF something and adding a paid pot to an unpaid one
+    gives a number nobody wants.
+
+    A basket_id wins when it is given and belongs to the named job. Otherwise
+    the first pool on that job is focused, which is the one the switcher shows
+    first. Falling all the way back to _pick_basket covers a caller that names
+    neither, and the URL that used to name only a basket.
+    """
+    if basket_id:
+        wanted = loaf_data.get_basket(current_user.id, basket_id) \
+            if str(basket_id).isdigit() else None
+        if wanted is not None and (
+                not shelf_id
+                or str(wanted.get('shelf_id') or '') == str(shelf_id)):
+            return wanted
+
+    if shelf_id and str(shelf_id).isdigit():
+        if loaf_data.get_shelf(current_user.id, shelf_id) is None:
+            return None
+        on_it = loaf_data.baskets_on(current_user.id, shelf_id,
+                                     include_hidden=False)
+        return on_it[0] if on_it else None
+
+    return _pick_basket(basket_id)
+
+
 @loaf.route('/dashboard')
 @login_required
 def dashboard():
-    """One basket, one month: what was worked, what was taken, what is left.
+    """One job, one month: what was worked, what was taken, what is left.
+
+    Every pool of hours on the job is drawn on the one grid, colour-coded, so
+    a week off shows whether it came out of the paid pot or the unpaid one
+    without switching between two calendars to find out. One pool is focused
+    at a time for the running balance, because a balance across a paid pot and
+    an unpaid one is not a number anybody wants.
 
     The grid itself is fetched and drawn by /api/month, the way dashboard_m
     builds its calendar - so changing month or swiping is one request rather
@@ -179,11 +224,16 @@ def dashboard():
     in Jinja and once in JS.
     """
     today = _today()
-    basket = _pick_basket(request.args.get('basket'))
+    basket = _focus_basket(request.args.get('shelf'), request.args.get('basket'))
+    shelf = loaf_data.shelf_of(current_user.id, basket) if basket else None
     return render_template(
         'loaf/dashboard.html',
         baskets=loaf_data.get_baskets(current_user.id, include_hidden=False),
         basket=basket,
+        shelf=shelf,
+        shelves=loaf_data.get_shelves(current_user.id),
+        pools=loaf_data.baskets_on(current_user.id, shelf['id'],
+                                   include_hidden=False) if shelf else [],
         today=today,
         # _basket_modal.html carries these on the element for its script to
         # read, so any page including that form has to pass them.
@@ -202,9 +252,15 @@ def baskets():
     from data-* attributes rather than by scraping the table - the one thing
     most worth copying from recurring_i.html.
     """
+    # Keyed by id so the template can find each basket's job without a
+    # lookup per row. The template falls back to the basket itself for a
+    # shelf-less one - the same transitional allowance loaf_data.shelf_of
+    # makes, and for the same reason.
+    shelves = {s['id']: s for s in loaf_data.get_shelves(current_user.id)}
     return render_template(
         'loaf/baskets.html',
         baskets=loaf_data.get_baskets(current_user.id),
+        shelves=shelves,
         today=_today(),
         weekday_prefixes=loaf_data.WEEKDAY_PREFIXES,
         weekday_names=loaf_data.WEEKDAY_NAMES,
@@ -214,6 +270,7 @@ def baskets():
         # every Blankee template's namespace too.
         describe_fill=loaf_data.describe_fill,
         describe_carryover=loaf_data.describe_carryover,
+        describe_week=loaf_data.describe_week,
         **_shell())
 
 
@@ -239,23 +296,50 @@ def _backfill_year(user_id, basket_id, stated_hours, today):
     and is left exactly as it would have been before any of this existed.
     """
     basket = loaf_data.get_basket(user_id, basket_id)
-    if basket is None or basket.get('accrual_hours') is None:
-        return None
-    if not basket.get('accrual_anchor_date'):
+    if basket is None:
         return None
 
-    year_start, _ = loaf_forecast.accrual_year_bounds(basket, today)
+    # Either way of filling counts. A basket that is GRANTED rather than
+    # accrued used to fail this guard and keep today as its starting date -
+    # so its whole year was outside the projection, and a day booked in it
+    # changed nothing while the calendar still drew the booking. An annual
+    # grant lands at the year turn, which is exactly what replaying from the
+    # year start reproduces.
+    accrues = basket.get('accrual_hours') is not None
+    granted = basket.get('grant_hours') is not None
+    if not accrues and not granted:
+        return None
+
+    shelf = loaf_data.shelf_of(user_id, basket)
+    if shelf is None:
+        return None
+    # Only an accrual needs to know when pay lands. A grant does not.
+    if accrues and not shelf.get('accrual_anchor_date'):
+        return None
+
+    year_start, _ = loaf_forecast.accrual_year_bounds(shelf, today)
     if year_start >= today:
         return None                 # the year began today; nothing to catch up
 
-    # Re-date to the year start and replay from nothing, so the engine - not
-    # arithmetic repeated here - decides what the accruals, the grant, the
-    # carryover and the ceiling come to. Anything computed by hand would be a
-    # second implementation of the walk, drifting the day either changes.
+    # Re-date to the DAY BEFORE the year start and replay from nothing, so
+    # the engine - not arithmetic repeated here - decides what the accruals,
+    # the grant, the carryover and the ceiling come to. Anything computed by
+    # hand would be a second implementation of the walk, drifting the day
+    # either changes.
+    #
+    # The day before, not the day itself, because _year_turns reports turns in
+    # (after, through] - so replaying from the year start excludes the turn AT
+    # the year start, and with it the grant that lands there. An accruing
+    # basket hid that: its pay dates fall inside the year and produce events
+    # whatever happens at the boundary. A basket that is only granted has
+    # nothing else, so it replayed to nothing, kept today as its starting date
+    # and put its whole year outside the projection.
+    from datetime import timedelta as _td
     loaf_data.update_basket(user_id, basket_id, {
-        'starting_hours': 0, 'starting_date': year_start.isoformat()})
+        'starting_hours': 0,
+        'starting_date': (year_start - _td(days=1)).isoformat()})
     replayed = loaf_data.get_basket(user_id, basket_id)
-    result = loaf_forecast.project(replayed, {}, {}, today, today=today)
+    result = loaf_forecast.project(shelf, replayed, {}, {}, today, today=today)
     earned = loaf_forecast.balance_on(result, today)
 
     if not result.get('events'):
@@ -298,17 +382,128 @@ def _backfill_year(user_id, basket_id, stated_hours, today):
                float(stated_hours or 0)))
 
 
-@loaf.route('/api/baskets', methods=['POST'])
+# ------------------------------------------------------------- the shelves ----
+
+# The fields that describe the job rather than the pool of hours. A payload
+# carrying any of them is one that thinks it is setting the working week, the
+# pay cadence or the holidays.
+SHELF_FIELDS = ('cadence_unit', 'cadence_interval', 'weekdays', 'monthly_days',
+                'yearly_day', 'yearly_month', 'accrual_anchor_date',
+                'year_start_month', 'year_start_day', 'period_hours',
+                'holidays', 'custom_holidays', 'accrual_only_weekdays') + tuple(
+    '%s_%s' % (day, part)
+    for day in loaf_data.WEEKDAY_PREFIXES
+    for part in ('start', 'end', 'break_minutes'))
+
+
+def _shelf_error(payload):
+    """Whatever is wrong with the job half of a basket payload, or None.
+
+    Checked even when it will not be applied. A basket joining a shelf that
+    already exists does not get to redefine when somebody works, but a form
+    that sends a thirteenth month or a day ending before it starts is wrong
+    whether or not anybody was going to act on it - and answering 200 to it
+    tells the caller their setting took when it went nowhere.
+
+    Silence here is the failure mode that matters: the old contract rejected
+    these, and quietly dropping them the day the week moved to the shelf would
+    be a regression nobody sees until a basket is found with no week at all.
+    """
+    if not any(field in payload for field in SHELF_FIELDS):
+        return None
+    _, error = loaf_data.clean_shelf(dict(payload, name=payload.get('name') or 'x'))
+    return error
+
+
+@loaf.route('/api/shelves', methods=['POST'])
 @login_required
-def api_create_basket():
-    values, error = loaf_data.clean_basket(_flat(_payload()))
+def api_create_shelf():
+    values, error = loaf_data.clean_shelf(_flat(_payload()))
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
 
-    if loaf_data.basket_name_exists(current_user.id, values['name']):
+    shelf_id = loaf_data.create_shelf(current_user.id, values)
+    if shelf_id is None:
         return jsonify({'status': 'error',
-                        'message': 'You already have a basket called "%s".'
-                                   % values['name']}), 400
+                        'message': 'Could not save that job.'}), 500
+    return jsonify({'status': 'success', 'shelf_id': shelf_id})
+
+
+@loaf.route('/api/shelves/<int:shelf_id>', methods=['POST'])
+@login_required
+def api_update_shelf(shelf_id):
+    if loaf_data.get_shelf(current_user.id, shelf_id) is None:
+        return jsonify({'status': 'error', 'message': 'No such job.'}), 404
+
+    payload = _flat(_payload())
+    values, error = loaf_data.clean_shelf(payload)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+
+    # The same rule api_update_basket documents at length, for the fields that
+    # moved here with the working week: clean_shelf reads "never sent" as "not
+    # set", and a form that does not show a control sends nothing. Without
+    # this, saving a name change would wipe a figure the projection is still
+    # using.
+    #
+    #   accrual_only_weekdays   only offered once the counted-week column is
+    #                       switched on from the console, so an ordinary save
+    #                       never mentions it. Wiping it would put the
+    #                       Thursdays back and start spending them again.
+    #   period_hours        lives in Advanced and only appears once the
+    #                       accrual is per hour worked. Wiping it silently
+    #                       swaps the employer's flat denominator back for a
+    #                       walked one, which drifts a few hours a year.
+    #
+    # A payload that DOES send one, empty or not, is still obeyed - so both
+    # stay clearable on purpose.
+    for absent_means_keep in ('accrual_only_weekdays', 'period_hours'):
+        if absent_means_keep not in payload:
+            values.pop(absent_means_keep, None)
+
+    # source_basket_id is provenance written once by the migration. Nothing on
+    # a form may move it, and clean_shelf never produces it, but popping it is
+    # cheap insurance against a future caller that does.
+    values.pop('source_basket_id', None)
+
+    if not loaf_data.update_shelf(current_user.id, shelf_id, values):
+        return jsonify({'status': 'error',
+                        'message': 'Could not save that job.'}), 500
+    return jsonify({'status': 'success'})
+
+
+@loaf.route('/api/shelves/<int:shelf_id>/delete', methods=['POST'])
+@login_required
+def api_delete_shelf(shelf_id):
+    """A job, and everything on it.
+
+    The count goes back so the caller can say what it is about to destroy.
+    Deleting a job takes every pool of hours on it and every booking against
+    those, which is a good deal more than the word "delete" implies on its
+    own, and the confirmation ought to say so.
+    """
+    if loaf_data.get_shelf(current_user.id, shelf_id) is None:
+        return jsonify({'status': 'error', 'message': 'No such job.'}), 404
+
+    losing = len(loaf_data.baskets_on(current_user.id, shelf_id))
+    if not loaf_data.delete_shelf(current_user.id, shelf_id):
+        return jsonify({'status': 'error',
+                        'message': 'Could not delete that job.'}), 500
+    return jsonify({'status': 'success', 'baskets_deleted': losing})
+
+
+@loaf.route('/api/baskets', methods=['POST'])
+@login_required
+def api_create_basket():
+    payload = _flat(_payload())
+    values, error = loaf_data.clean_basket(payload)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+
+    error = _shelf_error(payload)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+
 
     # New baskets go to the top, the way a new category does. Half a step above
     # the current highest, so the fractional ordering keeps working without
@@ -331,6 +526,50 @@ def api_create_basket():
     stamped_today = not values.get('starting_date')
     if stamped_today:
         values['starting_date'] = _today().isoformat()
+
+    # Every pool of hours belongs to a job. A caller that named one is taken
+    # at their word; otherwise it joins the only one there is, and if there is
+    # not one yet it gets one built FROM THIS FORM.
+    #
+    # That last part is what keeps "add a basket" a single step. The form has
+    # always carried the working week, the holidays and the pay cadence
+    # alongside the pool's own settings, and for somebody's first basket those
+    # answers are the job. Ignoring them and creating a blank shelf would mean
+    # a first basket that costs nothing to book, which is the same as broken.
+    #
+    # A basket joining a shelf that already exists does NOT get to rewrite it.
+    # Adding a second pool of hours is not the moment to redefine when you
+    # work, and silently reconfiguring the job from a form the person thought
+    # was about holiday entitlement is exactly the sort of thing that is only
+    # noticed months later.
+    if not values.get('shelf_id'):
+        shelves = loaf_data.get_shelves(current_user.id)
+        if len(shelves) == 1:
+            values['shelf_id'] = shelves[0]['id']
+        elif not shelves:
+            made, shelf_error = loaf_data.clean_shelf(payload)
+            if shelf_error:
+                return jsonify({'status': 'error', 'message': shelf_error}), 400
+            values['shelf_id'] = loaf_data.create_shelf(current_user.id, made)
+        else:
+            return jsonify({'status': 'error',
+                            'message': 'Say which job this basket is for.'}), 400
+    elif loaf_data.get_shelf(current_user.id, values['shelf_id']) is None:
+        return jsonify({'status': 'error', 'message': 'No such shelf.'}), 404
+
+    # Named after the shelf it just landed on, when nobody named it. The clash
+    # check follows rather than precedes, because two unnamed PTO baskets on
+    # one shelf would both want to be called "Acme Corp PTO" and the second
+    # has to be told so.
+    if not values.get('name'):
+        values['name'] = loaf_data.default_basket_name(
+            loaf_data.get_shelf(current_user.id, values['shelf_id']),
+            values.get('basket_type'))
+
+    if loaf_data.basket_name_exists(current_user.id, values['name']):
+        return jsonify({'status': 'error',
+                        'message': 'You already have a basket called "%s".'
+                                   % values['name']}), 400
 
     basket_id = loaf_data.create_basket(current_user.id, values)
     if basket_id is None:
@@ -361,6 +600,18 @@ def api_update_basket(basket_id):
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
 
+    error = _shelf_error(payload)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+
+    # Clearing the name puts the default back rather than saving an empty
+    # one, which is the same promise the create path makes.
+    if not values.get('name'):
+        was_on = loaf_data.get_basket(current_user.id, basket_id) or {}
+        values['name'] = loaf_data.default_basket_name(
+            loaf_data.shelf_of(current_user.id, was_on),
+            values.get('basket_type'))
+
     if loaf_data.basket_name_exists(current_user.id, values['name'],
                                     exclude_id=basket_id):
         return jsonify({'status': 'error',
@@ -379,15 +630,15 @@ def api_update_basket(basket_id):
     #                       how fast a basket fills. The walk still clamps to
     #                       it, so wiping one quietly raises every future
     #                       balance from that day on.
-    #   accrual_only_weekdays   only offered once the counted-week column is
-    #                       switched on from the console, so an ordinary save
-    #                       never mentions it. Wiping it would put the
-    #                       Thursdays back and start spending them again.
+    #
+    # accrual_only_weekdays used to be here too and has moved to the shelf,
+    # where api_update_shelf guards it the same way - it is the job's week
+    # that knows which days are counted but not attended, not the pool's.
     #
     # A payload that does not mention a field leaves it alone, the same
     # treatment starting_date gets below. One that DOES send it, empty or not,
     # is still obeyed - so both stay reachable and clearable on purpose.
-    for absent_means_keep in ('max_balance_hours', 'accrual_only_weekdays'):
+    for absent_means_keep in ('max_balance_hours',):
         if absent_means_keep not in payload:
             values.pop(absent_means_keep, None)
 
@@ -402,6 +653,29 @@ def api_update_basket(basket_id):
         values['starting_date'] = _today().isoformat()
     else:
         values.pop('starting_date', None)
+
+    # A basket that is the ONLY pool on its job is still, to the person
+    # looking at it, just "my basket" - so a form carrying the working week
+    # edits the week, exactly as it did before shelves existed. The moment a
+    # second pool joins that job the week stops being this basket's to change
+    # and the job gets edited on its own.
+    #
+    # Detected rather than declared, because the alternative is a hidden field
+    # saying "and by the way also write the shelf", which is the kind of flag
+    # that survives long after the reason for it is gone.
+    shelf = loaf_data.shelf_of(current_user.id, was)
+    alone = shelf and len(loaf_data.baskets_on(current_user.id,
+                                               shelf['id'])) == 1
+    if alone and any(k in payload for k in ('mon_start', 'cadence_unit',
+                                            'holidays', 'period_hours')):
+        shelf_values, shelf_error = loaf_data.clean_shelf(payload)
+        if shelf_error:
+            return jsonify({'status': 'error', 'message': shelf_error}), 400
+        for absent_means_keep in ('accrual_only_weekdays', 'period_hours'):
+            if absent_means_keep not in payload:
+                shelf_values.pop(absent_means_keep, None)
+        shelf_values.pop('source_basket_id', None)
+        loaf_data.update_shelf(current_user.id, shelf['id'], shelf_values)
 
     if not loaf_data.update_basket(current_user.id, basket_id, values):
         return jsonify({'status': 'error',
@@ -463,28 +737,45 @@ def _month_payload(user_id, basket, year, month, today):
     swipe is one fetch rather than a page load.
     """
     entries = loaf_data.get_entries(user_id)
-    baskets = loaf_data.get_baskets(user_id)
 
-    # usage is this basket's; absence is everyone's, because any hour not
-    # worked pro-rates the accrual whichever basket it came out of.
-    usage = loaf_forecast.usage_by_date(basket, entries)
-    absence = loaf_forecast.absence_by_date(baskets, entries)
+    # usage is this pool's; absence is every pool ON THIS SHELF, because an
+    # hour not worked pro-rates the accrual whichever pot it came out of - and
+    # scoped to the shelf, because an hour not worked at another job does not.
+    shelf = loaf_data.shelf_of(user_id, basket)
+    baskets = loaf_data.baskets_on(user_id, shelf['id'], include_hidden=False) \
+        if shelf else [basket]
+    if not any(int(b['id']) == int(basket['id']) for b in baskets):
+        baskets = [basket] + baskets    # a hidden pool can still be the focus
+
+    absence = loaf_forecast.absence_by_date(shelf, baskets, entries)
+
+    # Every pool's split, not just the focused one. The calendar colours a day
+    # by which pot the hours came out of, so it needs all of them - and the
+    # focused pool's is in here too rather than being worked out twice.
+    taken_by = {int(b['id']): loaf_forecast.usage_by_date(shelf, b, entries)
+                for b in baskets}
+    usage = taken_by[int(basket['id'])]
     credits = loaf_forecast.credit_by_date(basket, entries)
 
     viewing = date(int(year), int(month), 1)
-    through = loaf_forecast.horizon_for(basket, viewing, today=today)
-    result = loaf_forecast.project(basket, usage, absence, through, today=today,
-                                   credits=credits)
+    through = loaf_forecast.horizon_for(shelf, viewing, today=today)
+    result = loaf_forecast.project(shelf, basket, usage, absence, through,
+                                   today=today, credits=credits)
 
     grid_start, grid_end, first, last = loaf_forecast.grid_bounds(year, month)
-    rows = loaf_forecast.month_rows(basket, result, absence, grid_start, grid_end)
+    rows = loaf_forecast.month_rows(shelf, basket, result, absence,
+                                    grid_start, grid_end, taken_by=taken_by)
 
     # Which bookings touch each day, so a click can open the one that is
     # already there instead of always adding another.
-    mine = int(basket['id'])
+    #
+    # Every pool on the job, not just the focused one: the calendar shows them
+    # all, so clicking a day somebody booked against UTO has to open THAT
+    # booking rather than silently starting a new PTO one on top of it.
+    on_shelf = {int(b['id']) for b in baskets}
     touching = {}
     for entry in entries:
-        if int(entry.get('basket_id') or 0) != mine:
+        if int(entry.get('basket_id') or 0) not in on_shelf:
             continue
         starts = str(entry.get('starts_at') or '')[:10]
         ends = str(entry.get('ends_at') or '')[:10]
@@ -495,6 +786,7 @@ def _month_payload(user_id, basket, year, month, today):
         while day <= stop:
             touching.setdefault(day.isoformat(), []).append({
                 'id': entry.get('id'),
+                'basket_id': int(entry.get('basket_id') or 0),
                 'starts_at': entry.get('starts_at'),
                 'ends_at': entry.get('ends_at'),
                 'all_day': int(entry.get('all_day') or 0),
@@ -521,6 +813,9 @@ def _month_payload(user_id, basket, year, month, today):
             'scheduled': row['scheduled'],
             'worked': row['worked'],
             'taken': row['taken'],
+            # Keyed by basket id as a string, because JSON object keys always
+            # are and a client comparing 3 to "3" would find nothing.
+            'taken_by': {str(k): v for k, v in row['taken_by'].items()},
             'accrued': row['accrued'],
             'granted': row['granted'],
             'credited': row['credited'],
@@ -534,7 +829,31 @@ def _month_payload(user_id, basket, year, month, today):
         if summary.get(key) is not None:
             summary[key] = summary[key].isoformat()
 
-    return {'rows': out, 'summary': summary,
+    # The pools on this job, in the order the switcher shows them, each with
+    # what it is worth today. This is what the chips above the calendar read.
+    pools = []
+    for other in baskets:
+        if int(other['id']) == int(basket['id']):
+            balance = result['summary'].get('balance_today')
+        else:
+            walked = loaf_forecast.project(
+                shelf, other,
+                taken_by.get(int(other['id']), {}), absence, through,
+                today=today,
+                credits=loaf_forecast.credit_by_date(other, entries))
+            balance = walked['summary'].get('balance_today')
+        pools.append({
+            'id': int(other['id']),
+            'name': other.get('name'),
+            'basket_type': other.get('basket_type') or 'pto',
+            'low_balance_hours': other.get('low_balance_hours'),
+            'balance_today': balance,
+            'focused': int(other['id']) == int(basket['id']),
+        })
+
+    return {'rows': out, 'summary': summary, 'pools': pools,
+            'shelf': {'id': shelf['id'], 'name': shelf.get('name')}
+                     if shelf else None,
             'first': first.isoformat(), 'last': last.isoformat()}
 
 
@@ -542,7 +861,8 @@ def _month_payload(user_id, basket, year, month, today):
 @login_required
 def api_month():
     today = _today()
-    basket = _pick_basket(request.args.get('basket_id'))
+    basket = _focus_basket(request.args.get('shelf_id'),
+                           request.args.get('basket_id'))
     if basket is None:
         return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
 
@@ -566,8 +886,8 @@ def api_month():
 
 # --------------------------------------------------------- the bookings ----
 
-def _recompute(basket, values):
-    """Fill in what the schedule says a booking costs.
+def _recompute(shelf, values):
+    """Fill in what the job's schedule says a booking costs.
 
     computed_hours is always what the working week produces. hours follows it
     unless the user typed a figure, which is the whole point of
@@ -582,14 +902,14 @@ def _recompute(basket, values):
         values['computed_hours'] = None
         return values
 
-    computed = loaf_forecast.entry_hours(basket, values)
+    computed = loaf_forecast.entry_hours(shelf, values)
     values['computed_hours'] = computed
     if not int(values.get('hours_overridden') or 0):
         values['hours'] = computed
     return values
 
 
-def _unworkable(basket, values):
+def _unworkable(shelf, values):
     """The message for time off booked where no hours are worked, or None.
 
     Checked ahead of the override, unlike the plain zero-cost guard below it,
@@ -603,11 +923,45 @@ def _unworkable(basket, values):
     if str(values.get('direction') or 'use') in loaf_data.FLAT_DIRECTIONS:
         return None                 # neither is booked against the week
 
-    if loaf_forecast.entry_hours(basket, values) > 0:
+    if loaf_forecast.entry_hours(shelf, values) > 0:
         return None
 
     return ('You do not work any of those hours, so there is no time off to '
             'take. Pick a day your working week covers.')
+
+
+def _overbooked(user_id, shelf, values, editing=None):
+    """The message for a day booked past what it holds, or None.
+
+    A day can carry bookings from as many pools as you like - a morning of
+    paid leave and the afternoon unpaid is an ordinary thing - so nothing
+    stops a second one going on. What stops is the total: you cannot take
+    more hours off a day than were ever going to be worked.
+
+    Counted across every pool on the SHELF, because they share one working
+    week. Another job's day off says nothing about the hours available here.
+    """
+    if str(values.get('direction') or 'use') in loaf_data.FLAT_DIRECTIONS:
+        return None                 # hours handed over, not hours taken
+
+    if shelf is None:
+        return None
+
+    on_shelf = loaf_data.baskets_on(user_id, shelf['id'])
+    clash = loaf_forecast.booked_beyond(
+        shelf, on_shelf, loaf_data.get_entries(user_id), values,
+        ignoring=editing)
+    if clash is None:
+        return None
+
+    day, already, capacity = clash
+    when = day.strftime('%A %d %B')
+    if capacity <= 0:
+        return ('You do not work on %s, so there is no time off to take '
+                'there.' % when)
+    return ('%s only has %.2f hours to give and %.2f of them are already '
+            'booked. Take less, or free some up first.'
+            % (when, capacity, already))
 
 
 @loaf.route('/api/entries', methods=['POST'])
@@ -621,11 +975,13 @@ def api_create_entry():
     if basket is None:
         return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
 
-    blocked = _unworkable(basket, values)
+    shelf = loaf_data.shelf_of(current_user.id, basket)
+    blocked = _unworkable(shelf, values) \
+        or _overbooked(current_user.id, shelf, values)
     if blocked:
         return jsonify({'status': 'error', 'message': blocked}), 400
 
-    values = _recompute(basket, values)
+    values = _recompute(shelf, values)
 
     entry_id = loaf_data.create_entry(current_user.id, values)
     if entry_id is None:
@@ -653,11 +1009,15 @@ def api_update_entry(entry_id):
     # The update path had no zero-cost guard at all, so re-saving a booking
     # onto a day with no hours quietly wrote 0 and kept the row. It gets the
     # same refusal as the create path.
-    blocked = _unworkable(basket, values)
+    shelf = loaf_data.shelf_of(current_user.id, basket)
+    # Not against itself: re-saving an eight-hour day on an eight-hour
+    # schedule is not an overbooking.
+    blocked = _unworkable(shelf, values) \
+        or _overbooked(current_user.id, shelf, values, editing=entry_id)
     if blocked:
         return jsonify({'status': 'error', 'message': blocked}), 400
 
-    values = _recompute(basket, values)
+    values = _recompute(shelf, values)
     if not loaf_data.update_entry(current_user.id, entry_id, values):
         return jsonify({'status': 'error', 'message': 'Could not save that.'}), 500
     return jsonify({'status': 'success', 'hours': values['hours']})
@@ -696,29 +1056,36 @@ def _weekly_series(basket, result, first, last):
     return points
 
 
-def _basket_summary(basket, entries, baskets, today, extra=None):
+def _basket_summary(user_id, basket, entries, baskets, today, extra=None):
     """One basket's figures, and optionally the same again with a proposed
     booking folded in.
 
     extra is an unsaved entry. It is added to BOTH usage and absence, because a
-    booking costs its own basket the hours and costs every basket the accrual
-    those hours would have earned - which is the whole reason Test Time Off
-    cannot be answered by subtracting a number.
+    booking costs its own basket the hours and costs every pool ON ITS SHELF
+    the accrual those hours would have earned - which is the whole reason Test
+    Time Off cannot be answered by subtracting a number.
+
+    Takes user_id because the shelf has to be looked up, and `baskets` cannot
+    stand in for that: the caller passes every basket the person has, and the
+    pro-rate needs only the ones on this one's job.
     """
-    usage = loaf_forecast.usage_by_date(basket, entries)
-    absence = loaf_forecast.absence_by_date(baskets, entries)
+    shelf = loaf_data.shelf_of(user_id, basket)
+    on_shelf = loaf_data.baskets_on(user_id, shelf['id']) if shelf else [basket]
+    usage = loaf_forecast.usage_by_date(shelf, basket, entries)
+    absence = loaf_forecast.absence_by_date(shelf, on_shelf, entries)
     credits = loaf_forecast.credit_by_date(basket, entries)
 
     # Test Time Off only ever tries taking hours, never being given them, so
     # `extra` is a use and goes into both usage and absence as before.
     if extra is not None:
-        split = loaf_forecast._entry_split(basket, extra)
+        split = loaf_forecast._entry_split(shelf, extra)
         for when, hours in split.items():
             usage[when] = round(usage.get(when, 0.0) + hours, 2)
             absence[when] = round(absence.get(when, 0.0) + hours, 2)
 
-    year_start, year_end = loaf_forecast.accrual_year_bounds(basket, today)
-    result = loaf_forecast.project(basket, usage, absence, year_end, today=today,
+    year_start, year_end = loaf_forecast.accrual_year_bounds(shelf, today)
+    result = loaf_forecast.project(shelf, basket, usage, absence, year_end,
+                                   today=today,
                                    credits=credits)
 
     summary = dict(result['summary'])
@@ -759,7 +1126,8 @@ def api_summary():
     return jsonify({
         'status': 'success',
         'today': today.isoformat(),
-        'baskets': [_basket_summary(b, entries, baskets, today) for b in baskets],
+        'baskets': [_basket_summary(current_user.id, b, entries, baskets, today)
+                    for b in baskets],
     })
 
 
@@ -783,18 +1151,22 @@ def api_test_time_off():
         return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
 
     today = _today()
-    baskets = loaf_data.get_baskets(current_user.id, include_hidden=False)
+    shelf = loaf_data.shelf_of(current_user.id, basket)
+    baskets = loaf_data.baskets_on(current_user.id, shelf['id'],
+                                   include_hidden=False) if shelf else [basket]
     entries = loaf_data.get_entries(current_user.id)
 
-    blocked = _unworkable(basket, values)
+    blocked = _unworkable(shelf, values) \
+        or _overbooked(current_user.id, shelf, values)
     if blocked:
         return jsonify({'status': 'error', 'message': blocked}), 400
 
-    values = _recompute(basket, values)
+    values = _recompute(shelf, values)
     cost = values['hours']
 
-    now = _basket_summary(basket, entries, baskets, today)
-    then = _basket_summary(basket, entries, baskets, today, extra=values)
+    now = _basket_summary(current_user.id, basket, entries, baskets, today)
+    then = _basket_summary(current_user.id, basket, entries, baskets, today,
+                           extra=values)
 
     return jsonify({
         'status': 'success',

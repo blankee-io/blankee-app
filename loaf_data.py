@@ -61,6 +61,7 @@ from log_config import get_logger, log_info, log_error, log_exception
 logger = get_logger(__name__)
 
 
+SHELVES = 'loaf_shelves'
 BASKETS = 'loaf_baskets'
 ENTRIES = 'loaf_entries'
 
@@ -71,19 +72,35 @@ WEEKDAY_PREFIXES = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
 # What a caller may set. A request dict is filtered through these rather than
 # trusted, so a stray key cannot reach the SQL and id/user_id/created_at cannot
 # be written from outside.
-BASKET_COLUMNS = (
-    'name', 'basket_type', 'display_order', 'hidden',
-    'max_balance_hours', 'grant_hours', 'accrual_hours',
+# A shelf is the job: the working week, the days the office is shut, when pay
+# lands and how many hours the employer counts in a period. Everything here is
+# a property of the employment rather than of any one pool of hours, which is
+# why a basket no longer carries its own copy.
+#
+# The duplicates still exist on loaf_baskets and are no longer read - see
+# add_loaf_shelves.sql on why dropping them is a later release's job.
+SHELF_COLUMNS = (
+    'name', 'source_basket_id', 'period_hours',
     'cadence_interval', 'cadence_unit', 'weekdays', 'monthly_days',
     'yearly_day', 'yearly_month', 'accrual_anchor_date',
     'year_start_month', 'year_start_day',
-    'carryover_mode', 'carryover_cap_hours', 'low_balance_hours',
-    'starting_hours', 'starting_date', 'accrual_only_weekdays',
-    'accrual_basis', 'period_hours', 'holidays', 'custom_holidays',
+    'holidays', 'custom_holidays', 'accrual_only_weekdays',
 ) + tuple(
     '%s_%s' % (day, part)
     for day in WEEKDAY_PREFIXES
     for part in ('start', 'end', 'break_minutes')
+)
+
+# A basket is a pool of hours and nothing else now: what it holds, how it
+# fills, and what happens to it when the year turns. The year BOUNDARY is the
+# shelf's - one job, one leave year - while what happens at it stays here,
+# because PTO may carry over where UTO resets on the very same date.
+BASKET_COLUMNS = (
+    'shelf_id',
+    'name', 'basket_type', 'display_order', 'hidden',
+    'max_balance_hours', 'grant_hours', 'accrual_hours',
+    'carryover_mode', 'carryover_cap_hours', 'low_balance_hours',
+    'starting_hours', 'starting_date', 'accrual_basis',
 )
 
 ENTRY_COLUMNS = (
@@ -123,7 +140,7 @@ def _normalise(row):
 
 def _from_mysql(table, user_id):
     """Every row of one table for one user, straight from MySQL."""
-    if table not in (BASKETS, ENTRIES):
+    if table not in (SHELVES, BASKETS, ENTRIES):
         log_error(logger, 'LOAF', 'Refusing to query unknown table %r' % table)
         return []
     try:
@@ -163,6 +180,67 @@ def _refresh(table, user_id):
     flush for a table that has no flush branch.
     """
     set_table_cache(table, user_id, _from_mysql(table, user_id), mark_dirty=False)
+
+
+def get_shelves(user_id):
+    """A user's jobs, oldest first.
+
+    No display_order: a shelf is not something the dashboard pages through,
+    and inventing an ordering column nobody sets would only be one more thing
+    to keep in step.
+    """
+    return sorted(_read(SHELVES, user_id), key=lambda s: s.get('id') or 0)
+
+
+def get_shelf(user_id, shelf_id):
+    """One shelf, or None. Scoped by user, so an id from a request cannot
+    reach someone else's row."""
+    shelf_id = int(shelf_id)
+    for shelf in _read(SHELVES, user_id):
+        if int(shelf.get('id') or 0) == shelf_id:
+            return shelf
+    return None
+
+
+def shelf_of(user_id, basket):
+    """The job a basket belongs to.
+
+    Every read of the working week goes through here rather than through the
+    basket, which is the whole point of the split: two pools on one job cannot
+    disagree about which days are worked if neither of them holds the answer.
+
+    FALLS BACK TO THE BASKET ITSELF when it has no shelf, and that is
+    deliberate for exactly one release. An update applies schema before code,
+    so for a window the PREVIOUS release is still creating baskets - and those
+    arrive with shelf_id NULL and their own copies of the schedule columns
+    fully populated. Reading them is correct rather than a guess: this is the
+    release that stops WRITING those columns, and add_loaf_shelves.sql is
+    explicit that dropping them is a later one's job.
+
+    The fallback dies with them. Once nothing can create a shelf-less basket,
+    this returning a basket is a bug worth crashing on rather than papering
+    over, and the `return basket` below should become a raise.
+    """
+    if not basket:
+        return None
+    if basket.get('shelf_id'):
+        found = get_shelf(user_id, basket['shelf_id'])
+        if found is not None:
+            return found
+    return basket
+
+
+def baskets_on(user_id, shelf_id, include_hidden=True):
+    """Every pool of hours on one job.
+
+    This is the set the accrual pro-rate subtracts absence over. Scoped to the
+    shelf and not to the user: time off at one job says nothing about the
+    hours worked at another, and counting it would suppress that job's accrual
+    with no visible symptom.
+    """
+    shelf_id = int(shelf_id)
+    return [b for b in get_baskets(user_id, include_hidden)
+            if int(b.get('shelf_id') or 0) == shelf_id]
 
 
 def get_baskets(user_id, include_hidden=True):
@@ -300,6 +378,33 @@ def _delete(table, user_id, row_id):
     return gone > 0
 
 
+def create_shelf(user_id, data):
+    return _insert(SHELVES, user_id, data, SHELF_COLUMNS)
+
+
+def update_shelf(user_id, shelf_id, data):
+    return _update(SHELVES, user_id, shelf_id, data, SHELF_COLUMNS)
+
+
+def delete_shelf(user_id, shelf_id):
+    """A job, every pool of hours on it, and everything booked against those.
+
+    MySQL cascades twice - shelf to baskets, baskets to entries - and Redis
+    cascades not at all, so both downstream caches are refreshed by hand. The
+    same trap delete_basket documents, one level deeper: without this the
+    calendar keeps drawing bookings against baskets that no longer exist.
+
+    Deliberately destructive rather than refused-while-occupied. A shelf with
+    no baskets is not a thing anybody wants to keep, and refusing would leave
+    the only route to deleting a job as "delete every basket first", which is
+    the same destruction with more steps.
+    """
+    gone = _delete(SHELVES, user_id, shelf_id)
+    _refresh(BASKETS, user_id)
+    _refresh(ENTRIES, user_id)
+    return gone
+
+
 def create_basket(user_id, data):
     return _insert(BASKETS, user_id, data, BASKET_COLUMNS)
 
@@ -315,8 +420,21 @@ def delete_basket(user_id, basket_id):
     refreshed too. Without that second refresh the calendar keeps drawing
     bookings against a basket that no longer exists until the key expires.
     """
+    doomed = get_basket(user_id, basket_id) or {}
+    was_on = doomed.get('shelf_id')
     gone = _delete(BASKETS, user_id, basket_id)
     _refresh(ENTRIES, user_id)
+
+    # A job with no pools of hours left on it goes too. It shows nothing, it
+    # holds nothing, and leaving it would mean the next basket created
+    # silently joins a job the person thought they had deleted - inheriting a
+    # working week they cannot see and did not choose.
+    #
+    # This is also what happened before shelves existed: the week lived on the
+    # basket, so deleting the last basket took it. Keeping the shelf would be
+    # the change in behaviour, not removing it.
+    if gone and was_on and not baskets_on(user_id, was_on):
+        _delete(SHELVES, user_id, was_on)
     return gone
 
 
@@ -382,8 +500,12 @@ def _minutes(value):
     return -total if sign else total
 
 
-def schedule_for(basket, weekday):
-    """What this basket's week looks like on one weekday.
+def schedule_for(shelf, weekday):
+    """What this JOB's week looks like on one weekday.
+
+    Takes a shelf, not a basket. Two pools of hours on one job must not be
+    able to disagree about which days are worked, and the surest way to
+    guarantee that is for neither of them to hold the answer.
 
     weekday is 0=monday..6=sunday. Returns None for a day not worked - a NULL
     start - so a caller can skip it without inspecting the parts. Otherwise
@@ -399,29 +521,29 @@ def schedule_for(basket, weekday):
     except (IndexError, TypeError, ValueError):
         return None
 
-    start = _minutes(basket.get('%s_start' % prefix))
-    end = _minutes(basket.get('%s_end' % prefix))
+    start = _minutes(shelf.get('%s_start' % prefix))
+    end = _minutes(shelf.get('%s_end' % prefix))
     if start is None or end is None or end <= start:
         return None
 
     try:
-        pause = int(basket.get('%s_break_minutes' % prefix) or 0)
+        pause = int(shelf.get('%s_break_minutes' % prefix) or 0)
     except (TypeError, ValueError):
         pause = 0
 
     return {'start': start, 'end': end, 'break_minutes': max(0, pause)}
 
 
-def scheduled_minutes(basket, weekday):
+def scheduled_minutes(shelf, weekday):
     """The minutes actually worked on one weekday, breaks removed. 0 if the day
     is not worked."""
-    day = schedule_for(basket, weekday)
+    day = schedule_for(shelf, weekday)
     if not day:
         return 0
     return max(0, (day['end'] - day['start']) - day['break_minutes'])
 
 
-def attends(basket, weekday):
+def attends(shelf, weekday):
     """Is this a weekday the person is actually at work?
 
     Not the same question as scheduled_minutes, and deliberately not folded
@@ -442,7 +564,7 @@ def attends(basket, weekday):
         name = WEEKDAY_NAMES[int(weekday)]
     except (IndexError, TypeError, ValueError):
         return True
-    listed = str(basket.get('accrual_only_weekdays') or '').split(',')
+    listed = str(shelf.get('accrual_only_weekdays') or '').split(',')
     return name not in listed
 
 
@@ -603,25 +725,21 @@ def _monthly_day_list(value):
     return ','.join(keep) if keep else None
 
 
-def clean_basket(payload):
-    """A basket form as column values, or an error to show the user.
+def clean_shelf(payload):
+    """A shelf form as column values, or an error to show the user.
 
-    Returns (values, error). error is a sentence fit for a toast; when it is
-    None, values is safe to hand to create_basket or update_basket.
+    The job half of what clean_basket used to do: when pay lands, how many
+    hours the employer counts in a period, which days are worked, and which
+    days the office is shut. Same (values, error) contract, same validators.
     """
     values = {}
 
     name = str(payload.get('name') or '').strip()
     if not name:
-        return None, 'A basket needs a name.'
+        return None, 'A job needs a name.'
     if len(name) > 255:
         return None, 'That name is too long.'
     values['name'] = name
-
-    kind = str(payload.get('basket_type') or 'pto').strip().lower()
-    if kind not in BASKET_TYPES:
-        return None, 'A basket is either PTO or UTO.'
-    values['basket_type'] = kind
 
     unit = str(payload.get('cadence_unit') or 'weeks').strip().lower()
     if unit not in CADENCE_UNITS:
@@ -633,37 +751,17 @@ def clean_basket(payload):
         return None, 'Pay has to land every one period or more.'
     values['cadence_interval'] = interval or 1
 
-    mode = str(payload.get('carryover_mode') or 'reset').strip().lower()
-    if mode not in CARRYOVER_MODES:
-        return None, 'That carryover setting is not one Loaf understands.'
-    values['carryover_mode'] = mode
-
-    # Nullable figures. Empty means "not set", which is a real answer for every
-    # one of these - see _opt_number.
-    for field, label in (('period_hours', 'The hours in a pay period'),
-                         ('max_balance_hours', 'The maximum balance'),
-                         ('grant_hours', 'The granted hours'),
-                         ('accrual_hours', 'The accrual'),
-                         ('carryover_cap_hours', 'The carryover cap'),
-                         ('low_balance_hours', 'The low-balance warning')):
-        number, ok = _opt_number(payload.get(field))
-        if not ok:
-            return None, '%s has to be a number.' % label
-        if number is not None and number < 0:
-            return None, '%s cannot be negative.' % label
-        values[field] = number
-
-    starting, ok = _opt_number(payload.get('starting_hours'))
+    number, ok = _opt_number(payload.get('period_hours'))
     if not ok:
-        return None, 'The starting balance has to be a number.'
-    values['starting_hours'] = 0.0 if starting is None else starting
+        return None, 'The hours in a pay period has to be a number.'
+    if number is not None and number < 0:
+        return None, 'The hours in a pay period cannot be negative.'
+    values['period_hours'] = number
 
-    for field, label in (('accrual_anchor_date', 'The first pay date'),
-                         ('starting_date', 'The starting date')):
-        when, ok = _opt_date(payload.get(field))
-        if not ok:
-            return None, '%s is not a date Loaf can read.' % label
-        values[field] = when
+    when, ok = _opt_date(payload.get('accrual_anchor_date'))
+    if not ok:
+        return None, 'The first pay date is not a date Loaf can read.'
+    values['accrual_anchor_date'] = when
 
     month, ok = _opt_number(payload.get('year_start_month'), int)
     if not ok or (month is not None and not 1 <= month <= 12):
@@ -693,17 +791,11 @@ def clean_basket(payload):
     values['accrual_only_weekdays'] = _weekday_list(
         payload.get('accrual_only_weekdays'))
 
-    basis = str(payload.get('accrual_basis') or 'flat').strip().lower()
-    if basis not in ACCRUAL_BASES:
-        return None, 'That is not a way Loaf knows how to accrue.'
-    values['accrual_basis'] = basis
-
     values['holidays'] = ','.join(
         loaf_holidays.as_list(payload.get('holidays'))) or None
     values['custom_holidays'] = loaf_holidays.format_custom(
         payload.get('custom_holidays'))
     values['monthly_days'] = _monthly_day_list(payload.get('monthly_days'))
-    values['hidden'] = 1 if str(payload.get('hidden') or '') in ('1', 'true', 'on') else 0
 
     # The working week. A day with no start is a day not worked, which is how
     # the form says "I do not work Sundays" - it clears the two time inputs.
@@ -733,6 +825,76 @@ def clean_basket(payload):
         if start is not None and end is not None and end <= start:
             return None, ('%s finishes before it starts. Overnight shifts are not '
                           'supported yet.' % WEEKDAY_NAMES[index].capitalize())
+
+    return values, None
+
+
+def clean_basket(payload):
+    """A basket form as column values, or an error to show the user.
+
+    Returns (values, error). error is a sentence fit for a toast; when it is
+    None, values is safe to hand to create_basket or update_basket.
+    """
+    values = {}
+
+    # Empty is allowed, and means "call it the obvious thing". The caller
+    # fills it in from the shelf and the type - see default_basket_name - once
+    # it knows which shelf this is going on, which is not known here.
+    name = str(payload.get('name') or '').strip()
+    if len(name) > 255:
+        return None, 'That name is too long.'
+    values['name'] = name
+
+    kind = str(payload.get('basket_type') or 'pto').strip().lower()
+    if kind not in BASKET_TYPES:
+        return None, 'A basket is either PTO or UTO.'
+    values['basket_type'] = kind
+
+    mode = str(payload.get('carryover_mode') or 'reset').strip().lower()
+    if mode not in CARRYOVER_MODES:
+        return None, 'That carryover setting is not one Loaf understands.'
+    values['carryover_mode'] = mode
+
+    # Nullable figures. Empty means "not set", which is a real answer for every
+    # one of these - see _opt_number.
+    for field, label in (('max_balance_hours', 'The maximum balance'),
+                         ('grant_hours', 'The granted hours'),
+                         ('accrual_hours', 'The accrual'),
+                         ('carryover_cap_hours', 'The carryover cap'),
+                         ('low_balance_hours', 'The low-balance warning')):
+        number, ok = _opt_number(payload.get(field))
+        if not ok:
+            return None, '%s has to be a number.' % label
+        if number is not None and number < 0:
+            return None, '%s cannot be negative.' % label
+        values[field] = number
+
+    starting, ok = _opt_number(payload.get('starting_hours'))
+    if not ok:
+        return None, 'The starting balance has to be a number.'
+    values['starting_hours'] = 0.0 if starting is None else starting
+
+    when, ok = _opt_date(payload.get('starting_date'))
+    if not ok:
+        return None, 'The starting date is not a date Loaf can read.'
+    values['starting_date'] = when
+
+    basis = str(payload.get('accrual_basis') or 'flat').strip().lower()
+    if basis not in ACCRUAL_BASES:
+        return None, 'That is not a way Loaf knows how to accrue.'
+    values['accrual_basis'] = basis
+
+    values['hidden'] = 1 if str(payload.get('hidden') or '') in ('1', 'true', 'on') else 0
+
+    # Which job this pool belongs to. Absent is left alone rather than
+    # cleared, the same rule the hidden controls follow: a form that does not
+    # show the field sends nothing, and nothing must never mean "detach this
+    # basket from its job".
+    if payload.get('shelf_id') not in (None, ''):
+        shelf_id, ok = _opt_number(payload.get('shelf_id'), int)
+        if not ok or not shelf_id:
+            return None, 'That is not a job Loaf can find.'
+        values['shelf_id'] = shelf_id
 
     return values, None
 
@@ -901,16 +1063,64 @@ def _as_int(value, default=0):
         return default
 
 
-def describe_fill(basket):
-    """How a basket fills, in a sentence fragment, or None if it does not."""
+def describe_fill(basket, shelf=None):
+    """How a basket fills, in a sentence fragment, or None if it does not.
+
+    How MUCH comes from the pool and how OFTEN from the job, which is why
+    this needs both. shelf defaults to the basket so a combined dict - what
+    every caller had before shelves, and what the engine tests still build -
+    keeps working unchanged.
+    """
     accrual = basket.get('accrual_hours')
     grant = basket.get('grant_hours')
     parts = []
     if accrual is not None:
-        parts.append('%.2f h %s' % (float(accrual), describe_cadence(basket)))
+        parts.append('%.2f h %s' % (float(accrual),
+                                    describe_cadence(shelf or basket)))
     if grant is not None:
         parts.append('%.2f h granted each year' % float(grant))
     return ', then '.join(parts) if parts else None
+
+
+def default_basket_name(shelf, basket_type):
+    """What to call a basket nobody named.
+
+    The shelf and what the pool is: "Acme Corp PTO". Most people have one of
+    each per job and naming them is a question with an obvious answer, so the
+    form stops asking and fills this in instead. Anybody who wants their own
+    word still types one.
+    """
+    kind = 'UTO' if str(basket_type or 'pto').lower() == 'uto' else 'PTO'
+    stem = str((shelf or {}).get('name') or '').strip()
+    return ('%s %s' % (stem, kind)).strip() if stem else kind
+
+
+def describe_week(shelf):
+    """The job's working week in a few words, for a list that shows many.
+
+    Ranges rather than a list of seven, because "Mon-Fri" is how anybody
+    describes that week and "Mon, Tue, Wed, Thu, Fri" is how nobody does. Days
+    with different hours are still summarised by their days alone: the point
+    here is to tell two jobs apart at a glance, not to restate the form.
+    """
+    worked = [i for i in range(7) if scheduled_minutes(shelf, i) > 0]
+    if not worked:
+        return 'no days set'
+
+    short = [n[:3].capitalize() for n in WEEKDAY_NAMES]
+    runs, run = [], [worked[0]]
+    for day in worked[1:]:
+        if day == run[-1] + 1:
+            run.append(day)
+        else:
+            runs.append(run)
+            run = [day]
+    runs.append(run)
+    days = ', '.join(short[r[0]] if len(r) == 1
+                     else '%s-%s' % (short[r[0]], short[r[-1]]) for r in runs)
+
+    hours = sum(scheduled_minutes(shelf, i) for i in worked) / 60.0
+    return '%s, %.2f h a week' % (days, hours)
 
 
 def describe_carryover(basket):

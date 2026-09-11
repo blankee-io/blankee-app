@@ -83,6 +83,10 @@
       "icon": "fa-plus",
       "style": "solid"
     },
+    "fa-shelves": {
+      "icon": "fa-layer-group",
+      "style": "solid"
+    },
     "fa-shield-check": {
       "icon": "fa-shield-halved",
       "style": "solid"
