@@ -383,6 +383,22 @@
         }
     }
 
+    // The name a new basket opens with: the shelf's, and what the pool is.
+    // "Acme Corp PTO" - which is what most people would have typed, and what
+    // the server would have filled in had the field been left empty.
+    //
+    // It follows the type picker until somebody types their own, and then
+    // never again: a name being rewritten under the cursor because the type
+    // changed is the sort of thing that loses a word somebody meant.
+    var shelfStem = '';
+    var nameTouched = false;
+
+    function suggestName() {
+        if (nameTouched || !shelfStem) { return; }
+        var kind = val(P + '-type') === 'uto' ? 'UTO' : 'PTO';
+        el(P + '-name').value = (shelfStem + ' ' + kind).trim();
+    }
+
     function syncCarryover() {
         el(P + '-carryover-cap-row').style.display =
             val(P + '-carryover-mode') === 'capped' ? 'block' : 'none';
@@ -469,12 +485,33 @@
 
     function openAdd(seed) {
         clearForm();
+        seed = seed || {};
+
+        // The shelf's name is not a field - it fills the basket's name, so
+        // the form opens saying what this will be called rather than blank
+        // with a placeholder promising it later.
+        shelfStem = seed.shelf_name || '';
+        delete seed.shelf_name;
+
+        // Named on the form as `on-shelf`, so that it reads as "which shelf
+        // this is on" beside the basket's own id. The generic key-to-id rule
+        // below would have looked for `shelf-id` and found nothing, and a
+        // basket created from this form went out carrying no shelf at all -
+        // which the server only survived while there was exactly one to fall
+        // back to.
+        if (seed.shelf_id !== undefined) {
+            el(P + '-on-shelf').value = seed.shelf_id;
+            delete seed.shelf_id;
+        }
+
         // What the caller already knows. Adding a basket begins at the shelf
         // it will sit on, so that shelf arrives here rather than being asked
         // for on a form that has no business guessing.
-        Object.keys(seed || {}).forEach(function (key) {
+        Object.keys(seed).forEach(function (key) {
             el(P + '-' + key.replace(/_/g, '-')).value = seed[key];
         });
+        nameTouched = false;
+        suggestName();
         syncCountedWeek();
         el(P + '-modal-title').textContent = 'Add a ' + cfg.noun;
         el(P + '-submit').textContent = 'Add ' + cfg.noun;
@@ -745,6 +782,12 @@
 
     $('#' + P + '-cadence-unit').on('change', syncCadence);
     $('#' + P + '-carryover-mode').on('change', syncCarryover);
+
+    // The suggested name follows the type - PTO to UTO rewrites it - right
+    // up until somebody types their own, at which point it never touches
+    // the field again.
+    $('#' + P + '-type').on('change', suggestName);
+    $('#' + P + '-name').on('input', function () { nameTouched = true; });
     $('#' + P + '-add-day').on('click', function () {
         el(P + '-monthly-container').appendChild(monthlyDaySelect(null));
     });
