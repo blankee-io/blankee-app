@@ -12631,6 +12631,19 @@ def update_entry():
             cursor.execute(f"SELECT * FROM {category_table} WHERE id = %s AND user_id = %s", (category_id, current_user.id))
             cat_row = cursor.fetchone()
             if not cat_row:
+                # A category made moments ago lives in Redis and nowhere else
+                # until the flush worker writes it, and carries a negative
+                # temporary id meanwhile. Refusing it here is what made a
+                # brand-new recurring category impossible to edit for the
+                # first seconds of its life - the spinner, and the console
+                # error behind it.
+                #
+                # _get_categories_from_redis is scoped to the user, so finding
+                # the id in there IS the ownership check MySQL was doing.
+                cached_cats = _get_categories_from_redis(category_table, current_user.id) or []
+                cat_row = next((c for c in cached_cats
+                                if str(c.get('id')) == str(category_id)), None)
+            if not cat_row:
                 cursor.close()
                 return jsonify({"status": "error", "message": "Invalid category_id for this entry type"}), 400
         
@@ -20392,6 +20405,16 @@ def add_recurring_income():
         except Exception:
             pass
 
+        # Written through before answering, so the page that reloads next gets
+        # REAL ids rather than the negative temporary ones - see the note in
+        # add_recurring_expense for what those cost.
+        try:
+            import redis_manager as _rm
+            _rm.flush_dirty_tables_for_user(current_user.id)
+        except Exception as e:
+            log_error(app.logger, 'INCOME',
+                      f"[add_recurring_income] flush before responding failed: {e}")
+
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring income added successfully!'})
 
     except Exception as e:
@@ -21223,7 +21246,27 @@ def add_recurring_expense():
             delete_recurring_suggestion('recurring_expense', category_id, user_id=current_user.id)
         except Exception:
             pass
-        
+
+        # Write it through before answering, so the page that reloads next gets
+        # REAL ids rather than the negative temporary ones.
+        #
+        # Everything this endpoint just made - the category, the recurring row,
+        # and an entry for every occurrence - is Redis-first and carries a
+        # temporary id until the flush worker runs. The page renders those ids,
+        # and fifteen seconds later they are not the ids of anything: editing
+        # today's entry then answered 400, or matched nothing and created a
+        # second entry on the day instead of editing the one already there.
+        #
+        # The cost is one synchronous write on an action somebody took
+        # deliberately and is waiting on anyway. The alternative is every
+        # reader downstream having to cope with ids that expire.
+        try:
+            import redis_manager as _rm
+            _rm.flush_dirty_tables_for_user(current_user.id)
+        except Exception as e:
+            log_error(app.logger, 'EXPENSE',
+                      f"[add_recurring_expense] flush before responding failed: {e}")
+
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring expense added successfully!'})
 
     except Exception as e:
@@ -22131,6 +22174,16 @@ def add_recurring_ca_expense():
             delete_recurring_suggestion('recurring_c_expense', category_id, user_id=current_user.id)
         except Exception:
             pass
+
+        # Written through before answering, so the page that reloads next gets
+        # REAL ids rather than the negative temporary ones - see the note in
+        # add_recurring_expense for what those cost.
+        try:
+            import redis_manager as _rm
+            _rm.flush_dirty_tables_for_user(current_user.id)
+        except Exception as e:
+            log_error(app.logger, 'CA',
+                      f"[add_recurring_ca_expense] flush before responding failed: {e}")
 
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring CA expense added successfully!'})
 
