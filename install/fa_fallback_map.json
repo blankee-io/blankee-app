@@ -170,6 +170,10 @@
     "fa-solid-money-bill-transfer-circle-plus-bl": {
       "icon": "fa-money-bill-transfer",
       "style": "solid"
+    },
+    "fa-shelves": {
+      "icon": "fa-layer-group",
+      "style": "solid"
     }
   },
   "ignore": {

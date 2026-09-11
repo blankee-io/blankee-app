@@ -778,6 +778,60 @@ def grid_bounds(year, month, week_starts_on=5):
     # Six rows always, so the grid does not change height from month to month.
     return start, start + timedelta(days=41), first, last
 
+def workable_hours(shelf, day):
+    """How many hours of this day could be taken off at all.
+
+    The job's week for that weekday, less nothing - but zero on a day the
+    office is shut and zero on a day counted for accrual that nobody attends.
+    Both of those are days there is no time off to take: the first because
+    everybody is already off, the second because the person is not there.
+
+    One definition, because two would drift. month_rows draws the calendar
+    from it and the booking guard measures against it, and a day the calendar
+    calls empty must be a day a booking is refused for.
+    """
+    day = _as_date(day)
+    shut = loaf_holidays.dates_between(shelf.get('holidays'), day, day,
+                                       shelf.get('custom_holidays'))
+    if day in shut or not attends(shelf, day.weekday()):
+        return 0.0
+    return round(scheduled_minutes(shelf, day.weekday()) / 60.0, 2)
+
+
+def booked_beyond(shelf, baskets, entries, proposed, ignoring=None):
+    """The first day a booking would take more hours off than the day holds.
+
+    Returns (date, already, capacity) or None. Every pool on the shelf counts
+    toward the total, because a day taken half as paid leave and half as
+    unpaid is still one day: the question is whether the hours add up to more
+    than was ever going to be worked.
+
+    `ignoring` is the id of the entry being edited, which must not be counted
+    against itself - re-saving an eight-hour day on an eight-hour schedule is
+    not an overbooking.
+    """
+    # _entry_split, not hours_by_date: a booking with a typed figure costs
+    # that figure, and measuring it as a whole scheduled day would refuse four
+    # hours of leave and four of unpaid on an eight-hour day - which is
+    # exactly the pair this is meant to allow.
+    split = _entry_split(shelf, proposed)
+    if not split:
+        return None
+
+    others = [e for e in entries
+              if ignoring is None or int(e.get('id') or 0) != int(ignoring)]
+    already = absence_by_date(shelf, baskets, others)
+
+    for day in sorted(split):
+        wanted = round(already.get(day, 0.0) + split[day], 2)
+        capacity = workable_hours(shelf, day)
+        # A hair of tolerance, because these are decimals that have been
+        # through a database and a form.
+        if wanted > capacity + 0.005:
+            return day, round(already.get(day, 0.0), 2), capacity
+    return None
+
+
 # ------------------------------------------------- what a calendar shows ----
 
 def month_rows(shelf, basket, result, absence, first, last, taken_by=None):
@@ -817,15 +871,27 @@ def month_rows(shelf, basket, result, absence, first, last, taken_by=None):
         # non_working below turns true and worked falls to zero. The accrual
         # is unaffected - project() reads the unmasked week through
         # _scheduled_hours_between and never comes through here.
-        scheduled = 0.0 if (day in shut or not attends(shelf, day.weekday())) \
-            else round(scheduled_minutes(shelf, day.weekday()) / 60.0, 2)
+        #
+        # The same figure the booking guard refuses against, by the same
+        # name - a day this draws as empty is a day nothing can be booked on.
+        scheduled = 0.0 if day in shut else workable_hours(shelf, day)
         away = absence.get(day, 0.0)
         rows.append({
             'date': day,
             'non_working': scheduled == 0,
             'scheduled': scheduled,
             'worked': round(max(0.0, scheduled - away), 2),
-            'taken': (event or {}).get('used', 0.0),
+            # From the split, not from the projection's events. The two
+            # agree inside the window - project() sets used from this very
+            # dict - but a day BEFORE the basket's starting date has no event
+            # at all, and reading the event there reported nothing taken on a
+            # day the calendar was simultaneously colouring as taken.
+            #
+            # The balance is the thing that legitimately does not move there:
+            # a starting balance is what was left AFTER everything before it,
+            # so counting those hours again would take them twice.
+            'taken': round((taken_by or {}).get(int(basket.get('id') or 0), {})
+                           .get(day, 0.0), 2),
             # {} rather than None for a day nobody booked, so the caller can
             # read it without asking whether it is there.
             'taken_by': {bid: hours for bid, split in (taken_by or {}).items()

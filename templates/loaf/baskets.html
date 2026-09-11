@@ -49,58 +49,24 @@
                "Shelf" is what the table is called. Nobody reads that word
                here, because it says nothing on its own. #}
             <div class="recurring-header baskets">
-                <span>Jobs</span>
+                <span>Shelves</span>
                 <button id="add-shelf-btn" class="add-income-btn" type="button"
-                        title="Add Job">
+                        title="Add Shelf">
                     <i class="fa-solid fa-plus"></i>
                 </button>
             </div>
 
             {% if shelves %}
-            <table class="loaf-baskets-table loaf-shelves-table">
-                <tbody id="shelf-rows">
-                    {% for shelf in shelves.values() %}
-                    <tr data-shelf-row="{{ shelf.id }}">
-                        <td class="basket-name">
-                            <span class="basket-name-text">{{ shelf.name }}</span>
-                            <span class="loaf-shelf-week">
-                                {{ describe_week(shelf) }}
-                            </span>
-                        </td>
-                        <td class="basket-actions">
-                            <button type="button" class="edit-recurring-btn edit-shelf-btn"
-                                    data-shelf-id="{{ shelf.id }}" title="Edit this job">
-                                <i class="fa-solid fa-pen"></i>
-                            </button>
-                            <button type="button" class="delete-recurring-btn delete-shelf-btn"
-                                    data-shelf-id="{{ shelf.id }}"
-                                    data-name="{{ shelf.name }}" title="Delete this job">
-                                <i class="fa-solid fa-trash"></i>
-                            </button>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="recurring-income-empty-info">
-                <p>No jobs yet. A basket adds one for you the first time.</p>
-            </div>
-            {% endif %}
-
-            <div class="recurring-header baskets">
-                <span>Baskets</span>
-                <button id="add-basket-btn" class="add-income-btn" type="button" title="Add Basket">
-                    <i class="fa-solid fa-plus"></i>
-                </button>
-            </div>
-
-            {% if baskets %}
+            {# One table, not two. A shelf and its baskets are one thing with
+               parts, and recurring_i.html already draws that shape for an
+               income and its raises: the children sit in the same table,
+               indented under the parent with an arrow and a tint down the
+               left edge, so they read as belonging to the row above. #}
             <table class="loaf-baskets-table">
                 <thead>
                     <tr>
                         <th class="basket-handle-col"></th>
-                        <th class="basket-name-col">Basket</th>
+                        <th class="basket-name-col">Shelf</th>
                         <th class="basket-type-col">Type</th>
                         <th class="basket-start-col"><span class="th-full">Starting<br>Balance</span><span class="th-mobile">Start</span></th>
                         <th class="basket-fill-col">Fills</th>
@@ -110,28 +76,13 @@
                     </tr>
                 </thead>
                 <tbody id="basket-rows">
-                    {% for basket in baskets %}
-                    {# Every value the edit form needs is a data attribute. The
-                       modal never scrapes a cell - the one thing most worth
-                       copying from recurring_i.html, because a cell holds a
-                       formatted string and a form needs the figure.
-
-                       Half of them come from the shelf now: the working week,
-                       the holidays and the pay cadence belong to the job, not
-                       to this pool of hours. Falling back to the basket keeps
-                       a shelf-less row rendering during the update window,
-                       exactly as loaf_data.shelf_of does. #}
-                    {% set shelf = shelves.get(basket.shelf_id) or basket %}
-                    <tr data-basket-id="{{ basket.id }}"
-                        data-shelf-id="{{ basket.shelf_id or '' }}"
-                        data-shelf-name="{{ shelf.name or '' }}"
-                        data-name="{{ basket.name }}"
-                        data-basket-type="{{ basket.basket_type }}"
-                        data-starting-hours="{{ basket.starting_hours if basket.starting_hours is not none else '' }}"
-                        data-starting-date="{{ basket.starting_date or '' }}"
-                        data-max-balance-hours="{{ basket.max_balance_hours if basket.max_balance_hours is not none else '' }}"
-                        data-grant-hours="{{ basket.grant_hours if basket.grant_hours is not none else '' }}"
-                        data-accrual-hours="{{ basket.accrual_hours if basket.accrual_hours is not none else '' }}"
+                    {% for shelf in shelves.values() %}
+                    {# The shelf's own settings, for the form that edits them.
+                       data-shelf-id is on THIS row only - a basket says which
+                       shelf it is on with data-on-shelf - so the shelf form
+                       looking a row up by id can never land on a basket. #}
+                    <tr class="loaf-shelf-row" data-shelf-id="{{ shelf.id }}"
+                        data-name="{{ shelf.name }}"
                         data-cadence-interval="{{ shelf.cadence_interval or 1 }}"
                         data-cadence-unit="{{ shelf.cadence_unit or 'weeks' }}"
                         data-weekdays="{{ shelf.weekdays or '' }}"
@@ -141,11 +92,7 @@
                         data-accrual-anchor-date="{{ shelf.accrual_anchor_date or '' }}"
                         data-year-start-month="{{ shelf.year_start_month or 1 }}"
                         data-year-start-day="{{ shelf.year_start_day or 1 }}"
-                        data-carryover-mode="{{ basket.carryover_mode or 'reset' }}"
-                        data-carryover-cap-hours="{{ basket.carryover_cap_hours if basket.carryover_cap_hours is not none else '' }}"
-                        data-low-balance-hours="{{ basket.low_balance_hours if basket.low_balance_hours is not none else '' }}"
                         data-accrual-only-weekdays="{{ shelf.accrual_only_weekdays or '' }}"
-                        data-accrual-basis="{{ basket.accrual_basis or 'flat' }}"
                         data-period-hours="{{ shelf.period_hours if shelf.period_hours is not none else '' }}"
                         data-holidays="{{ shelf.holidays or '' }}"
                         data-custom-holidays="{{ shelf.custom_holidays or '' }}"
@@ -154,12 +101,67 @@
                         data-{{ prefix }}-end="{{ shelf[prefix ~ '_end'] or '' }}"
                         data-{{ prefix }}-break-minutes="{{ shelf[prefix ~ '_break_minutes'] or 0 }}"
                         {%- endfor %}>
+                        <td class="basket-handle"></td>
+                        <td class="basket-name" colspan="6">
+                            <span class="basket-name-text">{{ shelf.name }}</span>
+                            <span class="loaf-shelf-week">{{ describe_week(shelf) }}</span>
+                        </td>
+                        <td class="basket-actions">
+                            <div class="row-actions">
+                                {# Adding a basket starts from the shelf it will
+                                   belong to, which is why the button lives
+                                   here rather than above the table: a pool of
+                                   hours with no job to be earned at is not a
+                                   thing Loaf can cost. #}
+                                <button class="add-basket-btn" type="button"
+                                        title="Add a basket to this shelf"
+                                        data-shelf-id="{{ shelf.id }}">
+                                    <i class="fa-solid fa-plus"></i>
+                                </button>
+                                <button class="edit-recurring-btn edit-shelf-btn" type="button"
+                                        title="Edit Shelf" data-shelf-id="{{ shelf.id }}">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                                <button class="delete-recurring-btn delete-shelf-btn" type="button"
+                                        title="Delete Shelf" data-shelf-id="{{ shelf.id }}"
+                                        data-name="{{ shelf.name }}">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+
+                    {% set mine = baskets | selectattr('shelf_id', 'equalto', shelf.id) | list %}
+                    {% for basket in mine %}
+                    {# Every value the edit form needs is a data attribute. The
+                       modal never scrapes a cell - the one thing most worth
+                       copying from recurring_i.html, because a cell holds a
+                       formatted string and a form needs the figure.
+
+                       Only the pool's own settings now. The working week, the
+                       holidays and the pay cadence are on the shelf row above,
+                       because they are the job's and every basket under it
+                       shares one copy. #}
+                    <tr class="loaf-basket-row" data-basket-id="{{ basket.id }}"
+                        data-on-shelf="{{ basket.shelf_id or '' }}"
+                        data-name="{{ basket.name }}"
+                        data-basket-type="{{ basket.basket_type }}"
+                        data-starting-hours="{{ basket.starting_hours if basket.starting_hours is not none else '' }}"
+                        data-starting-date="{{ basket.starting_date or '' }}"
+                        data-max-balance-hours="{{ basket.max_balance_hours if basket.max_balance_hours is not none else '' }}"
+                        data-grant-hours="{{ basket.grant_hours if basket.grant_hours is not none else '' }}"
+                        data-accrual-hours="{{ basket.accrual_hours if basket.accrual_hours is not none else '' }}"
+                        data-carryover-mode="{{ basket.carryover_mode or 'reset' }}"
+                        data-carryover-cap-hours="{{ basket.carryover_cap_hours if basket.carryover_cap_hours is not none else '' }}"
+                        data-low-balance-hours="{{ basket.low_balance_hours if basket.low_balance_hours is not none else '' }}"
+                        data-accrual-basis="{{ basket.accrual_basis or 'flat' }}">
                         <td class="basket-handle">
                             <span class="sort-handle" title="Drag to reorder">
                                 <i class="fa-solid fa-grip-lines"></i>
                             </span>
                         </td>
                         <td class="basket-name">
+                            <span class="basket-arrow"><i class="fa-solid fa-arrow-turn-down-right"></i></span>
                             <span class="basket-name-text">{{ basket.name }}</span>
                             {# The mobile trick from recurring_i: the dropped
                                column's value already sits here, hidden, and the
@@ -196,6 +198,17 @@
                         </td>
                     </tr>
                     {% endfor %}
+                    {% if not mine %}
+                    <tr class="loaf-basket-row loaf-basket-none">
+                        <td class="basket-handle"></td>
+                        <td class="basket-name" colspan="7">
+                            <span class="basket-arrow"><i class="fa-solid fa-arrow-turn-down-right"></i></span>
+                            <span class="basket-none">No baskets on this shelf yet
+                                - use the plus to add one.</span>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
                 </tbody>
                 <tfoot>
                     <tr><td colspan="8" class="recurring-footer"></td></tr>
@@ -203,14 +216,19 @@
             </table>
             {% else %}
             <div class="recurring-income-empty-info">
-                <h2>No baskets yet</h2>
+                <h2>No shelves yet</h2>
                 <p>
-                    A <strong>basket</strong> is a pool of hours - vacation, sick
-                    leave, unpaid time. Each one knows how it fills, what your
-                    working week looks like, and what happens to whatever is left
-                    when the year turns.
+                    A <strong>shelf</strong> is a job: the week you work, the days
+                    the office is shut, and when your pay lands. Everything
+                    Loaf needs to know to cost a day off.
                 </p>
-                <p>Add one and Loaf can start forecasting what you will have left.</p>
+                <p>
+                    Inside it go <strong>baskets</strong> - pools of hours like
+                    vacation, sick leave or unpaid time. They share the shelf's
+                    week, so two of them can never disagree about which days you
+                    work.
+                </p>
+                <p>Add a shelf and Loaf can start forecasting what you will have left.</p>
             </div>
             {% endif %}
         </div>
@@ -232,7 +250,7 @@
     // its own, so the confirmation says so out loud.
     async function removeShelf(shelfId, name) {
         var ok = await showConfirmModal({
-            title: 'Delete this job?',
+            title: 'Delete this shelf?',
             message: 'Deleting "' + name + '" also deletes every basket filed ' +
                      'under it, and every hour booked against those. This ' +
                      'cannot be undone.',
@@ -250,13 +268,13 @@
                 if (response.status === 'success') {
                     location.reload();
                 } else {
-                    showToast(response.message || 'Could not delete that job.',
+                    showToast(response.message || 'Could not delete that shelf.',
                               'error');
                 }
             },
             error: function (xhr) {
                 var body = xhr.responseJSON || {};
-                showToast(body.message || 'Could not delete that job.', 'error');
+                showToast(body.message || 'Could not delete that shelf.', 'error');
             }
         });
     }
@@ -299,7 +317,13 @@
         removeBasket($(this).attr('data-basket-id'), $(this).attr('data-name') || 'this basket');
     });
 
-    $('#add-basket-btn').on('click', function () { loafBasketModal.openAdd(); });
+    // Adding a basket starts from the shelf it will belong to. The button is
+    // in that shelf's row, so which one is never a question the form has to
+    // ask - and a basket cannot be created with no shelf at all, which the
+    // API would otherwise have to guess at.
+    $(document).on('click', '.add-basket-btn', function () {
+        loafBasketModal.openAdd({shelf_id: $(this).attr('data-shelf-id')});
+    });
 
     // The job form. Same script, same markup, different id prefix - see the
     // two build() calls at the foot of loaf_basket_modal.js.
@@ -309,7 +333,7 @@
     });
     $(document).on('click', '.delete-shelf-btn', function () {
         removeShelf($(this).attr('data-shelf-id'),
-                    $(this).attr('data-name') || 'this job');
+                    $(this).attr('data-name') || 'this shelf');
     });
 
     // Drag to reorder. jQuery UI sortable plus touch-punch, the pair
@@ -319,6 +343,10 @@
     if ($('#basket-rows').length && $.fn.sortable) {
         $('#basket-rows').sortable({
             handle: '.sort-handle',
+            // Only baskets move. Shelf rows carry no handle either, but
+            // saying so here means a future handle cannot accidentally make a
+            // shelf draggable into the middle of another shelf's baskets.
+            items: '.loaf-basket-row',
             axis: 'y',
             containment: 'parent',
             helper: function (event, row) {
@@ -330,9 +358,13 @@
                 return row;
             },
             update: function () {
-                var ids = $('#basket-rows tr').map(function () {
-                    return parseInt($(this).attr('data-basket-id'), 10);
-                }).get();
+                // Basket rows only: the tbody now holds shelf rows and the
+                // "no baskets yet" placeholder as well, and either would map
+                // to NaN and be sent as part of the ordering.
+                var ids = $('#basket-rows tr.loaf-basket-row[data-basket-id]')
+                    .map(function () {
+                        return parseInt($(this).attr('data-basket-id'), 10);
+                    }).get();
                 $.ajax({
                     url: '/loaf/api/basket-order',
                     method: 'POST',

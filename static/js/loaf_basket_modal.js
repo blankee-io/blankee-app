@@ -402,6 +402,14 @@
         syncNone(P + '-no-accrual', P + '-accrual-hours');
         syncNone(P + '-no-grant', P + '-grant-hours');
         syncNone(P + '-warn-negative-only', P + '-low-balance-hours');
+
+        // Whether time off reduces the next accrual is a question about an
+        // accrual. A basket that does not have one is not being asked it -
+        // and the stored answer is left alone rather than reset, so ticking
+        // "No accrual" and changing your mind does not quietly flip a basket
+        // from per-hour-worked back to flat.
+        el(P + '-accrual-basis-row').style.display =
+            el(P + '-no-accrual').checked ? 'none' : '';
     }
 
     // Off is the same idea for a day: the engine reads a missing start as a day
@@ -459,8 +467,14 @@
         syncWeek();
     }
 
-    function openAdd() {
+    function openAdd(seed) {
         clearForm();
+        // What the caller already knows. Adding a basket begins at the shelf
+        // it will sit on, so that shelf arrives here rather than being asked
+        // for on a form that has no business guessing.
+        Object.keys(seed || {}).forEach(function (key) {
+            el(P + '-' + key.replace(/_/g, '-')).value = seed[key];
+        });
         syncCountedWeek();
         el(P + '-modal-title').textContent = 'Add a ' + cfg.noun;
         el(P + '-submit').textContent = 'Add ' + cfg.noun;
@@ -511,6 +525,10 @@
         // Straight off the row's data-* attributes. The cells hold formatted
         // strings; these hold the figures.
         el(P + '-name').value = row.attr('data-name') || '';
+        // Stays where it is. A basket is moved between shelves deliberately,
+        // not as a side effect of saving an edit, so the form carries the
+        // shelf it arrived on straight back out again.
+        el(P + '-on-shelf').value = row.attr('data-on-shelf') || '';
         el(P + '-type').value = row.attr('data-basket-type') || 'pto';
         el(P + '-starting-hours').value = row.attr('data-starting-hours') || '0';
         var warn = row.attr('data-low-balance-hours') || '';
@@ -627,6 +645,7 @@
 
         var payload = {
             name: val(P + '-name'),
+            shelf_id: val(P + '-on-shelf'),
             basket_type: val(P + '-type'),
             starting_hours: val(P + '-starting-hours'),
             // No starting_date and no max_balance_hours: the server stamps the
@@ -938,12 +957,15 @@
         noun: 'Basket',
         api: '/loaf/api/baskets',
         rowKey: 'data-basket-id',
-        sections: ['holds', 'fills', 'week', 'shut']
+        // The week and the holidays moved to the shelf form with the rest
+        // of the job. What is left here is the pool itself: what it holds
+        // and how it fills.
+        sections: ['holds', 'fills']
     });
 
     // "Shelf" is the table; "Job" is the only word the user ever sees.
     window.loafShelfModal = build('shelf', {
-        noun: 'Job',
+        noun: 'Shelf',
         api: '/loaf/api/shelves',
         rowKey: 'data-shelf-id',
         sections: ['pays', 'week', 'shut']

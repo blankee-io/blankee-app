@@ -837,9 +837,10 @@ def clean_basket(payload):
     """
     values = {}
 
+    # Empty is allowed, and means "call it the obvious thing". The caller
+    # fills it in from the shelf and the type - see default_basket_name - once
+    # it knows which shelf this is going on, which is not known here.
     name = str(payload.get('name') or '').strip()
-    if not name:
-        return None, 'A basket needs a name.'
     if len(name) > 255:
         return None, 'That name is too long.'
     values['name'] = name
@@ -1079,6 +1080,19 @@ def describe_fill(basket, shelf=None):
     if grant is not None:
         parts.append('%.2f h granted each year' % float(grant))
     return ', then '.join(parts) if parts else None
+
+
+def default_basket_name(shelf, basket_type):
+    """What to call a basket nobody named.
+
+    The shelf and what the pool is: "Acme Corp PTO". Most people have one of
+    each per job and naming them is a question with an obvious answer, so the
+    form stops asking and fills this in instead. Anybody who wants their own
+    word still types one.
+    """
+    kind = 'UTO' if str(basket_type or 'pto').lower() == 'uto' else 'PTO'
+    stem = str((shelf or {}).get('name') or '').strip()
+    return ('%s %s' % (stem, kind)).strip() if stem else kind
 
 
 def describe_week(shelf):

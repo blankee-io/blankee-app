@@ -16,14 +16,15 @@
          data-weekday-prefixes='{{ weekday_prefixes | list | tojson }}'
          data-weekday-names='{{ weekday_names | list | tojson }}'>
         <div class="income-form-container">
-            <h2 id="shelf-modal-title">Add a Job</h2>
+            <h2 id="shelf-modal-title">Add a Shelf</h2>
             <form id="shelf-form" autocomplete="off">
                 <input type="hidden" id="shelf-id" value="">
 
                 <label for="shelf-name">Name
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
                         <span class="info-tip-text">Your employer, or whatever you call the
-                            place. Every basket filed under it shares this working week.</span>
+                            place you work. Every basket on this shelf shares its working
+                            week, its holidays and when its year starts.</span>
                     </span>
                 </label>
                 <input type="text" id="shelf-name" class="category-input" maxlength="255" required>
@@ -294,7 +295,7 @@
                 </div>
                 </div>
 
-                <button type="submit" id="shelf-submit">Add Job</button>
+                <button type="submit" id="shelf-submit">Add Shelf</button>
             </form>
         </div>
     </div>

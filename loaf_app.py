@@ -296,22 +296,48 @@ def _backfill_year(user_id, basket_id, stated_hours, today):
     and is left exactly as it would have been before any of this existed.
     """
     basket = loaf_data.get_basket(user_id, basket_id)
-    if basket is None or basket.get('accrual_hours') is None:
+    if basket is None:
         return None
+
+    # Either way of filling counts. A basket that is GRANTED rather than
+    # accrued used to fail this guard and keep today as its starting date -
+    # so its whole year was outside the projection, and a day booked in it
+    # changed nothing while the calendar still drew the booking. An annual
+    # grant lands at the year turn, which is exactly what replaying from the
+    # year start reproduces.
+    accrues = basket.get('accrual_hours') is not None
+    granted = basket.get('grant_hours') is not None
+    if not accrues and not granted:
+        return None
+
     shelf = loaf_data.shelf_of(user_id, basket)
-    if shelf is None or not shelf.get('accrual_anchor_date'):
+    if shelf is None:
+        return None
+    # Only an accrual needs to know when pay lands. A grant does not.
+    if accrues and not shelf.get('accrual_anchor_date'):
         return None
 
     year_start, _ = loaf_forecast.accrual_year_bounds(shelf, today)
     if year_start >= today:
         return None                 # the year began today; nothing to catch up
 
-    # Re-date to the year start and replay from nothing, so the engine - not
-    # arithmetic repeated here - decides what the accruals, the grant, the
-    # carryover and the ceiling come to. Anything computed by hand would be a
-    # second implementation of the walk, drifting the day either changes.
+    # Re-date to the DAY BEFORE the year start and replay from nothing, so
+    # the engine - not arithmetic repeated here - decides what the accruals,
+    # the grant, the carryover and the ceiling come to. Anything computed by
+    # hand would be a second implementation of the walk, drifting the day
+    # either changes.
+    #
+    # The day before, not the day itself, because _year_turns reports turns in
+    # (after, through] - so replaying from the year start excludes the turn AT
+    # the year start, and with it the grant that lands there. An accruing
+    # basket hid that: its pay dates fall inside the year and produce events
+    # whatever happens at the boundary. A basket that is only granted has
+    # nothing else, so it replayed to nothing, kept today as its starting date
+    # and put its whole year outside the projection.
+    from datetime import timedelta as _td
     loaf_data.update_basket(user_id, basket_id, {
-        'starting_hours': 0, 'starting_date': year_start.isoformat()})
+        'starting_hours': 0,
+        'starting_date': (year_start - _td(days=1)).isoformat()})
     replayed = loaf_data.get_basket(user_id, basket_id)
     result = loaf_forecast.project(shelf, replayed, {}, {}, today, today=today)
     earned = loaf_forecast.balance_on(result, today)
@@ -478,10 +504,6 @@ def api_create_basket():
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
 
-    if loaf_data.basket_name_exists(current_user.id, values['name']):
-        return jsonify({'status': 'error',
-                        'message': 'You already have a basket called "%s".'
-                                   % values['name']}), 400
 
     # New baskets go to the top, the way a new category does. Half a step above
     # the current highest, so the fractional ordering keeps working without
@@ -533,7 +555,21 @@ def api_create_basket():
             return jsonify({'status': 'error',
                             'message': 'Say which job this basket is for.'}), 400
     elif loaf_data.get_shelf(current_user.id, values['shelf_id']) is None:
-        return jsonify({'status': 'error', 'message': 'No such job.'}), 404
+        return jsonify({'status': 'error', 'message': 'No such shelf.'}), 404
+
+    # Named after the shelf it just landed on, when nobody named it. The clash
+    # check follows rather than precedes, because two unnamed PTO baskets on
+    # one shelf would both want to be called "Acme Corp PTO" and the second
+    # has to be told so.
+    if not values.get('name'):
+        values['name'] = loaf_data.default_basket_name(
+            loaf_data.get_shelf(current_user.id, values['shelf_id']),
+            values.get('basket_type'))
+
+    if loaf_data.basket_name_exists(current_user.id, values['name']):
+        return jsonify({'status': 'error',
+                        'message': 'You already have a basket called "%s".'
+                                   % values['name']}), 400
 
     basket_id = loaf_data.create_basket(current_user.id, values)
     if basket_id is None:
@@ -567,6 +603,14 @@ def api_update_basket(basket_id):
     error = _shelf_error(payload)
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
+
+    # Clearing the name puts the default back rather than saving an empty
+    # one, which is the same promise the create path makes.
+    if not values.get('name'):
+        was_on = loaf_data.get_basket(current_user.id, basket_id) or {}
+        values['name'] = loaf_data.default_basket_name(
+            loaf_data.shelf_of(current_user.id, was_on),
+            values.get('basket_type'))
 
     if loaf_data.basket_name_exists(current_user.id, values['name'],
                                     exclude_id=basket_id):
@@ -886,6 +930,40 @@ def _unworkable(shelf, values):
             'take. Pick a day your working week covers.')
 
 
+def _overbooked(user_id, shelf, values, editing=None):
+    """The message for a day booked past what it holds, or None.
+
+    A day can carry bookings from as many pools as you like - a morning of
+    paid leave and the afternoon unpaid is an ordinary thing - so nothing
+    stops a second one going on. What stops is the total: you cannot take
+    more hours off a day than were ever going to be worked.
+
+    Counted across every pool on the SHELF, because they share one working
+    week. Another job's day off says nothing about the hours available here.
+    """
+    if str(values.get('direction') or 'use') in loaf_data.FLAT_DIRECTIONS:
+        return None                 # hours handed over, not hours taken
+
+    if shelf is None:
+        return None
+
+    on_shelf = loaf_data.baskets_on(user_id, shelf['id'])
+    clash = loaf_forecast.booked_beyond(
+        shelf, on_shelf, loaf_data.get_entries(user_id), values,
+        ignoring=editing)
+    if clash is None:
+        return None
+
+    day, already, capacity = clash
+    when = day.strftime('%A %d %B')
+    if capacity <= 0:
+        return ('You do not work on %s, so there is no time off to take '
+                'there.' % when)
+    return ('%s only has %.2f hours to give and %.2f of them are already '
+            'booked. Take less, or free some up first.'
+            % (when, capacity, already))
+
+
 @loaf.route('/api/entries', methods=['POST'])
 @login_required
 def api_create_entry():
@@ -898,7 +976,8 @@ def api_create_entry():
         return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
 
     shelf = loaf_data.shelf_of(current_user.id, basket)
-    blocked = _unworkable(shelf, values)
+    blocked = _unworkable(shelf, values) \
+        or _overbooked(current_user.id, shelf, values)
     if blocked:
         return jsonify({'status': 'error', 'message': blocked}), 400
 
@@ -931,7 +1010,10 @@ def api_update_entry(entry_id):
     # onto a day with no hours quietly wrote 0 and kept the row. It gets the
     # same refusal as the create path.
     shelf = loaf_data.shelf_of(current_user.id, basket)
-    blocked = _unworkable(shelf, values)
+    # Not against itself: re-saving an eight-hour day on an eight-hour
+    # schedule is not an overbooking.
+    blocked = _unworkable(shelf, values) \
+        or _overbooked(current_user.id, shelf, values, editing=entry_id)
     if blocked:
         return jsonify({'status': 'error', 'message': blocked}), 400
 
@@ -1074,7 +1156,8 @@ def api_test_time_off():
                                    include_hidden=False) if shelf else [basket]
     entries = loaf_data.get_entries(current_user.id)
 
-    blocked = _unworkable(shelf, values)
+    blocked = _unworkable(shelf, values) \
+        or _overbooked(current_user.id, shelf, values)
     if blocked:
         return jsonify({'status': 'error', 'message': blocked}), 400
 
