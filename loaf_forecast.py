@@ -45,7 +45,7 @@ from datetime import date, datetime, timedelta
 
 from bucket_utils import recurring_occurrence_dates
 import loaf_holidays
-from loaf_data import attends, schedule_for, scheduled_minutes
+from loaf_data import attends, charges, schedule_for, scheduled_minutes
 
 
 # ------------------------------------------------------------- coercions ----
@@ -106,8 +106,15 @@ def _midnight(day):
 
 # --------------------------------------------------- a booking, in hours ----
 
-def hours_by_date(shelf, entry):
+def hours_by_date(shelf, entry, costing=True):
     """What one booking costs, split across the dates it touches.
+
+    `costing` picks which question is being asked. True is the price: what
+    comes off a balance, which is what a calendar draws and what an overbook
+    check counts. False is the absence: the hours somebody was not at work,
+    which is what an accrual is pro-rated by. They differ only on a weekday
+    the employer does not bill - see loaf_data.charges() - where the price is
+    nothing and the absence is the whole day.
 
     Split rather than totalled because the accrual pro-rate needs to know which
     pay period an absence fell in, and the calendar needs a figure per day.
@@ -133,16 +140,24 @@ def hours_by_date(shelf, entry):
     while day <= last:
         shift = None if day in shut else schedule_for(shelf, day.weekday())
 
-        # attends() as well as schedule_for(), and the two are not the same
-        # test. schedule_for says the employer counts this day; attends says
-        # somebody is there for it. A day that is counted but never attended
-        # has hours - they are what keeps the accrual whole - and costs
-        # nothing to book, because no leave is ever requested for it.
+        # Three tests, not one. schedule_for says the employer counts this
+        # day; attends says somebody is there for it; charges says taking it
+        # draws from a balance. A day that is counted but never attended has
+        # hours - they are what keeps the accrual whole - and costs nothing to
+        # book, because no leave is ever requested for it.
         #
-        # Only job A and the calendar mask this way. _scheduled_hours_between
+        # charges() is masked only when `costing`, and that is the whole
+        # difference between the two. A day the employer does not bill you for
+        # is still a day you were away: it must not come off the balance, and
+        # it must still reduce the hours worked that the next accrual is
+        # pro-rated by. Mask it in both and the balance is right while the
+        # accrual runs high - correct-looking numbers, silently wrong, which
+        # is the failure this split exists to prevent.
+        #
+        # Only cost and the calendar mask this way. _scheduled_hours_between
         # below must NOT: it is the denominator the accrual is pro-rated
         # against, and masking it there would quietly inflate every accrual.
-        if shift and attends(shelf, day.weekday()):
+        if shift and attends(shelf, day.weekday())                 and (not costing or charges(shelf, day.weekday())):
             full = shift['end'] - shift['start']
             if all_day:
                 minutes = max(0, full - shift['break_minutes'])
@@ -167,7 +182,7 @@ def entry_hours(shelf, entry):
     return round(sum(hours_by_date(shelf, entry).values()), 2)
 
 
-def _entry_split(shelf, entry):
+def _entry_split(shelf, entry, costing=True):
     """A booking's per-date hours, honouring a manual override.
 
     An unedited booking is recomputed from the schedule: the projection owns
@@ -179,24 +194,40 @@ def _entry_split(shelf, entry):
     if str(entry.get('status') or 'planned') == 'cancelled':
         return {}
 
-    split = hours_by_date(shelf, entry)
+    split = hours_by_date(shelf, entry, costing=costing)
     if not int(entry.get('hours_overridden') or 0):
         return split
+
+    # An override is a statement about the BILL - "this cost me five hours" -
+    # so it scales the charged days and nothing else. A free day inside the
+    # range keeps its own hours: somebody typing a total was not saying how
+    # long they were away on a day they were never charged for.
+    free = {} if costing else {
+        day: hours
+        for day, hours in hours_by_date(shelf, entry, costing=False).items()
+        if day not in hours_by_date(shelf, entry, costing=True)}
 
     stored = _as_float(entry.get('hours'))
     computed = round(sum(split.values()), 2)
 
     if computed > 0:
-        if abs(stored - computed) < 0.005:
-            return split
-        factor = stored / computed
-        return {day: round(hours * factor, 2) for day, hours in split.items()}
+        charged = {day: hours for day, hours in split.items() if day not in free}
+        billed = round(sum(charged.values()), 2)
+        if billed > 0 and abs(stored - billed) >= 0.005:
+            factor = stored / billed
+            charged = {day: round(hours * factor, 2)
+                       for day, hours in charged.items()}
+        charged.update(free)
+        return charged
 
     # No working day in the range, but a figure was insisted on. Put it on the
     # first date rather than dropping it: a booking the user can see and the
     # projection ignores is worse than one attributed to a plausible day.
     starts = _as_datetime(entry.get('starts_at'))
-    return {starts.date(): stored} if starts and stored else {}
+    out = dict(free)
+    if starts and stored:
+        out[starts.date()] = stored
+    return out
 
 
 def _accumulate(target, split):
@@ -290,7 +321,10 @@ def absence_by_date(shelf, baskets, entries):
         basket = by_id.get(int(entry.get('basket_id') or 0))
         if basket is None:
             continue
-        _accumulate(total, _entry_split(shelf, entry))
+        # costing=False: the hours away, not the hours billed. A weekday the
+        # employer does not charge for is still a weekday somebody was not at
+        # work, and the accrual is pro-rated by the second of those.
+        _accumulate(total, _entry_split(shelf, entry, costing=False))
     return total
 
 

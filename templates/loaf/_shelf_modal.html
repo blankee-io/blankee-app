@@ -115,16 +115,34 @@
                    per day, and the projection still reads them per day, so a
                    week with genuinely different breaks stays expressible - this
                    form just writes the same figure to all seven. #}
-                {# The fourth column is hidden unless the counted-week flag is
-                   set from the browser console - see loafBasketModal.countedWeek.
-                   It is for one shape of schedule: a compressed week that the
-                   employer accrues as a standard one. Off and Not in are
-                   different states, and the difference is the whole feature:
-                   Off is not counted at all, Not in is counted for accrual but
-                   costs nothing to book. #}
+                {# Three states a working day can be in beyond its hours, and
+                   they are genuinely different:
+
+                     Off      not counted at all. Not worked, not in the
+                              denominator, nothing to book.
+                     Free     worked and counted like any other day, and never
+                              billed. Take the week off and this day is not
+                              charged - but you were still away for it, so it
+                              still reduces the hours the next accrual is
+                              pro-rated by.
+                     Not in   never attended at all: a compressed week the
+                              employer accrues as a standard one. Costs nothing
+                              AND loses nothing, because there were no hours
+                              there to lose.
+
+                   Free and Not in are the pair that get confused, and they
+                   disagree on exactly one question - were you at work? Getting
+                   it wrong is quiet: the balance comes out right either way
+                   and only the accrual drifts.
+
+                   Not in stays behind the counted-week flag - see
+                   loafBasketModal.countedWeek - because the schedule it is for
+                   is rare. Free does not: an employer that does not bill one
+                   weekday is an ordinary arrangement. #}
                 <div class="loaf-schedule-grid">
                     <div class="loaf-schedule-head">
                         <span></span><span>Start</span><span>End</span><span>Off</span>
+                        <span>Free</span>
                         <span class="loaf-schedule-counted">Not in</span>
                     </div>
                     {% for prefix in weekday_prefixes %}
@@ -137,6 +155,10 @@
                         <input type="checkbox" id="shelf-{{ prefix }}-off"
                                class="loaf-schedule-off"
                                aria-label="{{ weekday_names[loop.index0]|capitalize }} off">
+                        <input type="checkbox" id="shelf-{{ prefix }}-free"
+                               class="loaf-schedule-free"
+                               data-weekday="{{ weekday_names[loop.index0] }}"
+                               aria-label="Worked, but never charged, on {{ weekday_names[loop.index0]|capitalize }}">
                         <input type="checkbox" id="shelf-{{ prefix }}-notin"
                                class="loaf-schedule-counted"
                                data-weekday="{{ weekday_names[loop.index0] }}"

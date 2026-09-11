@@ -19408,7 +19408,8 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
    the picker just past the AM/PM with about 7px to spare - enough that a
    machine metering the font a shade wider does not lose it. */
 #shelf-modal .income-form-container {
-    width: 375px;
+    /* 375px, plus the 26px Free track and the 6px gap before it. */
+    width: 407px;
 }
 
 .loaf-schedule-grid {
@@ -19426,9 +19427,9 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 .loaf-schedule-head,
 .loaf-schedule-row {
     display: grid;
-    /* Day, start, end, off. The break moved out of the row and under the
-       grid, because one figure covers the week now. */
-    grid-template-columns: 38px 1fr 1fr 26px;
+    /* Day, start, end, off, free. The break moved out of the row and under
+       the grid, because one figure covers the week now. */
+    grid-template-columns: 38px 1fr 1fr 26px 26px;
     gap: 6px;
     align-items: center;
 }
@@ -19470,11 +19471,11 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
    10px uppercase with letter-spacing, and Off does not. */
 #shelf-modal.loaf-counted-week .loaf-schedule-head,
 #shelf-modal.loaf-counted-week .loaf-schedule-row {
-    grid-template-columns: 38px 1fr 1fr 26px 40px;
+    grid-template-columns: 38px 1fr 1fr 26px 26px 40px;
 }
 
 #shelf-modal.loaf-counted-week .income-form-container {
-    width: 421px;
+    width: 453px;
 }
 
 /* Both inputs are sized by the grid, not by themselves - a time input left to
@@ -19885,24 +19886,24 @@ label.loaf-holiday {
         gap: 6px;
     }
 
-    /* Narrower day column, and the last one is a checkbox rather than the
+    /* Narrower day column, and the last two are checkboxes rather than the
        minutes field it used to be - the break is one figure under the grid
        now, so nothing here needs room for two digits. */
     .loaf-schedule-head,
     .loaf-schedule-row {
-        grid-template-columns: 34px 1fr 1fr 28px;
+        grid-template-columns: 34px 1fr 1fr 28px 28px;
         gap: 4px;
     }
 
-    /* The same fifth track against the narrower template. Note that
+    /* The same sixth track against the narrower template. Note that
        .income-form-container also carries max-width: calc(100vw - 10px), so
-       on a narrow phone the 421px above is clamped and the time fields really
+       on a narrow phone the 453px above is clamped and the time fields really
        do lose the width this column takes. Accepted rather than solved: this
        is a console-only column for one person's schedule, and the rule below
        already hides the picker button to buy back most of it. */
     #shelf-modal.loaf-counted-week .loaf-schedule-head,
     #shelf-modal.loaf-counted-week .loaf-schedule-row {
-        grid-template-columns: 34px 1fr 1fr 28px 32px;
+        grid-template-columns: 34px 1fr 1fr 28px 28px 32px;
     }
 
     /* The picker button, not the AM/PM. Tapping the field opens the native

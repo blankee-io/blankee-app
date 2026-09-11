@@ -8,6 +8,38 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.33.0 — 2026-09-11
+
+### Added
+- **Loaf: weekdays your employer does not charge you for.** Some employers
+  bill four days when you take Monday to Friday off, because one weekday never
+  draws from your balance. Tick **Free** against that day in the shelf's
+  working week and booking it costs nothing, while the day stays worked,
+  stays counted, and — this is the part that matters — still counts as time
+  you were away when the next accrual is pro-rated.
+
+  It sits beside **Not in**, and the two are easy to confuse for good reason:
+  both make a day free to book. They differ on one question, *were you at
+  work?*, and that answer is exactly what an accrual is pro-rated by. Not in
+  means never, for a compressed week the employer counts as a standard one, so
+  a booking across it loses no hours and a public holiday landing on it costs
+  nothing either. Free means yes, ordinarily — so a day inside leave you took
+  IS an hour not worked, and a holiday on it costs an accrual like any other
+  working day.
+
+  Putting one on the other is quiet rather than obvious: the balance comes out
+  right either way and only the accrual drifts, upward, by the hours of every
+  such day you were actually away.
+
+  Adds one nullable column to `loaf_shelves`. Every existing shelf gets NULL
+  and keeps precisely the figures it shows today; nothing switches on until a
+  day is named.
+
+### Fixed
+- **Loaf: ticking a day's checkboxes now settles the row.** Only the **Off**
+  box re-ran the rules that keep a day's states consistent, so ticking **Not
+  in** left the row able to hold two settings that contradict each other.
+
 ## 1.32.0 — 2026-09-11
 
 ### Added

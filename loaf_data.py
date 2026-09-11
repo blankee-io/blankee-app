@@ -85,6 +85,7 @@ SHELF_COLUMNS = (
     'yearly_day', 'yearly_month', 'accrual_anchor_date',
     'year_start_month', 'year_start_day',
     'holidays', 'custom_holidays', 'accrual_only_weekdays',
+    'uncharged_weekdays',
 ) + tuple(
     '%s_%s' % (day, part)
     for day in WEEKDAY_PREFIXES
@@ -568,6 +569,30 @@ def attends(shelf, weekday):
     return name not in listed
 
 
+def charges(shelf, weekday):
+    """Does booking this weekday cost anything from the balance?
+
+    The third question a week gets asked, and the one attends() keeps being
+    mistaken for. attends() says nobody is there, ever - a compressed week's
+    fifth day - and everything follows: the day is free to book and a booking
+    across it loses no hours, because there were none to lose. This says the
+    day IS worked and IS counted, and is simply not billed when taken. Take
+    Monday to Friday off under such a rule and you are charged for four days;
+    you were still away for five, and payroll pro-rates the accrual by five.
+
+    So the two masks apply in different places. attends() masks the cost AND
+    the absence. This masks the cost alone - see _entry_split's `costing`.
+
+    True for an unrecognised weekday, and for every day of an ordinary shelf,
+    where this is empty and the question never arises.
+    """
+    try:
+        name = WEEKDAY_NAMES[int(weekday)]
+    except (IndexError, TypeError, ValueError):
+        return True
+    return name not in str(shelf.get('uncharged_weekdays') or '').split(',')
+
+
 # ------------------------------------------------------------ the projection ----
 
 PROJECTION_KEY = 'loaf_projection:%s:{user_id}' % redis_manager.REDIS_KEY_VERSION
@@ -790,6 +815,13 @@ def clean_shelf(payload):
     # different subject: that one is when the pay lands.
     values['accrual_only_weekdays'] = _weekday_list(
         payload.get('accrual_only_weekdays'))
+
+    # Free to book, and that is all that is free about it - see charges().
+    # Kept apart from accrual_only_weekdays rather than folded in, because a
+    # shelf can want both and because they answer opposite questions about
+    # whether the day was worked.
+    values['uncharged_weekdays'] = _weekday_list(
+        payload.get('uncharged_weekdays'))
 
     values['holidays'] = ','.join(
         loaf_holidays.as_list(payload.get('holidays'))) or None
