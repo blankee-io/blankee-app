@@ -375,6 +375,7 @@
         // the shelf decides what is DRAWN and the basket only decides what is
         // COUNTED.
         shelfId: {{ shelf.id if shelf else 'null' }},
+        shelfName: {{ (shelf.name if shelf else '') | tojson }},
         basketId: {{ basket.id }},
         pools: [],
         year: {{ today.year }},
@@ -584,7 +585,7 @@
 
             var name = document.createElement('span');
             name.className = 'loaf-pool-name';
-            name.textContent = pool.name;
+            name.textContent = shortPoolName(pool.name);
             chip.appendChild(name);
 
             var hours = document.createElement('span');
@@ -604,6 +605,26 @@
         add.setAttribute('aria-label', 'Add a basket to this shelf');
         add.innerHTML = '<i class="fa-solid fa-plus"></i>';
         host.appendChild(add);
+    }
+
+    // A chip sits directly under the shelf's name, so repeating it there is
+    // noise: "Acme Corp" above, "Acme Corp PTO" below. An unnamed basket is
+    // called after its shelf, which makes that the common case rather than an
+    // odd one - but this trims a typed name too, because the repetition reads
+    // the same either way.
+    //
+    // Only as a prefix, and only with something left over. A basket someone
+    // deliberately called exactly the shelf's name keeps it, rather than
+    // having its chip go blank.
+    function shortPoolName(name) {
+        var stem = (state.shelfName || '').trim();
+        var full = (name || '').trim();
+        if (stem && full.length > stem.length
+            && full.slice(0, stem.length).toLowerCase() === stem.toLowerCase()) {
+            var rest = full.slice(stem.length).trim();
+            if (rest) { return rest; }
+        }
+        return full;
     }
 
     // Which colour a pool draws in, by its position on the job. Position and
@@ -641,7 +662,10 @@
                 }
                 state.threshold = response.basket.low_balance_hours;
                 state.basketId = response.basket.id;
-                if (response.shelf) { state.shelfId = response.shelf.id; }
+                if (response.shelf) {
+                    state.shelfId = response.shelf.id;
+                    state.shelfName = response.shelf.name || '';
+                }
 
                 // Before the grid: drawCell reads state.pools to colour a day
                 // by the pool its hours came out of.
@@ -1211,7 +1235,12 @@
 
     // Moving the focus. What is DRAWN does not change - every pool on the job
     // is on the calendar either way - only which pool the balance counts down.
-    $(document).on('click', '.loaf-pool', function () {
+    //
+    // [data-basket-id] and not just .loaf-pool: the add button wears the chip
+    // shape to sit in the row, so a bare class matched it too and clicking the
+    // plus set the focus to NaN before the handler that opens the form ever
+    // ran.
+    $(document).on('click', '.loaf-pool[data-basket-id]', function () {
         var picked = parseInt($(this).attr('data-basket-id'), 10);
         if (picked === state.basketId) { return; }
         state.basketId = picked;
@@ -1251,7 +1280,8 @@
     // The chips' own plus: a basket joins the shelf on show, which is the one
     // its pools are sitting in a row under.
     $(document).on('click', '#loaf-add-pool', function () {
-        loafBasketModal.openAdd({shelf_id: state.shelfId});
+        loafBasketModal.openAdd({shelf_id: state.shelfId,
+                                 shelf_name: state.shelfName});
     });
 
     $('#loaf-prev').on('click', function () { shiftMonth(-1); });
