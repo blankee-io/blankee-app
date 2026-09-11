@@ -323,6 +323,12 @@
                 <input type="number" id="loaf-entry-hours" class="recurring-amount"
                        step="0.01" min="0" placeholder="Worked out from your week">
 
+                {# Why a day has nothing to give, when it has nothing to give.
+                   A public holiday, a day you are counted for but not at, and
+                   a day you simply do not work all come to the same zero, and
+                   which one it is is the thing worth saying. #}
+                <div id="loaf-entry-why" class="loaf-entry-why" hidden></div>
+
                 <label for="loaf-entry-note">Note</label>
                 <input type="text" id="loaf-entry-note" class="category-input" maxlength="255">
 
@@ -738,6 +744,8 @@
     // Nothing else knows it: month_rows computes it, and it is already in the
     // payload for exactly this.
     var entryScheduled = 0;
+    var entryClosed = false;
+    var entryUnattended = false;
 
     // accrue and prior are both a date and a figure - no range, no times, no
     // cap - so the form treats them alike and only the wording differs.
@@ -795,6 +803,26 @@
             hours.setAttribute('max', String(entryScheduled));
             hours.placeholder = 'Worked out from your week';
         }
+
+        // A day with no hours in it gets a sentence rather than a box capped
+        // at zero. Left to itself the browser says "Value must be 0.", which
+        // is true and tells nobody why - and the why is the whole question:
+        // a public holiday and a day you are simply not there are different
+        // answers with the same arithmetic.
+        var why = el('loaf-entry-why');
+        var empty = !adding && entryScheduled <= 0;
+        why.hidden = !empty;
+        if (empty) {
+            why.textContent = entryClosed
+                ? 'The office is shut that day, so there is no time off to take.'
+                : entryUnattended
+                ? 'That is a day you are counted for accrual but not at work, '
+                  + 'so there is nothing to take off it.'
+                : 'You do not work that day, so there is no time off to take.';
+        }
+        el('loaf-entry-submit').disabled = empty;
+        hours.disabled = empty;
+
         syncEntryFields();
     }
 
@@ -1056,6 +1084,8 @@
         el('loaf-entry-day').textContent = describeDay(row.date);
         el('loaf-entry-direction').value = 'use';
         entryScheduled = Number(row.scheduled) || 0;
+        entryClosed = !!row.closed;
+        entryUnattended = !!row.unattended;
 
         // What the working week says the day is worth, so the common case -
         // a whole day off - is already filled in and needs no arithmetic.
