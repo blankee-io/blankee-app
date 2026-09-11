@@ -375,9 +375,32 @@
     // would be telling somebody the opposite of what is happening. Clearing
     // it is still how you ask for that.
     function syncBasis() {
-        var worked = val(P + '-accrual-basis') === 'worked';
+        // Absent means show it, and that is the shelf form's whole case: the
+        // basis moved to the basket when the shelf was split out, the
+        // denominator stayed here, and there is no basis control on this form
+        // to ask. Read as a plain === 'worked' the answer is undefined, which
+        // is falsey, so the field sat in the markup and could never be
+        // reached - a shelf could not be given the figure payroll divides by.
+        // One shelf can carry baskets on either basis anyway, so the shelf is
+        // not the place the question can be answered.
+        var basis = val(P + '-accrual-basis');
+        var worked = basis === undefined || basis === 'worked';
         el(P + '-period-hours-row').style.display = worked ? '' : 'none';
-        if (worked && !$.trim(val(P + '-period-hours'))) {
+    }
+
+    // The figure appears when somebody says their employer uses one, and is
+    // filled in at that moment rather than when the form opens. Opening a
+    // shelf to look at it must not change what it does, and a pre-fill on
+    // open did exactly that: the box was empty because nobody had ever been
+    // able to reach it, so merely opening and saving would have switched the
+    // divisor from the walked weekdays to a flat 86.67 without being asked.
+    //
+    // Only when empty, so a figure typed from a payslip survives unticking
+    // and re-ticking the box.
+    function syncPeriodHours() {
+        var on = !!at(P + '-same-period-hours') && at(P + '-same-period-hours').checked;
+        el(P + '-period-hours-amount').style.display = on ? '' : 'none';
+        if (on && !$.trim(val(P + '-period-hours'))) {
             var guess = suggestedPeriodHours();
             if (guess) { el(P + '-period-hours').value = guess; }
         }
@@ -459,7 +482,9 @@
         $('.' + P + '-weekday').prop('checked', false);
         el(P + '-accrual-basis').value = 'flat';
         el(P + '-period-hours').value = '';
+        el(P + '-same-period-hours').checked = false;
         syncBasis();
+        syncPeriodHours();
         advanced = {};
         showSection('holds');
         $('.' + P + '-holiday').prop('checked', false);
@@ -591,8 +616,15 @@
         el(P + '-carryover-mode').value = row.attr('data-carryover-mode') || 'reset';
         el(P + '-accrual-basis').value =
             row.attr('data-accrual-basis') || 'flat';
-        el(P + '-period-hours').value = row.attr('data-period-hours') || '';
+        // A stored figure is what "my employer uses one" looks like once
+        // saved, so the box comes back ticked from the value itself. There is
+        // no separate column for the answer and there should not be: two
+        // places to say the same thing is two places to disagree.
+        var flat = row.attr('data-period-hours') || '';
+        el(P + '-period-hours').value = flat;
+        el(P + '-same-period-hours').checked = flat !== '' && Number(flat) > 0;
         syncBasis();
+        syncPeriodHours();
 
         var shut = (row.attr('data-holidays') || '').split(',');
         $('.' + P + '-holiday').each(function () {
@@ -723,7 +755,16 @@
         // does not offer that.
         var brk = val(P + '-break') || '0';
         payload.accrual_basis = val(P + '-accrual-basis');
-        payload.period_hours = val(P + '-period-hours');
+        // Unticked posts a real 0 rather than nothing. Nothing means "leave
+        // it alone" to the update route - the 1.25.1 guard for controls a
+        // form does not show - so an absent value could never turn a flat
+        // divisor back off. 0 is how the projection already spells "walk the
+        // weekdays": fixed if fixed > 0, else count them.
+        if (at(P + '-same-period-hours')) {
+            payload.period_hours =
+                at(P + '-same-period-hours').checked
+                    ? val(P + '-period-hours') : 0;
+        }
         payload.holidays = $('.' + P + '-holiday:checked')
             .map(function () { return this.value; }).get();
         payload.custom_holidays = customHolidays.map(function (h) {
@@ -795,6 +836,7 @@
     $('#' + P + '-no-accrual, ' + P + '-no-grant, ' + P + '-warn-negative-only')
         .on('change', syncAmounts);
     $('#' + P + '-accrual-basis').on('change', syncBasis);
+    $('#' + P + '-same-period-hours').on('change', syncPeriodHours);
 
     $('#' + P + '-advanced-toggle').on('click', function () {
         showAdvanced(el(P + '-advanced').hidden);
