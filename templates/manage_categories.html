@@ -892,27 +892,10 @@
                 }
             }
 
-            // Save group order
-            if (groupOrder.length > 0) {
-                const groupUrl = type === 'income' ? '/update_income_group_order' : '/update_expense_group_order';
-                $.ajax({
-                    url: groupUrl,
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({ order: groupOrder }),
-                    success: function(response) {
-                        if (response.status !== 'success') {
-                            showToast('Failed to save group order.', 'error');
-                        }
-                    },
-                    error: function() {
-                        showToast('Failed to save group order.', 'error');
-                    }
-                });
-            }
-
-            // Save category order
-            if (categoryOrder.length > 0) {
+            // The category order, held back until the group order has
+            // finished rather than sent alongside it - see below.
+            function _saveCategoryOrder() {
+                if (!categoryOrder.length) { return; }
                 const catUrl = type === 'income' ? "{{ url_for('update_income_order') }}" : "{{ url_for('update_expense_order') }}";
                 $.ajax({
                     url: catUrl,
@@ -932,6 +915,38 @@
                         showToast('Failed to save order.', 'error');
                     }
                 });
+            }
+
+            // Group order first, then category order - sequential, to avoid a
+            // Redis race. Both endpoints read the whole category list and
+            // write the whole list back, so sent together the group one's
+            // snapshot is taken before the category one's write and lands
+            // after it: the new order is overwritten by the values it was
+            // taken from. Both answer 200, which is why the drag simply
+            // appeared not to happen.
+            //
+            // dashboard.html and dashboard_3m.html already do this. This page
+            // did not, which is why reordering stuck there and not here.
+            if (groupOrder.length > 0) {
+                const groupUrl = type === 'income' ? '/update_income_group_order' : '/update_expense_group_order';
+                $.ajax({
+                    url: groupUrl,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ order: groupOrder }),
+                    success: function(response) {
+                        if (response.status !== 'success') {
+                            showToast('Failed to save group order.', 'error');
+                        }
+                        _saveCategoryOrder();
+                    },
+                    error: function() {
+                        showToast('Failed to save group order.', 'error');
+                        _saveCategoryOrder();
+                    }
+                });
+            } else {
+                _saveCategoryOrder();
             }
         }
 
