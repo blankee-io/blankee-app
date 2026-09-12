@@ -8,6 +8,45 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.35.0 — 2026-09-12
+
+### Changed
+- **Overspending an allowance no longer eats the weeks ahead.** A depleted
+  bucket is deleted, and depletion then moved on to the next period's — so
+  spending past this week's allowance quietly consumed next week's, and the
+  week after that. Weeks in which nothing had been spent lost their budget.
+  Spending now stops at the period it was made in, and everything past the
+  allowance is recorded there as overspending, where you can see it. Variable
+  income is protected the same way when more arrives than was expected.
+- **An allowance can no longer be deferred.** An allowance is money you may
+  spend on any day of its period, anchored to the period's last day, so
+  "ask me tomorrow" carried it over the boundary into the next period — which
+  already has an allowance of its own. Answering honestly that you had not
+  spent this week's handed you next week at double. Those rows now offer only
+  **Yes** and **Skip**: an allowance that goes unspent is simply gone. Bills,
+  wages, variable income and one-off purchases are unaffected — they are
+  single things with a date, and "not yet" is a real answer about them.
+- **A category with no recurring plan is treated as a bill.** Entries typed by
+  hand for a future date become forecast entries whatever category they are
+  in, and with no recurring template behind them they were treated as
+  allowances by default — whittled down over a period rather than settled in
+  one go. One planned purchase is a bill in every way that matters.
+
+### Fixed
+- **Two unpaid bills deferred to the same day no longer lose one of them.**
+  The second was deleted while the app reported it had been "merged in", so
+  two months of rent became one and the other month left your forecast. Both
+  now sit there as two separate rows, each confirmed, deferred or skipped on
+  its own, each settling its own month. Anything deferred before this update
+  is picked up correctly the first time you answer it.
+- **A weekly bill or allowance could not record overspending at all.** The
+  code that finds which period an entry belongs to read weekday names as
+  numbers, so every weekly category raised an error that was silently
+  swallowed.
+- **Menus are easier to read.** The side menu and the profile dropdown go from
+  13px to 15px.
+- **The "jump to today" banner no longer sits on top of the menu.**
+
 ## 1.34.1 — 2026-09-12
 
 ### Fixed
