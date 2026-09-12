@@ -1829,6 +1829,40 @@ function _bucketItemHtml(item, symbol) {
             ? (income ? "Wage" : "Bill")
             : (income ? "Variable Income" : "Allowance");
 
+    // "No" means "not yet, ask me tomorrow" - it defers the bucket to
+    // tomorrow, or drops it if tomorrow already holds one for this category.
+    //
+    // That is a sensible answer for a Bill or a Wage, at any age. Those are
+    // single obligations with a due date: one unpaid bill deferred is still
+    // one unpaid bill, and it belongs in the forecast until it is paid or
+    // skipped.
+    //
+    // It is never a sensible answer for an Allowance. An allowance is not
+    // money due on its date - it is money you may spend on any day of its
+    // period, anchored to the period's last day. So deferring it to tomorrow
+    // always carries it over the boundary into the NEXT period, which already
+    // has an allowance of its own: that period then holds two, and under the
+    // depletion rule both are spendable. Answering "I have not spent this
+    // week's" would hand you next week at double.
+    //
+    // An allowance that goes unspent is simply gone. Skip says exactly that,
+    // so the row offers Yes and Skip and nothing else - rather than offering
+    // No and having it silently mean Skip. Two buttons doing the same thing
+    // is only untidy; a button that means something different from row to row
+    // is a trap.
+    //
+    // Variable Income is left deferrable on purpose. It looks like an
+    // allowance in the data - income with wage_bill 0 - but it is money
+    // EXPECTED rather than money allotted, and income that has not arrived
+    // yet may still arrive tomorrow.
+    //
+    // So is a one-off: a purchase planned for a date on a category with no
+    // recurring plan at all. It reads as an allowance for want of a
+    // recurring row to say otherwise, but there is no period for it to
+    // carry into and no next bucket to collide with - it is one intention,
+    // and "not yet" is a real answer about it.
+    var deferrable = !!item.wage_bill || income || !!item.one_off;
+
     // Three tones, not two. Credit spending is money out, but it leaves a card
     // rather than the bank, and telling them apart at a glance is the point of
     // colouring the rows at all.
@@ -1851,7 +1885,8 @@ function _bucketItemHtml(item, symbol) {
     }
     return "" +
       '<div class="bucket-prompt-item ' + tone + '" data-entry-id="' + _bucketEscape(item.entry_id) +
-          '" data-table="' + _bucketEscape(item.table) + '">' +
+          '" data-table="' + _bucketEscape(item.table) + '"' +
+          (deferrable ? '' : ' data-no-defer="1"') + '>' +
         '<div class="bucket-prompt-head">' +
           '<span class="bucket-prompt-cat">' + title + '</span>' +
           '<span class="bucket-prompt-amount">' + symbol +
@@ -1864,7 +1899,9 @@ function _bucketItemHtml(item, symbol) {
           // figure is the thing most likely to differ from the forecast, and
           // it is one tap either way.
           '<button type="button" class="bucket-prompt-btn bucket-prompt-yes" data-action="open_amount">Yes</button>' +
-          '<button type="button" class="bucket-prompt-btn" data-action="defer">No</button>' +
+          (deferrable
+            ? '<button type="button" class="bucket-prompt-btn" data-action="defer">No</button>'
+            : '') +
           '<button type="button" class="bucket-prompt-btn bucket-prompt-skip" data-action="skip">Skip</button>' +
         '</div>' +
         '<div class="bucket-prompt-amount-row bucket-prompt-hidden">' +
@@ -1911,13 +1948,23 @@ function resolveAllBucketRows(bodyEl, action, close) {
             return;
         }
         row.classList.add("bucket-prompt-busy");
+
+        // "No to all" means the same as pressing No on each row, and a row
+        // that does not offer No is an allowance whose period has ended -
+        // there is no tomorrow to defer it to. Skip is what its buttons would
+        // have done, so that is what it gets. Sending defer here would put
+        // last week's untouched allowance onto tomorrow, which is precisely
+        // what not offering the button was meant to prevent.
+        var rowAction = (action === "defer" && row.getAttribute("data-no-defer"))
+            ? "skip" : action;
+
         fetch("/api/buckets/resolve", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 entry_id: row.getAttribute("data-entry-id"),
                 table: row.getAttribute("data-table"),
-                action: action
+                action: rowAction
             })
         }).then(function (r) { return r.json(); })
           .then(function (res) {
