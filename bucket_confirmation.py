@@ -21,9 +21,9 @@ This module is the answer to "did it actually happen?", asked once each evening:
 Nothing else removes anything. There is no sweeper and no automatic expiry: an
 unanswered bucket keeps being asked about until the user answers it, and the
 evening scheduler only sends the notification - it never touches entry or bucket
-data. A bucket disappears in exactly two cases, both of them an answer the user
-gave: skip, or a defer that lands on a date this category already has a bucket
-for, where the pushed one is dropped instead of duplicating it.
+data. A bucket disappears in exactly one case, and it is an answer the user
+gave: skip. Deferring onto a day this category already occupies is fine - two
+periods' obligations sit there as two rows and are answered separately.
 
 Redis-first throughout. Every write goes to Redis and marks the table dirty for
 the flush worker. The old conversion wrote to MySQL directly, which is a bug in
@@ -93,8 +93,10 @@ def _wage_bill_map(table, user_id):
     """
     {category_id: wage_bill} from the recurring template behind each category.
 
-    A bucket with no recurring template - one created by typing an entry dated
-    today - has no wage_bill, and reads as 0 (Allowance).
+    A bucket with no recurring template - one typed by hand for a date - has
+    no wage_bill of its own. It reads as 1 (Bill), because one planned
+    purchase is settled in one go rather than whittled down over a period.
+    The default lives at the call site, since a missing key is what says so.
     """
     recurring_table = {
         'income_entries': 'recurring_income',
@@ -304,8 +306,19 @@ def pending_buckets(user_id, on_date=None):
                 # labelled them "Allowance". Both are all-or-nothing: one plan
                 # or one charge, settled once.
                 'wage_bill': 1 if (cid in bundles or cid in interest)
-                             else wage_bill.get(cid, 0),
+                             else wage_bill.get(cid, 1),
                 'is_bundle': cid in bundles,
+                # A bucket with no recurring template behind it: a purchase
+                # somebody planned for a date, once. It reads as an Allowance
+                # because the wage_bill lookup answers 0 for anything with no
+                # recurring row - the same default that had to be overridden
+                # for bundles and interest charges above - but it is not one.
+                # An allowance is a sum for a PERIOD, and the rules that follow
+                # from that (it does not carry over, so it cannot be deferred)
+                # say nothing about a single intention. "Not yet, ask me
+                # tomorrow" is exactly right for one of these, and deferring it
+                # collides with nothing, because there is no series.
+                'one_off': not e.get('recurring_id'),
                 'bundle_item': _bundle_item_label(user_id, cid, e_date, cid in bundles),
                 'days_overdue': (on_date - e_date).days,
                 'days_pushed': days_pushed,
@@ -496,13 +509,25 @@ def _save_records(bucket_table, user_id, records):
     return True
 
 
-def _apply_to_record(table, user_id, category_id, bucket_date, mutate):
+def _apply_to_record(table, user_id, category_id, bucket_date, mutate,
+                     also=None):
     """
     Find the bucket record paired with an entry and hand it to `mutate`.
 
     `mutate(record, records)` returns True to keep the list, or False to drop
     that record. Every entry change has to be mirrored here: the same bucket
     lives in two stores and nothing in the database keeps them agreeing.
+
+    `bucket_date` is the PERIOD's date - the entry's original_date once it has
+    been deferred - because that is where a record lives.
+
+    `also` is a second date to accept, and exists for one reason: deferring
+    used to move the record along with the entry. A bucket deferred before
+    that changed has its record sitting on the day it was pushed to rather
+    than on its own period, so the anchor finds nothing and the record would
+    be stranded - the period keeping its full planned figure for ever, and the
+    prompt with nothing to clear. Passing the entry's current date as well
+    finds those and settles them the first time they are answered.
     """
     bucket_table = get_bucket_table_for_entry_table(table)
     if not bucket_table:
@@ -511,10 +536,15 @@ def _apply_to_record(table, user_id, category_id, bucket_date, mutate):
     if records is None:
         return False
 
+    wanted = [d for d in (bucket_date, also) if d]
     kept, touched = [], False
     for r in records:
         same_cat = int(r.get('category_id', -1)) == int(category_id)
-        same_date = str(r.get('bucket_date', ''))[:10] == bucket_date
+        same_date = str(r.get('bucket_date', ''))[:10] in wanted
+        # Only ever one: the anchor is tried first and `also` is the legacy
+        # position of that same record, so they cannot both be live at once.
+        if touched:
+            same_date = False
         if same_cat and same_date:
             touched = True
             if mutate(r, records) is False:
@@ -537,9 +567,8 @@ def resolve(user_id, table, entry_id, action, amount=None):
     Returns (ok, message, change) where change describes what the entry now
     looks like, or None when there was nothing to change. The browser needs it:
     it holds the same entries and has to show the result without reloading, and
-    working the outcome out for itself would mean duplicating the rules above -
-    including the collision case, where a defer removes the entry instead of
-    moving it. The server already knows; it may as well say.
+    working the outcome out for itself would mean duplicating the rules above.
+    The server already knows; it may as well say.
 
     Refuses an unknown table or action rather than guessing - these arrive from
     a browser.
@@ -566,7 +595,23 @@ def resolve(user_id, table, entry_id, action, amount=None):
         return True, 'That one has already been dealt with.', None
 
     category_id = int(target.get('category_id'))
-    bucket_date = str(target.get('date'))[:10]
+
+    # Which PERIOD this bucket belongs to, which is not where it currently
+    # sits. Deferring moves the entry - that is what "ask me tomorrow" does -
+    # but it does not change which month's rent this is. original_date is the
+    # anchor already stamped on the first defer and never moved again, so it
+    # is the period's identity; a bucket that has never been deferred has no
+    # anchor and its own date is the period.
+    #
+    # Every record lookup below goes through this. Keyed on the entry's
+    # current date instead, a confirmation after a defer looks for a record on
+    # a day no period ever started, finds nothing, and the period it really
+    # belonged to keeps its full planned figure for ever.
+    bucket_date = str(target.get('original_date') or target.get('date'))[:10]
+
+    # Where the entry sits now. Only used to find a record left behind by the
+    # old defer, which moved records as well as entries - see _apply_to_record.
+    entry_date = str(target.get('date'))[:10]
 
     def _state(entry=None, removed=False):
         """What the browser should do to its copy of this entry."""
@@ -602,7 +647,7 @@ def resolve(user_id, table, entry_id, action, amount=None):
         target['original_amount'] = None
         target['processed'] = 1
         _apply_to_record(table, user_id, category_id, bucket_date,
-                         lambda r, rs: False)
+                         lambda r, rs: False, also=entry_date)
         _save_entries(table, user_id, entries)
         return True, 'Recorded.', _state(target)
 
@@ -618,7 +663,7 @@ def resolve(user_id, table, entry_id, action, amount=None):
         target['original_amount'] = None
         target['processed'] = 1
         _apply_to_record(table, user_id, category_id, bucket_date,
-                         lambda r, rs: False)
+                         lambda r, rs: False, also=entry_date)
         _save_entries(table, user_id, entries)
         return True, 'Recorded.', _state(target)
 
@@ -629,54 +674,30 @@ def resolve(user_id, table, entry_id, action, amount=None):
         # mean "ask me tomorrow", which is only true relative to today.
         tomorrow = (_user_today(user_id) + timedelta(days=1)).isoformat()
 
-        # If tomorrow already holds a bucket for this category, this one has
-        # caught up with its own next occurrence, and moving it would put two
-        # buckets for one category on one date. That does not work: bucket
-        # records are keyed on (category_id, bucket_date), so the pair would
-        # share a single record and every later update to either would fight
-        # over it. The one being pushed is the one that goes - it went unanswered
-        # for its whole run, so treating it as not having happened is the
-        # inference that does not invent spending.
+        # Two buckets for one category CAN now share a day, and this is the
+        # change that allows it. They used to collide: the record moved with
+        # the entry, records are keyed on (category_id, bucket_date), so a
+        # second one deferred onto the same day wanted the same record. The
+        # one being pushed was deleted to avoid it - silently, while telling
+        # the user it had been "merged in". Two unpaid months of rent deferred
+        # together became one, and the other month's money left the forecast.
         #
-        # This is the only automatic removal left in the system, and it happens
-        # only because the user pressed No on this specific entry.
-        collision = None
-        for other in entries:
-            if other is target or other.get('is_bucket') != 1:
-                continue
-            if str(other.get('date'))[:10] != tomorrow:
-                continue
-            try:
-                if int(other.get('category_id')) != category_id:
-                    continue
-            except (TypeError, ValueError):
-                continue
-            collision = other
-            break
-
-        if collision is not None:
-            entries.remove(target)
-            _forget_entry(table, user_id, target.get('id'))
-            _apply_to_record(table, user_id, category_id, bucket_date,
-                             lambda r, rs: False)
-            _save_entries(table, user_id, entries)
-            log_info(logger, 'BUCKET_CONFIRM',
-                     f"Deferred bucket {entry_id} in {table} met the existing "
-                     f"bucket for category {category_id} on {tomorrow} - removed")
-            return (True, "Tomorrow already has this one, so it was merged in.",
-                    _state(removed=True))
-
+        # Nothing needs to collide once the record stops moving. Each entry
+        # keeps its own id and its own row in the prompt, so two months sit on
+        # one day as two obligations and each is confirmed, deferred or
+        # skipped on its own. Their records stay where their periods are, one
+        # per period, and the unique key is never troubled.
         # original_date is the anchor: it remembers where this forecast started,
         # however many times it is deferred.
         if not target.get('original_date'):
             target['original_date'] = bucket_date
         target['date'] = tomorrow
 
-        def move(r, rs):
-            r['bucket_date'] = tomorrow
-            return True
-
-        _apply_to_record(table, user_id, category_id, bucket_date, move)
+        # The record is deliberately left alone. It says which period this
+        # obligation is for, and deferring changes when the user is asked, not
+        # which month it is. Moving it was what forced two deferred buckets to
+        # fight over one row - and it also detached the record from the period
+        # whose figures it reports.
         _save_entries(table, user_id, entries)
         # A bundle's bucket is generated from its items' dates, so moving the
         # bucket alone leaves the item still saying the old date - and the next
@@ -688,6 +709,7 @@ def resolve(user_id, table, entry_id, action, amount=None):
     # skip
     entries.remove(target)
     _forget_entry(table, user_id, target.get('id'))
-    _apply_to_record(table, user_id, category_id, bucket_date, lambda r, rs: False)
+    _apply_to_record(table, user_id, category_id, bucket_date,
+                     lambda r, rs: False, also=entry_date)
     _save_entries(table, user_id, entries)
     return True, 'Removed.', _state(removed=True)
