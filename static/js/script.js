@@ -2818,6 +2818,13 @@ function _abApply(balance, savings, cards) {
             // a lot of entries, so there is no useful per-row patch here - the
             // page's own refresh is the honest option.
             setBucketLauncher(d.remaining || 0);
+
+            // The balance is done, so its icon goes now rather than on the
+            // next sync. apply() has cleared pending_date server-side and
+            // nothing may put it back but the cadence or the next set of
+            // entries being cleared - so this is the state, not a guess at it.
+            setBalanceLauncher(false);
+
             refreshAfterBucketAnswers([]);
             return true;
         })
@@ -2977,9 +2984,13 @@ function runMoneyPrompts() {
                 var total = (d && d.success) ? d.total : 0;
 
                 if (!total) {
-                    // Nothing to confirm, so the balance has the slot.
+                    // Nothing to confirm, so the balance has the slot - but
+                    // only if one is already waiting. Raising here as well is
+                    // what made a completed balance reappear on the very next
+                    // page load: apply() had just cleared it, and simply
+                    // arriving somewhere raised it again.
                     setBucketLauncher(0);
-                    return openBalanceStep();
+                    return showPendingBalance();
                 }
                 if (bucketSeenThisVisit()) {
                     // Put aside already. The count stays in the nav, one click
@@ -3068,6 +3079,27 @@ function _dialogSettled() {
     });
 }
 
+/* Show a balance that is already waiting. Raises nothing.
+
+   This is what an ordinary page load does. It must not create a balance,
+   only reveal one - the cadence raises them on a schedule, and clearing the
+   last entry raises one deliberately, and neither of those is "somebody
+   opened a page". */
+function showPendingBalance() {
+    return _dialogSettled()
+        .then(function () { return showAutoBalancePrompt(); })
+        .then(function () { return syncMoneyLaunchers(); });
+}
+
+/* Ask for a balance because the last entry has just been dealt with, then
+   show it.
+
+   Only ever from the moment the count reaches zero BY BEING ANSWERED.
+   Calling it whenever the count happened to be zero meant every page load
+   with nothing to confirm raised a fresh one - so a balance completed a
+   minute ago came straight back on the next page, and the icon never went
+   away. Completing a balance clears pending_date; nothing may put it back
+   except the cadence or the next set of entries being cleared. */
 function openBalanceStep() {
     return fetch("/api/autobalance/raise", { method: "POST" })
         .then(function (r) { return r.ok ? r.json() : null; })
@@ -3079,9 +3111,7 @@ function openBalanceStep() {
             if (d && d.success && !d.pending) {
                 return syncMoneyLaunchers();
             }
-            return _dialogSettled()
-                .then(function () { return showAutoBalancePrompt(); })
-                .then(function () { return syncMoneyLaunchers(); });
+            return showPendingBalance();
         });
 }
 
