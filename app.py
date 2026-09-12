@@ -18698,6 +18698,38 @@ def api_autobalance_apply():
     return jsonify(dict({'success': True}, **result))
 
 
+@app.route('/api/autobalance/raise', methods=['POST'])
+@login_required
+def api_autobalance_raise():
+    """
+    Ask for a balance now, because the last entry to confirm has been dealt
+    with.
+
+    Having just said what did and did not happen, the next question is what
+    the bank says - so the prompt follows the confirmations rather than
+    waiting for a date. The cadence is left alone: it is the longest the user
+    is willing to go without being asked, not a ration of how often they may
+    be.
+
+    Answers what is now pending rather than what it did, so the caller has one
+    thing to check. A user with the feature switched off, or with every
+    balance covered by a bank feed, gets a truthful false and no prompt.
+    """
+    import auto_balance
+
+    try:
+        auto_balance.raise_now(current_user.id)
+        settings = auto_balance.get_settings(current_user.id) or {}
+        pending = (settings.get('pending_date') is not None
+                   and auto_balance.anything_to_reconcile(current_user.id))
+    except Exception as e:
+        log_exception(logger, 'AUTOBALANCE',
+                      f"Could not raise a balance: {e}")
+        return jsonify({'success': False, 'pending': False}), 500
+
+    return jsonify({'success': True, 'pending': bool(pending)})
+
+
 @app.route('/api/autobalance/skip', methods=['POST'])
 @login_required
 def api_autobalance_skip():

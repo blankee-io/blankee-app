@@ -8,6 +8,45 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.34.0 — 2026-09-12
+
+### Changed
+- **Entries to confirm no longer wait for the evening.** A day's forecast
+  entries appear the day they arrive rather than at 20:00, and the prompt
+  opens once each visit for as long as any are outstanding. Put it aside and
+  the count stays in the nav, one click away, until you come back.
+- **The balance is asked for after the entries, not instead of them.** It used
+  to come first, and balancing confirms whatever is outstanding on your
+  behalf — so your entries were answered *for* you, silently, at the moment
+  you were thinking about a bank balance. Answer them first and the balance
+  prompt opens with nothing left to confirm.
+- **Clearing the last entry now asks you to balance.** Having just said what
+  did and did not happen, the bank's own figure is the next question. Your
+  balance cadence is untouched by it: the cadence is the longest you are
+  willing to go without being asked, not a limit on how often you may be.
+- **"Not now" on the balance keeps it waiting.** It used to put the question
+  away until the next date on your cadence, so a balance nobody had got round
+  to could sit unreconciled with nothing on screen saying so. The icon now
+  stays in the nav, beside where the entries count sits, until a balance is
+  actually completed.
+
+### Fixed
+- **The confirm prompt no longer blinks as it opens.** Every dialog in the app
+  plays a short grow-in animation, and an animation overrides a transform for
+  as long as it runs — so this prompt, which grows out of the corner under its
+  own steam, appeared at full size first, snapped to the corner when the
+  shared animation ended, and only then grew. It now opens once, smoothly.
+- **Nor as it closes.** A dialog being hidden is held open briefly to play a
+  fade out, which for one that has already animated itself away is not a fade
+  but a reappearance. Dialogs that see themselves out are now left alone.
+- **Loaf: tapping a date on a touch device opens one calendar, not two.** The
+  stylesheet hid the browser's own picker icon, but on a phone the whole field
+  is the picker, so the system calendar opened on top of Loaf's. Typing a date
+  is unaffected on a desktop, where that is worth keeping.
+- **Opening the menu closes the profile dropdown, and the other way round.**
+  Each one's button stops the click reaching the handler that would close the
+  other, so both could be open at once.
+
 ## 1.33.1 — 2026-09-11
 
 ### Fixed
