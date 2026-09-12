@@ -1344,6 +1344,21 @@
         drawRange();
     });
 
+    // On a touch device the whole date field is the browser's picker, not
+    // just the icon the stylesheet hides, so tapping it opened the native
+    // calendar on top of this one - two calendars, both writing the same
+    // field. readonly is what stops it: the field still takes focus and still
+    // fires the click that opens ours, it simply no longer offers its own.
+    //
+    // Nothing is lost by it. The typed date the hidden-icon rule was written
+    // to preserve is a desktop affordance - a phone never offered typing into
+    // a date input - and the Until field can still be emptied here, because
+    // picking a start again clears it.
+    if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+        el('loaf-entry-start-date').readOnly = true;
+        el('loaf-entry-end-date').readOnly = true;
+    }
+
     // The calendar belongs to the date fields, so it opens from them. Which
     // one was clicked decides what the next click means: From starts a new
     // range, Until finishes the one already begun.

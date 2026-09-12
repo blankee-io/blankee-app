@@ -196,6 +196,16 @@ function setupCategoryDuplicateCheck(inputEl, getCats, opts) {
         var display = getComputedStyle(el).display;
         if (display !== "none") { el.__modalShown = display; return; }
         if (!el.__modalShown) { return; }   // never seen open; nothing to play
+
+        // A dialog that animates its own exit opts out, because playOut works
+        // by putting the element BACK on screen for the length of the fade.
+        // For anything that has already animated itself away that is not a
+        // fade, it is a reappearance: the bucket prompt flies into the corner
+        // over 420ms, is hidden at the end of it, and was then shown again at
+        // full size for up to another 400ms - which is seen as the dialog
+        // blinking back after it has gone.
+        if (el.dataset.selfExit === "1") { el.__modalShown = null; return; }
+
         playOut(el);
     }
 
@@ -442,6 +452,12 @@ function showConfirmModal(opts) {
             modal.dataset.modifier = opts.modalClass;
         }
 
+        // Cleared every time for the same reason the modifier is: the element
+        // is shared, and a dialog that does not animate its own exit must not
+        // inherit the opt-out from one that does.
+        if (opts.selfExit) { modal.dataset.selfExit = "1"; }
+        else { delete modal.dataset.selfExit; }
+
         if (opts.danger) {
             confirmBtn.classList.add('danger');
         } else {
@@ -455,6 +471,16 @@ function showConfirmModal(opts) {
             checkboxEl.checked = false;
         } else {
             checkboxRow.style.display = 'none';
+        }
+
+        // The last moment at which a caller can set the state the dialog is
+        // FIRST PAINTED in. onReady is too late for that: by then the element
+        // is displayed, and anything it does is a second frame the user can
+        // see. A dialog that grows out of a corner has to start collapsed
+        // here, or it shows at full size and then snaps small.
+        if (typeof opts.beforeShow === 'function') {
+            try { opts.beforeShow(modal, modal.querySelector('.modal-content')); }
+            catch (e) { /* a bad hook must not stop the dialog opening */ }
         }
 
         modal.classList.add('modal--open');
@@ -1950,6 +1976,19 @@ function showBucketPrompt(opts) {
             return showConfirmModal({
                 title: "Did these come through?",
                 modalClass: "bucket-prompt-modal",
+                // It leaves by flying into the corner - see
+                // minimiseBucketPrompt - so the shared fade must not follow it.
+                selfExit: true,
+                // And it arrives the same way, so the first frame has to be
+                // the collapsed one. With no fly offsets set yet this is
+                // scale(0.08) and opacity 0 at the centre - invisible, which
+                // is all that is needed until prepareBucketExpand measures
+                // where the corner actually is.
+                beforeShow: function (modalEl, contentEl) {
+                    if (!contentEl) { return; }
+                    contentEl.classList.add("bucket-prompt-instant");
+                    modalEl.classList.add("bucket-prompt-expanding");
+                },
                 // Forwarded, not swallowed. Leaving this out was why the
                 // dialog vanished instead of shrinking into the corner: the
                 // hook existed and nothing ever handed it to the helper.
@@ -2077,10 +2116,25 @@ function showBucketPrompt(opts) {
    bubble is a launcher, not a dialog, so it is its own small element.
    -------------------------------------------------------------------------- */
 
-// How long counts as "away". Re-opening centred on every page navigation would
-// be intolerable; only after a real gap does it take over the screen again.
-var BUCKET_IDLE_MS = 4 * 60 * 60 * 1000;
-var BUCKET_LAST_KEY = "blankee_bucket_last_shown";
+// Once a visit. Re-opening centred on every page navigation would be
+// intolerable - there would be no way to put it aside and go do something
+// else - and a clock-based gap made it arrive unbidden in the middle of
+// unrelated work. A visit is the unit that matches what somebody means by
+// "not now": the nav keeps the count, one click away, and the next time they
+// come back it asks again.
+//
+// sessionStorage, not localStorage: it has to forget when the tab does, or
+// "the next visit" never comes.
+var BUCKET_SEEN_KEY = "blankee_bucket_seen_this_visit";
+
+function bucketSeenThisVisit() {
+    try { return !!sessionStorage.getItem(BUCKET_SEEN_KEY); }
+    catch (e) { return false; }   // private mode: ask, rather than never ask
+}
+
+function markBucketSeen() {
+    try { sessionStorage.setItem(BUCKET_SEEN_KEY, "1"); } catch (e) {}
+}
 
 function bucketLauncher() {
     // Rendered by nav.html now, so this finds it rather than building it. The
@@ -2091,7 +2145,14 @@ function bucketLauncher() {
     if (!el) { return null; }
     if (!el.dataset.bound) {
         el.dataset.bound = "1";
-        el.addEventListener("click", function () { openBucketPrompt(); });
+        el.addEventListener("click", function () {
+            // Same chain as the page-load path. Clearing the last entry from
+            // here has to lead to the balance too, or whether the prompt
+            // follows would depend on how the dialog happened to be opened.
+            openBucketPrompt().then(function (left) {
+                if (!left) { return openBalanceStep(); }
+            });
+        });
     }
     return el;
 }
@@ -2107,6 +2168,56 @@ function setBucketLauncher(count) {
     }
     el.querySelector(".bucket-launcher-count").textContent = count > 99 ? "99+" : count;
     el.classList.remove("bucket-prompt-hidden");
+}
+
+
+function balanceLauncher() {
+    var el = document.getElementById("balance-launcher");
+    if (!el) { return null; }
+    if (!el.dataset.bound) {
+        el.dataset.bound = "1";
+        el.addEventListener("click", function () {
+            showAutoBalancePrompt().then(syncMoneyLaunchers);
+        });
+    }
+    return el;
+}
+
+function setBalanceLauncher(show) {
+    var el = balanceLauncher();
+    if (!el) { return; }
+    el.classList.toggle("bucket-prompt-hidden", !show);
+}
+
+/* Which of the two the nav is showing, and never both.
+
+   They occupy the same slot because they are the same job at different
+   stages: say what happened, then say what the bank says. Entries win while
+   any are outstanding - balancing confirms whatever is left on the user's
+   behalf, so offering it first asks a question it is about to answer itself.
+
+   Called after anything that could change either count, which is why it reads
+   both rather than trusting what the caller thought it knew. */
+function syncMoneyLaunchers() {
+    return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+            var left = (d && d.success) ? d.total : 0;
+            setBucketLauncher(left);
+            if (left) {
+                setBalanceLauncher(false);
+                return left;
+            }
+            return fetch("/api/autobalance/state",
+                         { headers: { "Accept": "application/json" } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (b) {
+                    setBalanceLauncher(!!(b && b.success && b.pending));
+                    return 0;
+                })
+                .catch(function () { return 0; });
+        })
+        .catch(function () { /* leave the nav as it was */ });
 }
 
 // How long the dialog takes to fly to the corner. Must match the transition
@@ -2325,23 +2436,42 @@ function prepareBucketExpand() {
     var launcher = bucketLauncher();
     if (!content) { return null; }
 
+    // Every path out of here that does NOT animate has to leave the dialog
+    // uncollapsed, because beforeShow has already collapsed it. Returning
+    // null with the class still on is a dialog that opens invisible and
+    // stays that way - reduced motion would have made it happen every time.
+    function giveUp() {
+        modal.classList.remove("bucket-prompt-expanding");
+        content.classList.remove("bucket-prompt-instant");
+        return null;
+    }
+
     var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (still) { return null; }
+    if (still) { return giveUp(); }
 
     var wasHidden = launcher.classList.contains("bucket-prompt-hidden");
     if (wasHidden) { launcher.classList.remove("bucket-prompt-hidden"); }
     var to = launcher.getBoundingClientRect();
     if (wasHidden) { launcher.classList.add("bucket-prompt-hidden"); }
 
+    // Transitions off before anything is measured or moved, so none of the
+    // shuffling below animates.
+    content.classList.add("bucket-prompt-instant");
+
+    // beforeShow has usually collapsed it already, and a collapsed box
+    // measures 8% of the size the fly offsets have to be computed from. Taken
+    // off to measure and put straight back, the way the launcher is above -
+    // no paint happens in between, because none of this yields.
+    var collapsed = modal.classList.contains("bucket-prompt-expanding");
+    if (collapsed) { modal.classList.remove("bucket-prompt-expanding"); }
     var from = content.getBoundingClientRect();
-    if (!from.width || !to.width) { return null; }
+    if (!from.width || !to.width) { return giveUp(); }
 
     content.style.setProperty("--bucket-fly-x",
         ((to.left + to.width / 2) - (from.left + from.width / 2)) + "px");
     content.style.setProperty("--bucket-fly-y",
         ((to.top + to.height / 2) - (from.top + from.height / 2)) + "px");
 
-    content.classList.add("bucket-prompt-instant");
     modal.classList.add("bucket-prompt-expanding");
     void content.offsetWidth;          // compute it while transitions are off
     content.classList.remove("bucket-prompt-instant");
@@ -2351,19 +2481,41 @@ function prepareBucketExpand() {
 
 function releaseBucketExpand(prepared) {
     if (!prepared) { return; }
-    requestAnimationFrame(function () {
+
+    // A frame is the right moment to start the growth - the collapsed state
+    // has to be painted once for there to be anything to grow FROM - but it
+    // must not be the only way this ever runs. requestAnimationFrame does not
+    // fire in a background tab, and this is reached from a timer that can
+    // easily land while the tab is hidden. The collapsed state is now applied
+    // before the dialog is first painted, so a frame that never comes is not
+    // a missed animation: it is a dialog that stays scaled to 8% at opacity 0
+    // and never appears at all.
+    var released = false;
+    function go() {
+        if (released) { return; }
+        released = true;
         prepared.modal.classList.remove("bucket-prompt-expanding");
         setTimeout(function () {
             prepared.content.style.removeProperty("--bucket-fly-x");
             prepared.content.style.removeProperty("--bucket-fly-y");
         }, BUCKET_MINIMISE_MS);
-    });
+    }
+    requestAnimationFrame(go);
+    setTimeout(go, 80);
 }
 
 function startBucketOpenSequence() {
     // Beat one: the dialog is hidden at the corner and the bubble bounces.
     // Beat two: the bubble is gone and the dialog grows into its place.
     var prepared = prepareBucketExpand();
+    if (!prepared) {
+        // No animation to play. prepareBucketExpand has already undone the
+        // collapse; this is belt and braces for any future path that has not.
+        var m = document.getElementById("generic-confirm-modal");
+        if (m) { m.classList.remove("bucket-prompt-expanding"); }
+        bounceBucketLauncherOut();
+        return;
+    }
     var wait = bounceBucketLauncherOut();
     if (!wait) { releaseBucketExpand(prepared); return; }
     setTimeout(function () { releaseBucketExpand(prepared); }, wait);
@@ -2455,14 +2607,22 @@ function openBucketPrompt(opts) {
             return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {
-                    setBucketLauncher((d && d.success) ? d.total : 0);
+                    var left = (d && d.success) ? d.total : 0;
+                    setBucketLauncher(left);
 
                     // Flush anything the debounce is still holding. Answers
                     // already applied themselves as they landed; this catches
                     // the last one, which is usually what closed the dialog.
                     scheduleBucketRefresh(true);
+
+                    // Reported so the caller can move on to the balance when
+                    // this reaches nothing. Resolved from the server's count
+                    // rather than from how many rows were answered: the dialog
+                    // can be closed with some still outstanding, and it can be
+                    // open on one device while another answers them.
+                    return left;
                 })
-                .catch(function () { /* leave the bubble as it was */ });
+                .catch(function () { return 0; });
         });
 }
 
@@ -2572,12 +2732,18 @@ function showAutoBalancePrompt(opts) {
                 var typed = input ? input.value : null;
 
                 if (!confirmed) {
-                    // Nothing written, and the cadence is untouched: next_due
-                    // was advanced when the prompt was raised, so "not now"
-                    // simply means the next occurrence asks again.
-                    return fetch("/api/autobalance/skip", { method: "POST" })
-                        .then(function () { return false; })
-                        .catch(function () { return false; });
+                    // Left pending on purpose. This used to clear it, which
+                    // put the question away until the next date on the
+                    // cadence - so a balance nobody had got round to sat
+                    // unreconciled with nothing on screen to say so.
+                    //
+                    // Now "not now" only closes the dialog. pending_date
+                    // stands, the nav keeps the icon, and it asks again next
+                    // visit; apply() is the only thing that clears it, which
+                    // means the prompt goes away by being answered rather
+                    // than by being waited out. /api/autobalance/skip still
+                    // exists and still does what it says - nothing calls it.
+                    return Promise.resolve(false);
                 }
                 if (typed === null || typed === "") {
                     showToast("Enter your current balance.", "error");
@@ -2776,49 +2942,147 @@ document.addEventListener("DOMContentLoaded", function () {
         // file for showToast and the shared modal.
         if (currentAppId() !== "blankee") { return; }
 
-        // The balance prompt goes first when one is waiting, and the bucket
-        // prompt is skipped entirely for this load: balancing confirms every
-        // outstanding entry itself, so asking about them first and then
-        // confirming them again is the same question twice.
-        showAutoBalancePrompt().then(function (shown) {
-            if (shown !== false) { return; }
-            _openBucketPromptIfDue();
-        });
+        // Entries first, the balance after them - the reverse of what this
+        // used to do. Balancing confirms whatever is outstanding on the
+        // user's behalf, so the old order was defensible: ask the one
+        // question that settles both. But it meant the entries were answered
+        // FOR somebody rather than BY them, silently, at the moment they were
+        // thinking about a bank balance instead.
+        //
+        // Answered one at a time first, the balance prompt then opens with
+        // nothing left to confirm, and the two stop overlapping at all.
+        runMoneyPrompts();
     } catch (e) { /* never let this break a page */ }
 });
 
-function _openBucketPromptIfDue() {
+/* The two money prompts, in order: entries, then the balance.
+
+   Entries no longer wait for the evening notification. They became due at
+   midnight in the user's own timezone and the server has been listing them
+   since - /api/buckets/pending is bounded by the user's calendar date, not
+   the server's - so the notification was only ever deciding when to SHOW what
+   was already there. A day's entries now appear the day they arrive, and the
+   notification goes back to being a reminder rather than a gate.
+
+   `prompted` and `overdue` are still returned by that endpoint and are no
+   longer read here. They are what the old gate was built from: today's
+   entries hidden until 20:00, with anything already late shown in the nav so
+   the count did not vanish at midnight and reappear in the evening. With
+   nothing hidden there is no distinction left to draw. */
+function runMoneyPrompts() {
     try {
-        fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
+        return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
-                if (!d || !d.success || !d.total) { setBucketLauncher(0); return; }
+                var total = (d && d.success) ? d.total : 0;
 
-                // Today's entries wait for tonight's notification: they are
-                // due but the user has not been told, and asking at 00:01 is
-                // asking about a day that has barely started.
-                //
-                // Anything already late is different. It was asked about on the
-                // day it fell due and never answered, so it stays in the nav
-                // until it is dealt with. Hiding it again each midnight made the
-                // count vanish overnight and come back at 20:00, which reads as
-                // the app having forgotten.
-                if (!d.prompted) { setBucketLauncher(d.overdue || 0); return; }
-
-                var last = parseInt(localStorage.getItem(BUCKET_LAST_KEY) || "0", 10);
-                var away = !last || (Date.now() - last) > BUCKET_IDLE_MS;
-
-                if (away) {
-                    localStorage.setItem(BUCKET_LAST_KEY, String(Date.now()));
-                    openBucketPrompt();
-                } else {
-                    // Seen recently - stay out of the way, but keep the count
-                    // visible so it is one click away.
-                    setBucketLauncher(d.total);
+                if (!total) {
+                    // Nothing to confirm, so the balance has the slot.
+                    setBucketLauncher(0);
+                    return openBalanceStep();
                 }
+                if (bucketSeenThisVisit()) {
+                    // Put aside already. The count stays in the nav, one click
+                    // away, and nothing takes over the screen again until the
+                    // next visit.
+                    setBucketLauncher(total);
+                    setBalanceLauncher(false);
+                    return null;
+                }
+
+                // The bubble is deliberately NOT revealed first. The opening
+                // sequence grows the dialog out of the launcher, and
+                // bounceBucketLauncherOut returns 0 when there is no launcher
+                // on screen to bounce - which is how a prompt that opens by
+                // itself skips the handover and simply appears.
+                //
+                // Showing the count before opening made every page load play
+                // the launched-from-the-corner animation: the dialog painted
+                // full size, snapped into a corner it had never come from,
+                // waited for a bubble to finish bouncing, and grew back. The
+                // count is set by openBucketPrompt when the dialog closes,
+                // which is the point at which there is something to count.
+                markBucketSeen();
+                return openBucketPrompt().then(function (left) {
+                    // Cleared them all in one go: the balance follows
+                    // immediately, which is the whole shape of this - one
+                    // question after the other, not two at once.
+                    if (!left) { return openBalanceStep(); }
+                    setBalanceLauncher(false);
+                    return null;
+                });
             })
             .catch(function () { /* no prompt, no error */ });
     } catch (e) { /* never let this break a page */ }
+}
+
+/* The balance, asked for straight after the entries, and the nav left showing
+   whether it is still owed.
+
+   Clearing the last entry RAISES one rather than merely revealing one that
+   the cadence had already raised. Having just said what did and did not
+   happen, the bank's own figure is the next question, and waiting for a date
+   to come round to ask it means asking when nothing is fresh.
+
+   The raise is the server's to record, not this function's to assume: it
+   answers whether anything is actually pending afterwards, which is false for
+   a user who has the feature off or whose balances are all covered by a bank
+   feed. Nothing is shown to them, and the nav stays empty.
+
+   Beyond that, this decides nothing. "Not now" is a dialog that closed with
+   pending_date standing, and the icon it leaves behind is that state made
+   visible - apply() is still the only thing that clears it. */
+/* Wait for the shared dialog to be off screen, then leave a beat.
+
+   Both prompts are built into the one #generic-confirm-modal. showConfirmModal
+   resolves the moment it drops modal--open, and the element itself stays in
+   the document to be reused - so building the next dialog straight from that
+   promise rewrites the title, the body and the box size inside a node that is
+   still the one just closed. Nothing is ever hidden between them, and what
+   you see is not one dialog replacing another but a single dialog flickering
+   into a different shape.
+
+   The wait is for the class, which is what actually decides display; the beat
+   afterwards is what makes the handover legible. Capped, because a dialog
+   that never closes must not mean a balance prompt that never opens. */
+function _dialogSettled() {
+    return new Promise(function (resolve) {
+        var m = document.getElementById("generic-confirm-modal");
+        if (!m) { setTimeout(resolve, 220); return; }
+
+        // Put away deliberately rather than waited out. Dropping modal--open
+        // is what closing does, and measuring the element afterwards it was
+        // still painted - so waiting for it to disappear on its own meant
+        // waiting while the old dialog sat frozen on screen, which is worse
+        // than the swap it was meant to soften.
+        //
+        // Inline, because inline beats whatever left it visible, and cleared
+        // again below: modal--open sets display through a class, and an inline
+        // display:none left behind would stop the next dialog opening at all.
+        m.classList.remove("modal--open");
+        m.style.display = "none";
+        setTimeout(function () {
+            m.style.display = "";
+            resolve();
+        }, 220);
+    });
+}
+
+function openBalanceStep() {
+    return fetch("/api/autobalance/raise", { method: "POST" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+        .then(function (d) {
+            // A raise that could not happen is not a reason to skip the
+            // prompt: one may already be pending from the cadence, and
+            // showAutoBalancePrompt asks the server either way.
+            if (d && d.success && !d.pending) {
+                return syncMoneyLaunchers();
+            }
+            return _dialogSettled()
+                .then(function () { return showAutoBalancePrompt(); })
+                .then(function () { return syncMoneyLaunchers(); });
+        });
 }
 
 

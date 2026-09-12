@@ -45,6 +45,18 @@
                 <span class="bucket-launcher-count"></span>
             </button>
 
+            <!-- The balance prompt, in the same slot and never at the same
+                 time: entries are answered first, and this takes their place
+                 once the last one is dealt with. It stays until a balance is
+                 actually completed - saying "not now" closes the dialog and
+                 leaves this behind, which is the whole point of it being here
+                 rather than only arriving with a notification. -->
+            <button type="button" class="bucket-launcher bucket-prompt-hidden"
+                    id="balance-launcher" title="Check your balance"
+                    aria-label="A balance is waiting to be checked">
+                <i class="fa-solid fa-scale-balanced"></i>
+            </button>
+
             <!-- Support icon -->
             <a href="{{ url_for('support_page') }}" class="nav-faq" title="Support">
                 <i class="fa-solid fa-headset"></i>
@@ -168,6 +180,13 @@
         const profile = document.querySelector('.sidenav-profile');
         const dropdown = document.getElementById('profileDropdown');
 
+        // The two panels in the top bar are siblings, and only one of them
+        // should ever be up. Each one's toggle calls stopPropagation - it has
+        // to, or the window handler below would close the thing that had just
+        // been opened - and that is exactly why neither could see the other's
+        // click. This is the handle they close each other by.
+        var closeProfileDropdown = function () {};
+
         if (profile && dropdown) {
             // The dropdown grows taller to open and shortens to close. height
             // cannot animate to auto, so each direction sets a pixel height to
@@ -236,9 +255,17 @@
             }
 
             // Toggle the dropdown menu on profile click
+            closeProfileDropdown = function () { setDropdown(false); };
+
             profile.addEventListener('click', function(event) {
                 event.stopPropagation();
-                setDropdown(!dropdownOpen);
+                var opening = !dropdownOpen;
+                // Resolved at click time, not now: blankeeSideMenu is defined
+                // further down this same handler.
+                if (opening && window.blankeeSideMenu) {
+                    window.blankeeSideMenu.close();
+                }
+                setDropdown(opening);
             });
 
             // Prevent dropdown from closing when clicking inside it
@@ -277,7 +304,9 @@
 
             sideMenuToggle.addEventListener('click', function (event) {
                 event.stopPropagation();
-                setMenu(!sideMenu.classList.contains('open'));
+                var opening = !sideMenu.classList.contains('open');
+                if (opening) { closeProfileDropdown(); }
+                setMenu(opening);
             });
             sideMenuBackdrop.addEventListener('click', function () { setMenu(false); });
             document.addEventListener('keydown', function (event) {

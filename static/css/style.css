@@ -18625,7 +18625,18 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
    duration, the easing, how small it gets - is here. The 420ms matches
    BUCKET_MINIMISE_MS in script.js; change one and change the other, or the
    bubble pops before the dialog has finished arriving. */
+/* No shared grow-in. This dialog animates its own entry - it comes out of the
+   corner bubble over 420ms - and the two cannot both run.
+
+   A CSS animation beats a transform for as long as it plays, so modal-grow-in
+   simply won: the dialog faded in at FULL SIZE for its 160ms, then snapped to
+   the corner the instant the animation ended, and only then grew out of it.
+   On, off, then the animation - which is exactly how it looked.
+
+   Only the content. The sheet keeps modal-sheet-in, because the backdrop
+   fading up behind is right either way and nothing here is fighting it. */
 .bucket-prompt-modal .modal-content {
+    animation: none;
     transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1),
                 opacity 420ms cubic-bezier(0.4, 0, 0.2, 1);
 }
