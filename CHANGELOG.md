@@ -8,6 +8,19 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.34.1 — 2026-09-12
+
+### Fixed
+- **A balance you have completed now stays completed.** Since 1.34.0 the
+  prompt came back on the very next page you opened: completing a balance
+  clears it, but simply arriving somewhere with nothing waiting to be
+  confirmed raised a fresh one, so the icon never went away. Asking for a
+  balance and showing one are now separate things — a page load only shows
+  one that is already waiting, and a new one is raised only when the last
+  entry to confirm is actually answered, or when your cadence comes round.
+- **The balance icon goes the moment the balance lands**, rather than on the
+  next thing that happened to refresh the nav.
+
 ## 1.34.0 — 2026-09-12
 
 ### Changed
