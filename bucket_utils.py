@@ -387,6 +387,33 @@ def find_next_bucket_for_category(table, category_id, user_id, wage_bill=None):
         chosen = min(upcoming, key=lambda p: p[0]) if upcoming else None
         which = 'upcoming'
 
+        # ...but only while that bucket really is this period's. A depleted
+        # bucket is DELETED, so once today's is gone the earliest one forward
+        # is the NEXT period's, and this quietly promoted it: spending past
+        # this week's allowance went on to eat next week's, then the week
+        # after. Nothing was spent in those weeks, so their forecast shrank
+        # for no reason, and the overspend that caused it disappeared from
+        # the week it belonged to.
+        #
+        # One period's width is the distance between consecutive bucket dates,
+        # which the series already carries - the same reasoning the wage/bill
+        # branch above uses, and the reason neither consults the cadence. A
+        # bucket a full period or more away is therefore not this period's,
+        # and there is nothing here left to deplete: the caller falls through
+        # to the bucket RECORD, which is where overspending is recorded and
+        # is allowed to go negative.
+        if chosen is not None and len(candidates) > 1:
+            dates = sorted(set(p[0] for p in candidates))
+            gaps = [(b - a).days for a, b in zip(dates, dates[1:]) if b > a]
+            period = min(gaps) if gaps else None
+            if period and (chosen[0] - today).days >= period:
+                log_info(logger, 'FIND_NEXT_BUCKET',
+                         f"Earliest live bucket {chosen[0]} is {(chosen[0] - today).days} "
+                         f"days out and a period is {period} - this period's bucket is "
+                         f"already spent, so nothing here is depleted")
+                chosen = None
+                which = 'upcoming (this period already spent)'
+
     if chosen is None:
         log_info(logger, 'FIND_NEXT_BUCKET',
                  f"No bucket via {which} for category {category_id}")
@@ -870,7 +897,10 @@ def subtract_from_bucket(table, bucket_id, subtract_amount, user_id):
         if new_amount <= 0:
             # Bucket is depleted, delete it from Redis
             category_id = bucket_entry.get('category_id')
-            bucket_date = bucket_entry.get('date')
+            # The period it was for, so a deferred bucket is announced as the
+            # occurrence it belongs to rather than the day it drifted to.
+            bucket_date = (bucket_entry.get('original_date')
+                           or bucket_entry.get('date'))
             original_amount = bucket_entry.get('original_amount', current_amount)
             recurring_id = bucket_entry.get('recurring_id')
             
@@ -1214,7 +1244,24 @@ def _get_wage_bill_for_category(entry_table, category_id, user_id):
                     return int(rec.get('wage_bill', 0))
     except Exception:
         pass
-    return 0
+
+    # No recurring template at all. Whatever buckets this category has were
+    # typed by hand for a date - one planned purchase, not a sum allotted for
+    # a period - and that is a bill in every way that matters here: settled in
+    # one go rather than whittled down, reached backwards from the day it came
+    # due rather than forwards, and answerable with "not yet".
+    #
+    # Answering 0 made them allowances by default, which is the same mistake
+    # the bundle and interest guards at the top of this function exist to
+    # correct. They are the same case; this is the general form of it.
+    return 1
+
+
+# date.weekday() numbering: Monday is 0, Sunday is 6.
+WEEKDAY_NUMBERS = {
+    'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+    'friday': 4, 'saturday': 5, 'sunday': 6,
+}
 
 
 def _find_bucket_date_for_entry(entry_date, cadence_info):
@@ -1263,7 +1310,22 @@ def _find_bucket_date_for_entry(entry_date, cadence_info):
         # For weekly, look back up to 7 days for the most recent bucket date
         weekdays = cadence_info.get('weekdays')
         if weekdays:
-            weekday_list = [int(d.strip()) for d in str(weekdays).split(',')]
+            # Stored as lowercase NAMES - 'friday', or 'monday,friday' - which
+            # is what the recurring forms post and what the generators read.
+            # Parsed here as integers, this raised ValueError on every weekly
+            # category, and the caller swallowed it: the record for the
+            # entry's own period was never found, so the overspend it was
+            # supposed to carry went nowhere. Numbers are still accepted, since
+            # nothing guarantees which a caller holds.
+            weekday_list = []
+            for part in str(weekdays).split(','):
+                part = part.strip().lower()
+                if not part:
+                    continue
+                if part.isdigit():
+                    weekday_list.append(int(part))
+                elif part in WEEKDAY_NUMBERS:
+                    weekday_list.append(WEEKDAY_NUMBERS[part])
             for days_back in range(7):
                 check_date = entry_date - timedelta(days=days_back)
                 if check_date.weekday() in weekday_list:
@@ -1345,9 +1407,14 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
         # First subtract from the bucket RECORD (tracks overspending)
         from recurring_bucket_manager import subtract_from_bucket_record_by_category_date, get_bucket_table_for_entry_table, get_bucket_record_by_category_date
         bucket_table = get_bucket_table_for_entry_table(table)
-        bucket_date = bucket.get('date')
+        # The PERIOD this bucket is for, not where it currently sits. A
+        # deferred bucket has been moved; its record has not, because the
+        # record says which occurrence the money was planned for. Keyed on the
+        # entry's own date, a deferred bucket looks for a record on a day no
+        # period began and reduces nothing.
+        bucket_date = bucket.get('original_date') or bucket.get('date')
         if isinstance(bucket_date, str):
-            bucket_date = date_type.fromisoformat(bucket_date)
+            bucket_date = date_type.fromisoformat(bucket_date[:10])
         
         # Get current bucket record amount BEFORE subtraction
         bucket_record_before = None
@@ -1419,7 +1486,16 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
                 
                 if bucket_date_for_record:
                     record = get_bucket_record_by_category_date(bucket_table, category_id, bucket_date_for_record, user_id)
-                    if record and float(record.get('amount', 0)) > 0:
+                    # An allowance record that has already gone negative still
+                    # takes the next overspend. It is the running total of what
+                    # this period cost against what it was given, and stopping
+                    # at zero would drop every pound past the first one that
+                    # broke the budget - which is exactly the spending somebody
+                    # most wants to see. A wage/bill record at or below zero is
+                    # different: it is settled, and subtracting its remaining
+                    # amount again would double-count the bill.
+                    already_spent = record is not None and float(record.get('amount', 0)) <= 0
+                    if record is not None and not (wage_bill and already_spent):
                         if wage_bill:
                             subtract_amount = Decimal(str(record.get('amount', 0)))
                         else:
@@ -1427,7 +1503,7 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
                         log_info(logger, 'BUCKET_DEBUG', f"Found bucket record at {bucket_date_for_record}, reducing by {subtract_amount} (wage_bill={wage_bill})")
                         subtract_from_bucket_record_by_category_date(bucket_table, category_id, bucket_date_for_record, float(subtract_amount), user_id)
                     else:
-                        log_info(logger, 'BUCKET_DEBUG', f"No bucket record found at {bucket_date_for_record} or already at 0")
+                        log_info(logger, 'BUCKET_DEBUG', f"No bucket record at {bucket_date_for_record}, or it is a settled wage/bill")
                 else:
                     log_info(logger, 'BUCKET_DEBUG', f"Could not determine bucket_date for entry_date={entry_date}")
         except Exception as record_err:
@@ -1569,9 +1645,14 @@ def restore_bucket_for_deleted_entry_v2(table, category_id, deleted_entry_amount
     
     if bucket:
         bucket_id = bucket.get('id')
-        bucket_date = bucket.get('date')
+        # The PERIOD this bucket is for, not where it currently sits. A
+        # deferred bucket has been moved; its record has not, because the
+        # record says which occurrence the money was planned for. Keyed on the
+        # entry's own date, a deferred bucket looks for a record on a day no
+        # period began and reduces nothing.
+        bucket_date = bucket.get('original_date') or bucket.get('date')
         if isinstance(bucket_date, str):
-            bucket_date = date_type.fromisoformat(bucket_date)
+            bucket_date = date_type.fromisoformat(bucket_date[:10])
         
         log_info(logger, 'RESTORE_BUCKET_V2', f"No depleted records. Found undepleted bucket entry: id={bucket_id}, date={bucket_date}")
         
@@ -1870,9 +1951,12 @@ def restore_bucket_for_deleted_entry(table, category_id, deleted_entry_date, del
             log_info(logger, 'RESTORE_BUCKET', f"No bucket (active or deleted) found for entry date {deleted_entry_date}")
             return False
     
-    bucket_date = bucket['date']
+    # The period, not the day the bucket sits on - a deferred bucket has moved
+    # and its record has not. The restores below put money back into a record,
+    # so keyed on the moved date they would find none.
+    bucket_date = bucket.get('original_date') or bucket['date']
     if isinstance(bucket_date, str):
-        bucket_date = date_type.fromisoformat(bucket_date)
+        bucket_date = date_type.fromisoformat(bucket_date[:10])
     
     # Calculate the cadence period for this bucket
     cadence_unit = cadence_info.get('cadence_unit')

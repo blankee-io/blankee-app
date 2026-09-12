@@ -664,7 +664,9 @@ body {
     /* visual */
     background-color: var(--primary);
     box-shadow: 0 10px 40px var(--shadow-lg);
-    font-size: 13px;
+    /* One size for everything in the side menu: the rows, their icons
+       and the section labels all inherit it. */
+    font-size: 15px;
     transform: translateX(-100%);
     transition: transform 0.25s ease;
     backdrop-filter: blur(20px);
@@ -1049,7 +1051,9 @@ body {
     width: 100%;
     padding-left: 10px;
     color: white;
-    font-size: 13px;
+    /* Two under the name, as it was two under it at 13/15 - the gap is what
+       makes it read as a subtitle rather than a second line of the name. */
+    font-size: 15px;
     text-align: left;
     word-break: break-all;
 }
@@ -1061,7 +1065,7 @@ body {
     width: 100%;
     padding-left: 10px;
     color: white;
-    font-size: 15px;
+    font-size: 17px;
     font-weight: 600;
     text-align: left;
     word-break: break-all;
@@ -1117,7 +1121,9 @@ body {
     background-color: var(--primary);
     border-radius: 12px;
     box-shadow: 0 10px 40px var(--shadow-lg);
-    font-size: 13px;
+    /* One size for everything in the profile dropdown: the rows, their icons
+       and the section labels all inherit it. */
+    font-size: 15px;
     cursor: default;
     backdrop-filter: blur(20px);
     backdrop-filter: blur(20px);
@@ -7007,7 +7013,11 @@ td:has(.bucket-progress-container) {
 .today-floating-banner {
     position: sticky;
     top: 120px; /* 70px nav + 50px extra */
-    z-index: 999;
+    /* Under the menu and its backdrop, which are 200 and 199. At 999 this rode
+       over both: the panel slid out and the banner stayed on top of it, which
+       reads as the menu having opened behind the page. Above the nav bar at
+       100 still, because it has to clear that while scrolling. */
+    z-index: 150;
     display: none;
     align-items: center;
     gap: 6px;
