@@ -476,6 +476,37 @@ def claim_due(user_id, local_date):
     return won
 
 
+def raise_now(user_id):
+    """Mark a balance as waiting, outside the cadence.
+
+    Raised when the last entry waiting to be confirmed is dealt with: having
+    just said what did and did not happen, the natural next question is what
+    the bank actually says, and asking it then is asking it while the answer
+    is still in mind.
+
+    next_due is deliberately untouched. The cadence is a floor - the longest
+    the user is willing to go without being asked - and this is a prompt on
+    top of it, not a replacement for it. Advancing it here would let a busy
+    week of confirmations push the scheduled prompt indefinitely into the
+    future, which is the opposite of what a cadence is for.
+
+    Does nothing when one is already waiting, so a second call does not move
+    the date of a prompt the user has already been shown and set aside.
+    """
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            cursor.execute(
+                "UPDATE autobalance_settings "
+                "   SET pending_date = %s "
+                " WHERE user_id = %s AND enabled = 1 AND pending_date IS NULL",
+                (_user_today(user_id).isoformat(), user_id))
+            return cursor.rowcount == 1
+    except Exception as e:
+        log_exception(logger, 'AUTOBALANCE',
+                      f"Could not raise a balance for user {user_id}: {e}")
+        return False
+
+
 def clear_pending(user_id):
     """Nothing is waiting any more - the user balanced, or skipped."""
     try:
