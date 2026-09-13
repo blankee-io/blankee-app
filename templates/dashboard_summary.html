@@ -1309,7 +1309,7 @@
             const categoryName = document.createElement('div');
             categoryName.className = 'summary-category-name';
             if (accountName) {
-                categoryName.innerHTML = `<span class="account-label">${accountName}</span> ${category.name}`;
+                categoryName.innerHTML = `<span class="account-label">${escapeHtml(accountName)}</span> ${escapeHtml(category.name)}`;
             } else {
                 categoryName.textContent = category.name;
             }

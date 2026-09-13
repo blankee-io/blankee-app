@@ -7307,6 +7307,8 @@ td:has(.bucket-progress-container) {
     padding: 20px 5px;
     overflow-y: auto;
     background: var(--shadow-xxl);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }
 
 .center-modal-content {
@@ -7338,6 +7340,15 @@ td:has(.bucket-progress-container) {
     display: flex;
     gap: 10px;
     margin-top: 10px;
+}
+
+.upload-limit-note {
+    margin: 10px 0 0;
+}
+
+.upload-limit-note.is-over {
+    color: var(--danger, #c0392b);
+    font-weight: 600;
 }
 
 .cancel-upload-button,
@@ -16536,7 +16547,10 @@ tr[data-collapsed] {
     top: 20px;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 10000;
+    /* Above every overlay, the profile-picture one included (10000): a toast
+       raised from inside a modal - "choose a file first" - has to be readable
+       over the blur, not under it. */
+    z-index: 10010;
     display: flex;
     flex-direction: column;
     align-items: center;

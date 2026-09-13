@@ -657,6 +657,9 @@ install_apache_conf() {
     # per asset rather than a re-download.
     <IfModule mod_headers.c>
         Header set Cache-Control "no-cache"
+        # Apache serves these itself, so the application's own header hook
+        # never sees them; say it here too.
+        Header set X-Content-Type-Options "nosniff"
     </IfModule>
 </Directory>
 EOF

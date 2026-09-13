@@ -77,6 +77,7 @@
                                                 <button type="button" class="cancel-upload-button" onclick="toggleUploadPrompt()">Cancel</button>
                                                 <button type="submit" class="upload-button">Upload</button>
                                             </div>
+                                            <p class="format-hint upload-limit-note" id="upload-limit-note">Maximum file size: 10 MB</p>
                                         </form>
                                     </div>
                                 </div>
@@ -917,6 +918,21 @@
             if (fileInput && canvas) {
                 fileInput.addEventListener('change', function(event) {
                     const file = event.target.files[0];
+                    // Same limit the server enforces (MAX_CONTENT_LENGTH); said
+                    // here so the answer is immediate rather than a 413 later.
+                    const limitNote = document.getElementById('upload-limit-note');
+                    if (file && file.size > 10 * 1024 * 1024) {
+                        if (limitNote) {
+                            limitNote.textContent = 'That file is larger than 10 MB. Choose a smaller one.';
+                            limitNote.classList.add('is-over');
+                        }
+                        event.target.value = '';
+                        return;
+                    }
+                    if (limitNote) {
+                        limitNote.textContent = 'Maximum file size: 10 MB';
+                        limitNote.classList.remove('is-over');
+                    }
                     if (file && file.type.startsWith('image/')) {
                         const reader = new FileReader();
                         reader.onload = function(e) {
@@ -1049,6 +1065,18 @@
             }
         });
 
+        // Like every other modal: a click on the backdrop or Escape closes it.
+        document.addEventListener('DOMContentLoaded', function () {
+            const overlay = document.getElementById('uploadModalOverlay');
+            if (!overlay) return;
+            overlay.addEventListener('click', function (e) {
+                if (e.target === overlay) toggleUploadPrompt();
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && overlay.style.display === 'flex') toggleUploadPrompt();
+            });
+        });
+
         function toggleUploadPrompt() {
             const overlay = document.getElementById('uploadModalOverlay');
             const cropContainer = document.getElementById('image-crop-container');
@@ -1080,14 +1108,6 @@
             const overlay = document.getElementById('uploadModalOverlay');
             const modalContent = document.getElementById('uploadPrompt');
 
-            // Prevent closing modal on clicking outside
-            if (overlay && modalContent) {
-                overlay.addEventListener('click', function(e) {
-                    // Do nothing - modal can only be closed with Cancel or Done button
-                    e.stopPropagation();
-                });
-            }
-
             // Handle form submission to send cropped image
             const uploadForm = document.getElementById('profile-upload-form');
             if (uploadForm) {
@@ -1096,12 +1116,10 @@
                     
                     // Check if an image has been selected
                     if (!cropperState.image) {
-                        // Show error message using settings bubble pattern
-                        const errorMsg = $('<div style="position: fixed; bottom: 20px; right: 20px; background-color: #dc3545; color: white; padding: 15px; border-radius: 5px; z-index: 9999;">Please add image</div>');
-                        $('body').append(errorMsg);
-                        setTimeout(function() {
-                            errorMsg.fadeOut(300, function() { $(this).remove(); });
-                        }, 3000);
+                        // The shared toast, not a hand-made div: the modal's
+                        // backdrop sits at z-index 10000 and the old div at
+                        // 9999 appeared underneath the blur.
+                        showToast('Please add an image first.', 'error');
                         return;
                     }
                     
