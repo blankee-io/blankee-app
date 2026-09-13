@@ -8,6 +8,59 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.39.0 — 2026-09-13
+
+A hardening pass over the application itself, following the one over the
+updater. Nothing here changes what the app does for a signed-in person; it
+changes what a stranger, a guesser, or a second user can do to them.
+
+### Security
+- **Profile pictures are named by user, not by the uploaded file.** They all
+  lived in one folder under the uploader's filename - and the page uploads
+  every crop as `profile_picture.png`, so every user's picture was the same
+  file, and any user could replace anyone's. Now `u<id>-<random>.<ext>`.
+- **Sign-in is throttled.** Five failed attempts in a minute - counted per
+  address and per account name, and the minute restarts with every failure -
+  and the next attempt is refused with "Too many attempts". Successful
+  sign-ins are never slowed. The same applies to the MFA code.
+- **Security response headers.** Every response now carries
+  `X-Frame-Options: SAMEORIGIN` (no framing by other sites),
+  `X-Content-Type-Options: nosniff` and `Referrer-Policy`. Files Apache serves
+  directly get `nosniff` from the vhost directives.
+- **Errors no longer quote the exception.** Thirty-one JSON error responses
+  returned `str(e)` - database errors naming tables and columns, filesystem
+  errors naming paths. They now say something went wrong and log the detail.
+- **A 10 MB request limit.** The only upload is a profile picture; anything
+  larger is refused with a clear message, both by the page before it sends and
+  by the server if it arrives anyway. The limit is shown under the upload
+  buttons.
+- **Names are escaped where they are rendered.** A notification's text, the
+  ordinal-day filter, and eight places that built HTML from category or
+  account names now escape them.
+- **The health endpoints answer only from the machine itself.** They report
+  connection-pool and Redis internals and exist for the container health
+  check and an operator's curl. From anywhere else they are a 404. A dead
+  placeholder route (`/fetch-latest-data`) is gone.
+- **`python app.py` no longer starts the debugger on every interface.** That
+  path is never used by Apache or gunicorn, but it bound to 0.0.0.0 with the
+  Werkzeug debugger on, which executes code from the browser. It now binds
+  to loopback with the debugger off unless `FLASK_DEBUG=1`.
+- **The Docker container runs the app as an unprivileged user.** The image
+  still starts as root - only to make the two volumes writable, because a
+  volume created by an older image is root-owned - then drops to `blankee`
+  for the migrations and the server.
+
+### Changed
+- The profile-picture dialog looks and behaves like the other modals: blurred
+  backdrop, and a click outside it or Escape closes it.
+
+### Notes
+- Anything that polled `/health/redis` or `/health/db-pool` from another
+  machine will get a 404 now; poll from the box, or through a check that runs
+  on it.
+- Cross-site request forgery tokens are the one item from the review still
+  open; they touch every form and fetch call and get their own release.
+
 ## 1.38.2 — 2026-09-13
 
 ### Fixed

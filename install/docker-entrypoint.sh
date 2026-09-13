@@ -43,10 +43,36 @@ until MYSQL_PWD="$DB_PASSWORD" mysql --no-defaults -h "$DB_HOST" -u "$DB_USER" \
 done
 say "MySQL is reachable."
 
+# --------------------------------------------------------------- privileges
+# Run as the unprivileged user from here on. The container starts as root for
+# one reason: a named volume created by an older image is root-owned, and the
+# server has to be able to write profile pictures and blankee.conf. So root
+# re-owns those two mounts, then everything else - the migrations and the
+# server itself - runs as blankee. setpriv is util-linux, in the base image;
+# if the image were ever built without the user this degrades to what it did
+# before rather than refusing to start.
+APP_USER=blankee
+drop_privs=0
+if [[ "$(id -u)" -eq 0 ]] && id "$APP_USER" >/dev/null 2>&1 && command -v setpriv >/dev/null; then
+  chown -R "$APP_USER:$APP_USER" /app/static/uploads /config 2>/dev/null || true
+  drop_privs=1
+  say "Running as $APP_USER."
+fi
+as_app() {
+  if [[ $drop_privs -eq 1 ]]; then
+    setpriv --reuid="$APP_USER" --regid="$APP_USER" --init-groups "$@"
+  else
+    "$@"
+  fi
+}
+
 # --------------------------------------------------------------- migrations
 say "Applying migrations..."
-python3 /app/install/migrate.py || die "Migrations failed."
+as_app python3 /app/install/migrate.py || die "Migrations failed."
 
 # --------------------------------------------------------------- go
 say "Starting: $*"
+if [[ $drop_privs -eq 1 ]]; then
+  exec setpriv --reuid="$APP_USER" --regid="$APP_USER" --init-groups "$@"
+fi
 exec "$@"
