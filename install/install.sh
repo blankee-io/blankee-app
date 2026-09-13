@@ -12,6 +12,7 @@
 #   sudo ./install/install.sh --permissions-only     # re-apply ownership and exit
 #   sudo ./install/install.sh --units-only           # reinstall the updater units
 #   sudo ./install/install.sh --apache-conf          # refresh app Apache directives
+#   sudo ./install/install.sh --helper NAME          # (internal) answer a helper request
 #
 # Re-running is safe. Anything already in place is left alone, and existing
 # secrets in the config file are never regenerated - doing so would invalidate
@@ -53,6 +54,18 @@ UPDATER_SERVICE="/etc/systemd/system/blankee-update.service"
 UPDATER_TIMER="/etc/systemd/system/blankee-update.timer"
 UPDATER_AUTO_SERVICE="/etc/systemd/system/blankee-update-auto.service"
 UPDATER_AUTO_TIMER="/etc/systemd/system/blankee-update-auto.timer"
+# The user the updater runs as. It owns the code, the virtualenv and the WSGI
+# file - the things nine of the updater's twelve steps write - and nothing
+# else. The web user is not it, and must never be: see apply_permissions.
+SERVICE_USER=blankee
+# Where a non-root updater leaves requests for the root helpers, and where the
+# helpers leave their answers. tmpfiles.d keeps it 0770 root:$SERVICE_USER.
+HELPER_DIR=/run/blankee-update
+HELPER_NAMES="permissions units apache"
+HELPER_ONLY=""
+# Root-owned server configuration: the flags that must not be settable by the
+# web process. Today that is the admin password reset. See server_config.py.
+ROOT_CONF="$SECURE_DIR/blankee.conf"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -63,6 +76,7 @@ while [[ $# -gt 0 ]]; do
     --units-only)       UNITS_ONLY=1; shift ;;
     --apache-conf)      APACHE_CONF_ONLY=1; shift ;;
     --no-self-update)   SELF_UPDATE=0; shift ;;
+    --helper)           HELPER_ONLY="$2"; shift 2 ;;
     -h|--help)     sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
@@ -107,12 +121,142 @@ install_signers() {
     install -m 644 -o root -g root "$APP_DIR/install/allowed_signers" "$SIGNERS_FILE"
     info "release signing key pinned in $SIGNERS_FILE"
   fi
-  # Turn verification on. Safe from this release forward because every release
-  # from here is signed by the publish script, which refuses to push otherwise.
-  # To undo it on a machine that must update regardless, clear this one line.
-  set_conf_key UPDATE_VERIFY_SIGNERS "$SIGNERS_FILE"
+  # Nothing is written to blankee.conf. The updater used to read the key's
+  # PATH from UPDATE_VERIFY_SIGNERS there - a file the web user owns, so a
+  # compromised web process could blank the name or point it at a key of its
+  # own, and the pin above proved nothing. The path now comes from the unit's
+  # environment (BLANKEE_SIGNERS) and defaults to $SIGNERS_FILE; that key in
+  # blankee.conf is dead, and setting it does nothing.
+  #
+  # Called from --units-only as well as the full install, so an installation
+  # upgraded in place - which never had a key - gets one on its next update and
+  # verifies from the run after.
 }
 
+
+# The user the updater runs as. System account, no shell, home is the tree it
+# owns so git has somewhere to look for nothing. A member of www-data's group
+# ONLY so it can read blankee.conf (640 www-data:www-data, the request flag)
+# and traverse CONFIG_DIR (750 root:www-data); .env is 600 and stays out of
+# reach, which is the point of the split.
+install_service_user() {
+  if ! id "$SERVICE_USER" >/dev/null 2>&1; then
+    useradd --system --no-create-home --home-dir "$APP_DIR" \
+            --shell /usr/sbin/nologin "$SERVICE_USER"
+    info "created the $SERVICE_USER service user"
+  fi
+  if id www-data >/dev/null 2>&1 && ! id -nG "$SERVICE_USER" | tr ' ' '\n' | grep -qx www-data; then
+    usermod -a -G www-data "$SERVICE_USER"
+  fi
+}
+
+
+# The root-owned server configuration file. It holds the flags that must not be
+# settable by the web process - the admin password reset - and is created here,
+# as root, with everything off. server_config.py owns the template; calling it
+# rather than keeping a second copy in bash, for the same reason as blankee.conf
+# below. Never overwritten once it exists.
+install_root_conf() {
+  [[ -f "$ROOT_CONF" ]] && return 0
+  mkdir -p "$SECURE_DIR"
+  # server_config needs only the standard library, so the system python will
+  # do when the virtualenv is not there yet (a fresh install reaches here
+  # before creating it; a machine without one at all).
+  local py="$VENV_DIR/bin/python"
+  [[ -x "$py" ]] || py=python3
+  PYTHONPATH="$APP_DIR" BLANKEE_ROOT_CONFIG="$ROOT_CONF" \
+    "$py" -c 'import server_config; server_config.ensure_root_config_file()' \
+    && info "created $ROOT_CONF" || warn "could not create $ROOT_CONF"
+  if [[ -f "$ROOT_CONF" ]]; then
+    chown root:root "$ROOT_CONF"
+    chmod 644 "$ROOT_CONF"
+  fi
+}
+
+
+# Write a unit only when its content changed. Rendered to a sibling and
+# compared, so an update that touches no unit leaves /etc/systemd/system alone -
+# a release should not churn it silently, and daemon-reload should mean
+# something changed. Sets UNITS_CHANGED for the caller.
+UNITS_CHANGED=0
+write_if_changed() {
+  local target="$1" tmp="$1.new"
+  cat > "$tmp"
+  if [[ -f "$target" ]] && cmp -s "$tmp" "$target"; then
+    rm -f "$tmp"
+  else
+    mv -f "$tmp" "$target"
+    chmod 644 "$target"
+    UNITS_CHANGED=1
+  fi
+}
+
+# Everything the updater does not need, taken away. One block, expanded into
+# both main units, so the two cannot drift. Each line answers a line in
+# `systemd-analyze security blankee-update.service`, which read 9.6 (UNSAFE)
+# before any of this existed.
+#
+# ProtectSystem=strict makes the whole filesystem read-only except what is
+# listed; a listed path that does not exist yet (the request directory before
+# tmpfiles has run) must not stop the unit starting, hence the - prefixes.
+# ProtectHome=tmpfs shows an empty home rather than an inaccessible one, so git
+# finds no .gitconfig instead of warning that it may not look; it breaks pip's
+# cache under /root, so the cache is turned off instead, and it would break an
+# SSH origin (known_hosts) - the installer sets HTTPS. @system-service contains
+# @chown, which the permissions step needs. MemoryDenyWriteExecute is
+# deliberately absent: pip loads native extensions.
+#
+# This release keeps the main units running as root, with the capability set
+# cut to what the three system steps use; the next release moves them to
+# $SERVICE_USER with an empty set, once this one has created the user and
+# re-owned the tree - the old updater is what applies these files, so the user
+# has to exist one release before the unit that runs as it.
+read -r -d '' UPDATER_HARDENING <<HARD || true
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=-$APP_DIR -$CONFIG_DIR -$HELPER_DIR -/etc/systemd/system -/etc/cron.d -/etc/apache2 -/etc/blankee -/etc/tmpfiles.d -$LOG_DIR -/var/log/apache2 -/run/apache2 -/run/lock/apache2
+ProtectHome=tmpfs
+Environment=PIP_NO_CACHE_DIR=1
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_SETUID CAP_SETGID CAP_KILL
+HARD
+
+# What the helpers share. Same protections; ReadWritePaths is added per helper,
+# because the whole point of three of them is that each can write one place.
+read -r -d '' HELPER_HARDENING <<HARD || true
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+HARD
 
 install_updater_units() {
   # Writes and enables the systemd units. A function because the updater calls
@@ -120,7 +264,27 @@ install_updater_units() {
   # file, or adds one, would otherwise leave the new file sitting in the
   # repository with the old one still installed - which is exactly how 1.1.0
   # shipped an automatic-update toggle whose timer nobody had installed.
-  cat > "$UPDATER_SERVICE" <<EOF
+  # The port the site answers on locally, for the reload probe. Off the vhost
+  # this installer wrote, because on an update --port is not given and the
+  # updater, once it is not root, cannot read APP_URL out of .env.
+  local port="$HTTP_PORT"
+  if [[ -r "$VHOST" ]]; then
+    local from_vhost
+    from_vhost="$(grep -oE "^<VirtualHost \*:[0-9]+>" "$VHOST" | head -1 | grep -oE "[0-9]+")"
+    [[ "$from_vhost" =~ ^[0-9]+$ ]] && port="$from_vhost"
+  fi
+  local common_env="Environment=BLANKEE_APP_DIR=$APP_DIR
+Environment=BLANKEE_HTTP_PORT=$port
+Environment=BLANKEE_CONFIG_DIR=$CONFIG_DIR
+Environment=BLANKEE_CONFIG=$CONF_FILE
+Environment=BLANKEE_VENV=$VENV_DIR
+Environment=BLANKEE_WSGI=$WSGI_FILE
+Environment=BLANKEE_DB_CONF=$DB_CONF
+Environment=BLANKEE_SIGNERS=$SIGNERS_FILE
+Environment=BLANKEE_HELPER_DIR=$HELPER_DIR
+Environment=BLANKEE_APP_LOG=$LOG_DIR/blankee_error.log"
+
+  write_if_changed "$UPDATER_SERVICE" <<EOF
 [Unit]
 Description=Blankee self-update (applies a request from the admin console)
 Documentation=file://$APP_DIR/docs/RELEASING.md
@@ -129,24 +293,20 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Root deliberately: it replaces root-owned code, installs into a root-owned
-# virtualenv and reloads the web server. The web process gains nothing from
-# this - it can only set a flag in blankee.conf, which this reads and validates.
-#
 # /usr/bin/python3 rather than the virtualenv's python: the moment this most
 # needs to report clearly is when pip has just broken that virtualenv.
 #
 # ExecStart points at the copy in the repository on purpose. The script rewrites
 # that tree while running, which is safe because CPython compiles the whole file
 # before executing it - and it means there is no second copy to go stale.
+#
+# The web process gains nothing from this unit: it can only set a flag in
+# blankee.conf, which the script reads and validates. The signing key's path
+# comes from BLANKEE_SIGNERS below, never from that file.
 ExecStart=/usr/bin/python3 $APP_DIR/install/blankee_update.py
 ExecStopPost=/usr/bin/python3 $APP_DIR/install/blankee_update.py --mark-aborted
-Environment=BLANKEE_APP_DIR=$APP_DIR
-Environment=BLANKEE_CONFIG_DIR=$CONFIG_DIR
-Environment=BLANKEE_CONFIG=$CONF_FILE
-Environment=BLANKEE_VENV=$VENV_DIR
-Environment=BLANKEE_WSGI=$WSGI_FILE
-Environment=BLANKEE_DB_CONF=$DB_CONF
+$common_env
+$UPDATER_HARDENING
 UMask=0022
 TimeoutStartSec=1800
 Nice=10
@@ -155,7 +315,7 @@ StandardError=journal
 SyslogIdentifier=blankee-update
 EOF
 
-  cat > "$UPDATER_TIMER" <<EOF
+  write_if_changed "$UPDATER_TIMER" <<EOF
 [Unit]
 Description=Check for a Blankee update request every minute
 
@@ -176,7 +336,7 @@ Unit=blankee-update.service
 WantedBy=timers.target
 EOF
 
-  cat > "$UPDATER_AUTO_SERVICE" <<EOF
+  write_if_changed "$UPDATER_AUTO_SERVICE" <<EOF
 [Unit]
 Description=Blankee automatic update (daily, when AUTO_UPDATE is on)
 Documentation=file://$APP_DIR/docs/RELEASING.md
@@ -190,12 +350,8 @@ Type=oneshot
 # read from blankee.conf on every run - so turning it off takes effect at once.
 ExecStart=/usr/bin/python3 $APP_DIR/install/blankee_update.py --auto
 ExecStopPost=/usr/bin/python3 $APP_DIR/install/blankee_update.py --mark-aborted
-Environment=BLANKEE_APP_DIR=$APP_DIR
-Environment=BLANKEE_CONFIG_DIR=$CONFIG_DIR
-Environment=BLANKEE_CONFIG=$CONF_FILE
-Environment=BLANKEE_VENV=$VENV_DIR
-Environment=BLANKEE_WSGI=$WSGI_FILE
-Environment=BLANKEE_DB_CONF=$DB_CONF
+$common_env
+$UPDATER_HARDENING
 UMask=0022
 TimeoutStartSec=1800
 Nice=10
@@ -204,7 +360,7 @@ StandardError=journal
 SyslogIdentifier=blankee-update
 EOF
 
-  cat > "$UPDATER_AUTO_TIMER" <<EOF
+  write_if_changed "$UPDATER_AUTO_TIMER" <<EOF
 [Unit]
 Description=Apply Blankee updates nightly when AUTO_UPDATE is on
 
@@ -222,8 +378,94 @@ Unit=blankee-update-auto.service
 WantedBy=timers.target
 EOF
 
-  chmod 644 "$UPDATER_SERVICE" "$UPDATER_TIMER" "$UPDATER_AUTO_SERVICE" "$UPDATER_AUTO_TIMER"
-  systemctl daemon-reload
+  # The three root helpers. Each is a oneshot started by a .path unit the moment
+  # its request file appears, runs install.sh --helper NAME, and may write ONE
+  # place. Between them they are everything the updater still needs root for,
+  # and the reason the updater itself no longer needs to be root.
+  #
+  # PathExists rather than PathModified: the request is written atomically by
+  # rename, so there is no truncation to misfire on, and PathExists re-arms as
+  # long as the file is there - a request left behind by a crashed helper is
+  # picked up on the next daemon start rather than lost.
+  local name paths caps extra
+  for name in $HELPER_NAMES; do
+    extra=""
+    # Capabilities: root without CAP_DAC_OVERRIDE is bound by file modes like
+    # anyone else, which is the point - and why the units helper keeps it: it
+    # sets SELF_UPDATE in blankee.conf, a file the web user owns. The apache
+    # helper writes only root's own directories and needs none.
+    case "$name" in
+      permissions) paths="-$APP_DIR -$CONFIG_DIR -$LOG_DIR"
+                   caps="CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID" ;;
+      units)       paths="-/etc/systemd/system -/etc/cron.d -/etc/blankee -/etc/tmpfiles.d -$CONFIG_DIR"
+                   caps="CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID" ;;
+      # apache2ctl configtest is `apache2 -t`, and Apache opens its error logs
+      # and its listen sockets even for a test - read-only logs or AF_UNIX-only
+      # sockets fail it on a perfectly good configuration. (systemd merges
+      # repeated RestrictAddressFamilies= lines, so this adds to the block.)
+      apache)      paths="-/etc/apache2 -/var/log/apache2 -$LOG_DIR -/run/apache2 -/run/lock/apache2"
+                   caps=""
+                   extra="RestrictAddressFamilies=AF_INET AF_INET6" ;;
+    esac
+    write_if_changed "/etc/systemd/system/blankee-update-$name.path" <<EOF
+[Unit]
+Description=Watch for a Blankee $name request from the updater
+
+[Path]
+PathExists=$HELPER_DIR/$name.request
+Unit=blankee-update-$name.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    write_if_changed "/etc/systemd/system/blankee-update-$name.service" <<EOF
+[Unit]
+Description=Blankee update helper: $name (root, one directory writable)
+Documentation=file://$APP_DIR/docs/RELEASING.md
+
+[Service]
+Type=oneshot
+# Runs the checkout the updater has just verified, exactly as the updater
+# itself used to - but under ProtectSystem=strict with only what this step
+# writes made writable. Answers into $HELPER_DIR and never touches the tree
+# except where listed.
+ExecStart=/bin/bash $APP_DIR/install/install.sh --helper $name
+$common_env
+$HELPER_HARDENING
+ReadWritePaths=$paths -$HELPER_DIR
+CapabilityBoundingSet=$caps
+$extra
+UMask=0022
+TimeoutStartSec=600
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blankee-update-$name
+EOF
+  done
+
+  # The directory below is group $SERVICE_USER, so the user has to exist first.
+  # It does on every path that reaches here except an operator running
+  # --units-only on a machine that has never run --permissions-only.
+  id "$SERVICE_USER" >/dev/null 2>&1 || install_service_user
+
+  # The request directory, recreated on every boot. root:$SERVICE_USER, 770 so
+  # the updater can write requests and read results and nobody else can do
+  # either, and setgid so a result a capability-less root helper leaves there
+  # is born in the $SERVICE_USER group without a chown it could not perform.
+  mkdir -p /etc/tmpfiles.d
+  write_if_changed /etc/tmpfiles.d/blankee-update.conf <<EOF
+# Blankee: where the updater asks its root helpers for the three things it may
+# not do itself. Installed by install.sh.
+d $HELPER_DIR 2770 root $SERVICE_USER -
+EOF
+  systemd-tmpfiles --create /etc/tmpfiles.d/blankee-update.conf >/dev/null 2>&1 || true
+
+  if [[ $UNITS_CHANGED -eq 1 ]]; then
+    systemctl daemon-reload
+  fi
+  for name in $HELPER_NAMES; do
+    systemctl enable --now "blankee-update-$name.path" >/dev/null 2>&1 || true
+  done
   # The nightly timer is enabled either way; it does nothing at all unless
   # AUTO_UPDATE is on, and enabling it here means the toggle in the console
   # needs no privileged action to take effect.
@@ -287,22 +529,41 @@ migrate_old_logs() {
 }
 
 apply_permissions() {
-  # static/uploads (profile pictures) is the only path the application writes to,
-  # so the code stays owned by root and merely readable. Two reasons not to hand
-  # the whole tree to www-data: a web process able to rewrite its own source turns
-  # any code-execution bug into persistence, and a repository owned by www-data
-  # makes every later "git pull" as root fail with "detected dubious ownership".
+  # The code, the virtualenv and the WSGI file belong to the service user the
+  # updater runs as, and are merely readable by everyone else. What must NOT
+  # own them, or be able to write them, is the web user: a web process able to
+  # rewrite its own source turns any code-execution bug into persistence, and a
+  # repository owned by www-data makes git in it code execution for whoever runs
+  # it. static/uploads (profile pictures) is the only path the application
+  # writes to, and stays the web user's.
   #
   # A function because the self-updater calls it through --permissions-only after
-  # every checkout. git creates new files with root's umask, so on a host with a
-  # restrictive one every added file would be unreadable by www-data and the site
-  # would 500 the moment it reloaded. One copy of these rules, called from both
-  # places.
-  chown -R root:root "$APP_DIR"
+  # every checkout. git creates new files with the caller's umask, so on a host
+  # with a restrictive one every added file would be unreadable by www-data and
+  # the site would 500 the moment it reloaded. One copy of these rules, called
+  # from both places.
+  install_service_user
+  chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR"
   chmod -R a+rX "$APP_DIR"
   mkdir -p "$APP_DIR/static/uploads"
   chown -R www-data:www-data "$APP_DIR/static/uploads"
   chmod 775 "$APP_DIR/static/uploads"
+
+  # The virtualenv: pip writes it on an update. The config directory: the
+  # updater creates the status, available and lock files in it, so it owns the
+  # directory - while the group stays www-data at r-x, which is what the web
+  # tier needs to read them and exactly what it had. blankee.conf and .env stay
+  # www-data's; the updater reads the first (via the group) and never the second.
+  [[ -d "$VENV_DIR" ]] && chown -R "$SERVICE_USER:$SERVICE_USER" "$VENV_DIR"
+  if [[ -d "$CONFIG_DIR" ]]; then
+    chown "$SERVICE_USER:www-data" "$CONFIG_DIR"
+    chmod 750 "$CONFIG_DIR"
+    [[ -f "$WSGI_FILE" ]] && chown "$SERVICE_USER:www-data" "$WSGI_FILE" && chmod 640 "$WSGI_FILE"
+    local f
+    for f in update-status.json update-available.json .update.lock; do
+      [[ -e "$CONFIG_DIR/$f" ]] && chown "$SERVICE_USER:www-data" "$CONFIG_DIR/$f" || true
+    done
+  fi
 
   # Apache writes the live logs here as root and /admin/logs reads them as
   # www-data, so the group is www-data and the mode is 750: readable by the web
@@ -318,6 +579,14 @@ apply_permissions() {
   # read them. Blankee's own logs only - never a blanket pass over /var/log.
   find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -exec chgrp www-data {} + 2>/dev/null || true
   find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -exec chmod 640 {} + 2>/dev/null || true
+  # The updater appends its own lines to the live error log so an update shows
+  # up in /admin/logs. The directory stays root:www-data for Apache and the web
+  # tier; the service user gets in by ACL rather than by loosening the group.
+  # Best effort - without setfacl the updater still logs to the journal.
+  if command -v setfacl >/dev/null 2>&1; then
+    setfacl -m "u:$SERVICE_USER:rwx" "$LOG_DIR" 2>/dev/null || true
+    [[ -f "$LOG_DIR/blankee_error.log" ]] && setfacl -m "u:$SERVICE_USER:rw" "$LOG_DIR/blankee_error.log" 2>/dev/null || true
+  fi
 }
 
 # The self-updater calls this after every checkout. Kept as early as possible so
@@ -327,7 +596,8 @@ if [[ $PERMISSIONS_ONLY -eq 1 ]]; then
   [[ -f "$APP_DIR/app.py" ]] || die "Cannot find app.py - run this from inside the repository."
   say "Setting permissions"
   apply_permissions
-  info "code owned by root and readable; static/uploads writable by www-data"
+  install_root_conf
+  info "code owned by $SERVICE_USER and readable; static/uploads writable by www-data"
   exit 0
 fi
 
@@ -375,6 +645,71 @@ EOF
 }
 
 
+# What the three helper units run. The updater, when it is not root, writes
+# $HELPER_DIR/NAME.request holding one verb; the matching .path unit starts the
+# helper; this reads the verb, removes the request, does the one thing that
+# helper exists for, and leaves NAME.result: the exit code on the first line
+# and the output after it. Always exits 0 itself - the answer is in the file,
+# and a non-zero exit here would only make systemd mark a healthy unit failed.
+#
+# The verb is sanitised to letters before it is compared to anything, and the
+# request is deleted before any work so a crash cannot loop.
+if [[ -n "$HELPER_ONLY" ]]; then
+  [[ $EUID -eq 0 ]] || die "Run with sudo."
+  [[ -f "$APP_DIR/app.py" ]] || die "Cannot find app.py - run this from inside the repository."
+  case " $HELPER_NAMES " in *" $HELPER_ONLY "*) ;; *) die "unknown helper: $HELPER_ONLY" ;; esac
+  _req="$HELPER_DIR/$HELPER_ONLY.request"
+  _res="$HELPER_DIR/$HELPER_ONLY.result"
+  # Read, then delete, and let neither stop the other: a request this cannot
+  # read must still go, or the .path unit re-fires on it until systemd's start
+  # rate limit stops the helper for good.
+  _verb="$(head -c 64 "$_req" 2>/dev/null | head -1 | tr -cd 'a-z' || true)"
+  rm -f "$_req"
+  [[ -n "$_verb" ]] || _verb="run"
+  _out="$(mktemp)"
+  _rc=0
+  {
+    case "$HELPER_ONLY" in
+      permissions)
+        apply_permissions
+        install_root_conf
+        ;;
+      units)
+        if command -v systemctl >/dev/null; then
+          install_updater_units
+          install_log_rotation
+        fi
+        install_signers
+        install_root_conf
+        ;;
+      apache)
+        if command -v apache2ctl >/dev/null; then
+          if [[ "$_verb" == "restart" ]]; then
+            apache2ctl configtest && systemctl restart apache2
+          else
+            install_apache_conf
+            if apache2ctl configtest >/dev/null 2>&1; then
+              systemctl reload apache2 >/dev/null 2>&1 || systemctl restart apache2 >/dev/null 2>&1 || true
+            else
+              a2disconf blankee-app >/dev/null 2>&1 || true
+              rm -f "$APACHE_CONF"
+              echo "Apache rejected the new configuration; it has been removed and nothing changed."
+              false
+            fi
+          fi
+        fi
+        ;;
+    esac
+  } >"$_out" 2>&1 || _rc=$?
+  # The directory is setgid, so the group is already $SERVICE_USER; 660 is all
+  # that is needed for the updater to read it and remove it.
+  { printf '%s\n' "$_rc"; tail -c 16000 "$_out"; } > "$_res.new"
+  rm -f "$_out"
+  chmod 660 "$_res.new"
+  mv -f "$_res.new" "$_res"
+  exit 0
+fi
+
 # The self-updater calls this after every checkout, so a release that changes or
 # adds a unit file actually installs it. Kept beside --permissions-only for the
 # same reason: the installer owns these rules, and the updater should not carry
@@ -389,6 +724,10 @@ if [[ $UNITS_ONLY -eq 1 ]]; then
   say "Installing the updater units"
   install_updater_units
   install_log_rotation
+  # An installation upgraded in place never had a key pinned. Seeding it here
+  # is what turns "unverified once" into "verified from the next run on".
+  install_signers
+  install_root_conf
   exit 0
 fi
 
@@ -555,6 +894,7 @@ chmod 750 "$CONFIG_DIR"
 mkdir -p "$SECURE_DIR"
 chown root:root "$SECURE_DIR"
 chmod 755 "$SECURE_DIR"
+install_service_user
 
 if [[ -f "$ENV_FILE" ]]; then
   info "$ENV_FILE exists - keeping it, and every secret in it"
@@ -699,7 +1039,8 @@ DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" DB_NAME="$DB_NA
 # ---------------------------------------------------------------- permissions
 say "Setting permissions"
 apply_permissions
-info "code owned by root and readable; static/uploads writable by www-data"
+install_root_conf
+info "code owned by $SERVICE_USER and readable; static/uploads writable by www-data"
 
 # ---------------------------------------------------------------- self-updater
 say "Configuring the self-updater"

@@ -1404,10 +1404,11 @@ def reset_admin_password():
     Set the administrator password without a session or a mailbox.
 
     The authority here is the filesystem: this route only exists while
-    RESET_ADMIN_PASSWORD is on in the server config file, which only someone
-    with access to the machine can set. Anyone able to do that already controls
-    the deployment, so no further proof is asked for - and none would be
-    meaningful.
+    RESET_ADMIN_PASSWORD is set in /etc/blankee/blankee.conf, a ROOT-owned
+    file, which only someone with access to the machine can write. Anyone able
+    to do that already controls the deployment, so no further proof is asked
+    for - and none would be meaningful. (It used to be read from the file the
+    web server owns, which made that sentence untrue; see server_config.)
 
     404 when the flag is off, matching the other closed doors in this app: a 403
     would confirm the mechanism exists.
@@ -1417,7 +1418,7 @@ def reset_admin_password():
     happens.
     """
     from server_config import (admin_password_reset_enabled,
-                               consume_admin_password_reset, config_path, RESET_KEY)
+                               consume_admin_password_reset, root_config_path, RESET_KEY)
 
     if not admin_password_reset_enabled():
         return abort(404)
@@ -1476,7 +1477,7 @@ def reset_admin_password():
 
         log_warning(app.logger, 'AUTH',
                     f"Administrator password for {admin['username']} was reset via "
-                    f"{RESET_KEY} in {config_path()}")
+                    f"{RESET_KEY} in {root_config_path()}")
 
         ok, message = consume_admin_password_reset()
         if not ok:
