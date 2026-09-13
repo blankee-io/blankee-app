@@ -1,0 +1,57 @@
+{#
+  Cross-site request forgery token, one decision in one place.
+
+  Included from _fontawesome.html - the one include every page's <head> already
+  has - so that no page can forget it. The token lives in a <meta>, and the
+  script below makes every same-origin request that changes something carry
+  it: fetch() is wrapped, and jQuery's ajax gets a beforeSend hook, so none of
+  the ~200 call sites had to change. Plain <form method="POST"> elements carry
+  it as a hidden input instead, added in the template.
+
+  Anything that cannot send the header - the iOS widget and push registration,
+  which are native code, not this page - is exempted on the server, by name.
+#}
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<script>
+(function () {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    var token = meta && meta.getAttribute('content');
+    if (!token) return;
+    window.CSRF_TOKEN = token;
+
+    function sameOrigin(input) {
+        try {
+            var url = new URL(typeof input === 'string' ? input : input.url, window.location.href);
+            return url.origin === window.location.origin;
+        } catch (e) { return false; }
+    }
+
+    var nativeFetch = window.fetch;
+    if (nativeFetch) {
+        window.fetch = function (input, init) {
+            init = init || {};
+            var method = (init.method || (input && input.method) || 'GET').toUpperCase();
+            if (method !== 'GET' && method !== 'HEAD' && sameOrigin(input)) {
+                var headers = new Headers(init.headers || (input && input.headers) || {});
+                if (!headers.has('X-CSRFToken')) headers.set('X-CSRFToken', token);
+                init.headers = headers;
+            }
+            return nativeFetch.call(this, input, init);
+        };
+    }
+
+    // jQuery is loaded after this include, so hook it once the document is
+    // parsed; nothing sends ajax before then.
+    document.addEventListener('DOMContentLoaded', function () {
+        if (!window.jQuery) return;
+        window.jQuery.ajaxSetup({
+            beforeSend: function (xhr, settings) {
+                var method = (settings.type || settings.method || 'GET').toUpperCase();
+                if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' && !settings.crossDomain) {
+                    xhr.setRequestHeader('X-CSRFToken', token);
+                }
+            }
+        });
+    });
+})();
+</script>
