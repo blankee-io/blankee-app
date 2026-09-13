@@ -8,6 +8,21 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.36.0 — 2026-09-12
+
+### Fixed
+- **The back button no longer leaves a spinner over the page.** Clicking a link
+  raises the loading overlay, so the page enters the browser's back/forward
+  cache with it showing — and coming back restores the page exactly as it left,
+  without re-running anything that would have taken it down. The overlay is now
+  cleared when a page is restored from that cache.
+
+### Removed
+- **The Support page.** This also removes the FAQ, which lived on the same page,
+  and the in-app form for contacting support.
+- Two leftover debug lines that wrote to the browser console on the dashboards,
+  and the counters that existed only to feed them.
+
 ## 1.35.0 — 2026-09-12
 
 ### Changed

@@ -7957,11 +7957,9 @@
         function zebraStripeVisibleRows(tableBodySelector, oddClass, evenClass) {
             const allRows = Array.from(document.querySelectorAll(`${tableBodySelector} tr`));
             let idx = 0;
-            let groupResets = 0;
             allRows.forEach(row => {
                 if (row.classList.contains('sidebar-group-header') || row.classList.contains('group-header-row')) {
                     idx = 0;
-                    groupResets++;
                     return;
                 }
                 if (!row.hasAttribute('data-category-id')) return;
@@ -7970,7 +7968,6 @@
                 row.classList.add(idx % 2 === 0 ? evenClass : oddClass);
                 idx++;
             });
-            console.log(`[ZEBRA] selector=${tableBodySelector}, totalRows=${allRows.length}, groupResets=${groupResets}`);
         }
         
         function updateHiddenCountBubbles() {
