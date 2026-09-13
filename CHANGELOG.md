@@ -8,6 +8,43 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.38.0 — 2026-09-13
+
+The second of the two releases that take root away from the self-updater.
+1.37.0 created the `blankee` service user, re-owned the code to it and left the
+updater running as root inside a sandbox; this release switches the updater
+onto that user. From here on, root does exactly three things during an update -
+re-apply ownership, refresh the units, refresh the Apache directives - each in
+its own helper, each allowed to write one place.
+
+### Security
+- **The updater no longer runs as root.** `blankee-update.service` and the
+  nightly `blankee-update-auto.service` run as `blankee`, with an empty
+  capability set and only the code tree, the config directory, the request
+  directory and the log directory writable. The database credentials stay
+  root-only on disk; systemd hands the unit a private copy for the duration of
+  the run (`LoadCredential=`). `systemd-analyze security` on the unit is now
+  1.7, from 9.6 two releases ago. A compromised release, or a compromised
+  updater, can no longer touch anything the service user does not own.
+
+### Changed
+- **The live error log is group-writable (660).** The updater appends its
+  progress there so an update shows up in `/admin/logs`, and it can only do so
+  through the www-data group now. This grants the web tier nothing new: its
+  workers already hold a writable descriptor to that exact file - it is where
+  their stderr goes. Rotated copies stay 640.
+
+### Notes
+- This release must be applied *after* 1.37.0 - it is, automatically, by
+  1.37.0's updater. A machine still on 1.36.0 or earlier that is updated by
+  hand with `install.sh --units-only` from this release still works: the
+  installer creates the user before it writes a unit that runs as it.
+- To run the updater by hand, `sudo -u blankee /opt/blankee/install/blankee_update.py --dry-run`.
+  A root shell still works too, except that plain `git` in `/opt/blankee`
+  will refuse the tree ("dubious ownership"); use `sudo -u blankee git …`.
+- Rolling back past 1.37.0 is described in `docs/RELEASING.md` under "The
+  updater's privileges".
+
 ## 1.37.0 — 2026-09-12
 
 The first of two releases that take root away from the self-updater. This one
