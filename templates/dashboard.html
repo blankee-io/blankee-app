@@ -3853,16 +3853,11 @@
                 row.querySelectorAll('.current-week').forEach(cell => cell.classList.remove('current-week'));
 
                 // Highlight only the cell in this row with matching data-date
-                let matched = false;
                 row.querySelectorAll(`${cellTag}[data-date]`).forEach(cell => {
                     if (cell.getAttribute('data-date') === fridayDateString) {
                         cell.classList.add('current-week');
-                        matched = true;
                     }
                 });
-                if (tableId.startsWith('cas-table-')) {
-                    console.log(`[CA-HIGHLIGHT-DEBUG] ${tableId}: fridayDateString=${fridayDateString}, matched=${matched}, cellTag=${cellTag}, cells with data-date:`, row.querySelectorAll(`${cellTag}[data-date]`).length);
-                }
             });
         }
 
