@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.38.1 — 2026-09-13
+
+### Changed
+- **The month, quarter and year pickers open a list that matches the header.**
+  The options are now the same colour and size as the label above them, the
+  list is as wide as its widest option instead of as narrow as the label (which
+  clipped "2024" to "202" and grew a scrollbar), and it opens flush with the
+  left edge of its own label with the option text inset by its padding. On
+  every dashboard that has these pickers: weekly, 3-month, monthly and yearly.
+
 ## 1.38.0 — 2026-09-13
 
 The second of the two releases that take root away from the self-updater.
