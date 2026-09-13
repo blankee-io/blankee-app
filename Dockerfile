@@ -34,7 +34,12 @@ COPY . .
 # in /config. Both are volumes in compose; creating them here means the image
 # also works without one.
 RUN mkdir -p /app/static/uploads /config \
-    && chmod +x /app/install/docker-entrypoint.sh
+    && chmod +x /app/install/docker-entrypoint.sh \
+    # The user the server runs as. The entrypoint starts as root only to make
+    # the two volumes writable by it, then drops to it - see there.
+    && useradd --system --uid 10001 --user-group --home-dir /app \
+               --shell /usr/sbin/nologin blankee \
+    && chown -R blankee:blankee /app/static/uploads /config
 
 ENV PYTHONUNBUFFERED=1 \
     BLANKEE_CONFIG=/config/blankee.conf \

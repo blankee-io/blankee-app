@@ -23,6 +23,7 @@ from flask_bcrypt import Bcrypt
 from flask import jsonify
 from datetime import date as datetime_date, date, datetime, timedelta
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+import secrets
 from werkzeug.utils import secure_filename
 from markupsafe import Markup
 from dateutil.relativedelta import relativedelta
@@ -76,6 +77,12 @@ bcrypt = Bcrypt(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=30)
+
+# The largest request body accepted. The only upload is a profile picture,
+# which is cropped to 150px before it is stored; 10 MB is generous for that
+# and stops a signed-in user posting a body the size of memory. Anything
+# larger gets a 413 - see _request_too_large.
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
 # There is no CSRF token anywhere in this application. Today the state-changing
 # routes are protected only by accident: they read JSON, so a cross-site form
@@ -132,7 +139,10 @@ def ordinal_filter(value):
         try:
             n = int(n)
         except (ValueError, TypeError):
-            return str(n)
+            # Not a day number, so it cannot be given a suffix - but the result
+            # is marked safe below, so whatever it is must be escaped here.
+            import html
+            return html.escape(str(n))
         if 11 <= (n % 100) <= 13:
             suffix = 'th'
         else:
@@ -365,12 +375,14 @@ else:
 
 @app.route('/health/redis', methods=['GET'])
 def health_redis():
+    _local_only()
     status = {'ok': bool(app.config.get('REDIS_OK'))}
     return jsonify(status), 200 if status['ok'] else 503
 
 @app.route('/health/db-pool', methods=['GET'])
 def health_db_pool():
     """Monitor connection pool health"""
+    _local_only()
     try:
         status = get_db_pool().get_pool_status()
         
@@ -384,7 +396,7 @@ def health_db_pool():
             'recommendation': 'increase_pool_size' if overflow_pct > 50 else 'optimal'
         }), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 503
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 503
 
 # --- Dashboard cache helpers ---
 DASHBOARD_CACHE_TTL = int(os.getenv("DASHBOARD_CACHE_TTL", "60"))
@@ -900,6 +912,105 @@ def admin_exists():
         return True
 
 
+
+# ------------------------------------------------ what a client may be told
+def _client_error(e):
+    """
+    The text a client gets for an unexpected exception - never the exception.
+
+    str(e) from a database driver names tables, columns and sometimes values;
+    from the filesystem it names paths. That is for the log, which gets the
+    full traceback here, not for whoever sent the request.
+    """
+    log_exception(app.logger, 'ERROR',
+                  f"{request.method} {request.path} raised {type(e).__name__}: {e}")
+    return 'Something went wrong on the server. The details are in the server log.'
+
+
+def _local_only():
+    """
+    404 unless the request comes from this machine.
+
+    The health endpoints report internals - pool sizes, Redis state - and exist
+    for the container health check and an operator's curl on the box, not for
+    the internet. 404 rather than 403, for the same reason admin_required uses
+    it: nothing gained by confirming they are there.
+    """
+    if request.remote_addr not in ('127.0.0.1', '::1'):
+        abort(404)
+
+
+@app.errorhandler(413)
+def _request_too_large(e):
+    message = 'That file is larger than the 10 MB limit.'
+    if request.path.startswith('/api/') or request.is_json:
+        return jsonify({'status': 'error', 'message': message}), 413
+    flash(message)
+    return redirect(request.referrer or url_for('profile'))
+
+
+# ------------------------------------------------------- login throttling
+# Failures only: a person who signs in five times in a minute is not slowed,
+# a guesser is. Counted twice - per source address and per account name - so
+# that neither rotating addresses nor rotating names gets round it, and the
+# window slides: every failure re-arms the full minute. Redis when it is up,
+# so the count is shared across workers; a per-process fallback otherwise,
+# which is weaker but never nothing.
+LOGIN_ATTEMPT_LIMIT = 5
+LOGIN_ATTEMPT_WINDOW = 60
+LOGIN_THROTTLE_MESSAGE = 'Too many attempts. Try again in a minute.'
+_login_attempts_local = {}
+
+
+def _login_attempt_keys(who):
+    ip = request.remote_addr or 'unknown'
+    who = (who or '').strip().lower()[:64]
+    return (f"login_attempts:ip:{ip}", f"login_attempts:who:{who}")
+
+
+def _login_attempt_count(key):
+    import time
+    if app.config.get('REDIS_OK'):
+        try:
+            return int((_redis_client or init_redis()).get(key) or 0)
+        except Exception:
+            pass
+    now = time.time()
+    stamps = [t for t in _login_attempts_local.get(key, []) if now - t < LOGIN_ATTEMPT_WINDOW]
+    _login_attempts_local[key] = stamps
+    return len(stamps)
+
+
+def _login_throttled(who):
+    return any(_login_attempt_count(k) >= LOGIN_ATTEMPT_LIMIT for k in _login_attempt_keys(who))
+
+
+def _login_failed(who):
+    import time
+    for key in _login_attempt_keys(who):
+        if app.config.get('REDIS_OK'):
+            try:
+                pipe = (_redis_client or init_redis()).pipeline()
+                pipe.incr(key)
+                pipe.expire(key, LOGIN_ATTEMPT_WINDOW)
+                pipe.execute()
+                continue
+            except Exception:
+                pass
+        _login_attempts_local.setdefault(key, []).append(time.time())
+
+
+def _login_succeeded(who):
+    for key in _login_attempt_keys(who):
+        if app.config.get('REDIS_OK'):
+            try:
+                (_redis_client or init_redis()).delete(key)
+                continue
+            except Exception:
+                pass
+        _login_attempts_local.pop(key, None)
+
+
 def admin_required(f):
     """
     Restrict a route to the administrator.
@@ -1209,7 +1320,7 @@ def update_landing_page():
         
         return jsonify({'status': 'success'})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': _client_error(e)})
 
 @app.route('/api/tutorial/status', methods=['GET'])
 @login_required
@@ -1241,7 +1352,7 @@ def get_tutorial_status():
 
         return jsonify({'status': 'success', 'completed': completed})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': _client_error(e)})
 
 @app.route('/api/tutorial/complete', methods=['POST'])
 @login_required
@@ -1284,7 +1395,7 @@ def complete_tutorial():
 
         return jsonify({'status': 'success', 'completed': completed})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': _client_error(e)})
 
 @app.route('/api/tutorial/reset', methods=['POST'])
 @login_required
@@ -1322,7 +1433,7 @@ def reset_tutorials():
 
         return jsonify({'status': 'success'})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': _client_error(e)})
 
 def create_totals_remainders_for_new_user(user_id):
     with get_db_pool().get_connection() as conn:
@@ -1733,7 +1844,7 @@ def check_has_categories():
         log_error(logger, 'SETUP_PROFILE', f"Error: {str(e)}")
         return jsonify({
             'status': 'error',
-            'message': str(e),
+            'message': _client_error(e),
             'has_categories': False
         }), 500
 
@@ -1776,7 +1887,7 @@ def save_setup_name():
         
     except Exception as e:
         log_error(logger, 'SETUP_PROFILE', f"Error: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 @app.route('/verify_mfa_setup', methods=['POST'])
@@ -1920,7 +2031,7 @@ def save_setup_step():
                 """, (user_id, json.dumps(state)))
     except Exception as e:
         log_error(logger, 'SETUP_PROFILE', f"MySQL error: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
     return jsonify({'status': 'success'})
 
@@ -2318,6 +2429,10 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
+        if _login_throttled(username):
+            log_warning(app.logger, 'AUTH',
+                        f"Login throttled for '{username[:64]}' from {request.remote_addr}")
+            return render_template('login.html', error_message=LOGIN_THROTTLE_MESSAGE), 429
         remember = 'remember' in request.form  # Get the value of the Remember Me checkbox
 
         # Establish database connection
@@ -2351,6 +2466,7 @@ def login():
                     log_info(logger, 'AUTH', f"No MFA required for user {user[1]} (id={user[0]})")
                     user_obj = User(id=user[0], username=user[1], password=user[2])
                     login_user(user_obj, remember=remember)
+                    _login_succeeded(username)
 
                     # Continue with the rest of your logic using the same connection
                     # Check the most recent year in totals_remainders for this user
@@ -2559,6 +2675,7 @@ def login():
             else:
                 cursor.close()
                 # Invalid username or password, redirect back to login with an error message
+                _login_failed(username)
                 return render_template('login.html', error_message="Invalid username or password")
 
     # If it's a GET request, render the login page
@@ -2582,8 +2699,13 @@ def login_mfa():
     if not user or not user[3]:
         flash('MFA not enabled for this account.')
         return redirect(url_for('login'))
+    if _login_throttled(f"mfa:{user_id}"):
+        log_warning(app.logger, 'AUTH', f"MFA throttled for user {user_id} from {request.remote_addr}")
+        return render_template('login.html', mfa_step=True, username=user[1],
+                               mfa_error=LOGIN_THROTTLE_MESSAGE), 429
     totp = pyotp.TOTP(user[3])
     if totp.verify(code):
+        _login_succeeded(f"mfa:{user_id}")
         user_obj = User(id=user[0], username=user[1], password=user[2])
         login_user(user_obj, remember=remember)
         session.pop('pre_mfa_user_id', None)
@@ -2595,6 +2717,7 @@ def login_mfa():
         landing_page = user[4] if len(user) > 4 and user[4] else 'dashboard'
         return redirect(url_for(landing_page))
     else:
+        _login_failed(f"mfa:{user_id}")
         return render_template('login.html', mfa_step=True, username=user[1], mfa_error='Incorrect code')
 
 ############################## Login Add One Year of Data ######################################
@@ -3687,7 +3810,7 @@ def get_categories():
         
     except Exception as e:
         log_error(app.logger, 'CATEGORIES', f"User {current_user.id}: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 @app.route('/dashboard-d/get_totals_for_day', methods=['GET'])
@@ -3758,7 +3881,7 @@ def get_totals_for_day():
         return jsonify(response)
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 @app.route('/dashboard-d/update_totals_for_day', methods=['POST'])
 @login_required
@@ -3813,7 +3936,7 @@ def update_totals_for_day():
         return jsonify({'status': 'success', 'remainder': remainder})
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 @app.route('/get_dashboard_d_data')
@@ -9995,7 +10118,7 @@ def move_entry_d():
                             'ca_recalculated': ca_recalculated})
         except Exception as e:
             cursor.close()
-            return jsonify({'status': 'error', 'message': str(e)}), 500
+            return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 ##############################################################################
 ############################### DASHBOARD WEEK ###############################
@@ -10108,7 +10231,7 @@ def delete_income_category():
         return jsonify({'status': 'success'})
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': _client_error(e)})
 
 @app.route('/delete_expense_category', methods=['POST'])
 @login_required
@@ -10236,7 +10359,7 @@ def delete_expense_category():
         return jsonify({'status': 'success'})
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': _client_error(e)})
         
 @app.route('/delete_ca_category', methods=['POST'])
 @login_required
@@ -10355,7 +10478,7 @@ def delete_ca_category():
         return jsonify({'status': 'success', 'message': 'Recurring category converted to regular category.'})
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': _client_error(e)})
 
 @app.route('/add_income_category', methods=['POST'])
 @login_required
@@ -10592,10 +10715,6 @@ def update_ca_category():
     # Rename the expense category instead — it will automatically sync to all credit accounts.
     return jsonify({'status': 'error', 'message': 'Credit account categories cannot be renamed directly. Rename the category in Expenses instead — it will sync to all credit accounts.'}), 400
 
-@app.route('/fetch-latest-data')
-def fetch_latest_data():
-    # Your logic to return the latest data
-    return jsonify({"data": "latest data"})
 
 def _bucket_days_pushed(entry, orig_date):
     """
@@ -11313,7 +11432,7 @@ def get_recurring_id_for_category():
 
     except Exception as e:
         log_error(app.logger, 'RECURRING', f"Error looking up recurring ID: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 @app.route('/get_total_income', methods=['GET'])
@@ -11933,7 +12052,7 @@ def update_credit_account_order():
         return jsonify({'status': 'success'})
     except Exception as e:
         log_error(app.logger, 'CREDIT', f"Error updating credit account order: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 # ──────────────────────────────────────────────
@@ -16659,10 +16778,10 @@ def _update_state(check_remote=False):
                 'code': empty,
                 'dependencies': {'ok': None, 'pinned_count': 0, 'missing': [],
                                  'mismatched': [], 'undeclared': [], 'unpinned': [],
-                                 'error': str(e)},
+                                 'error': _client_error(e)},
                 'schema': {'ok': None, 'applied_count': 0, 'pending': [],
                            'missing_files': [], 'unlisted': [], 'unknown': [],
-                           'error': str(e)},
+                           'error': _client_error(e)},
                 'run': None}
 
 
@@ -19126,7 +19245,7 @@ def update_email_notifications():
         return jsonify({'status': 'success'})
     except Exception as e:
         log_error(app.logger, 'NOTIFICATION', f"Error updating email notifications: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 @app.route('/update_goofy_week_mode', methods=['POST'])
 @login_required
@@ -19139,7 +19258,7 @@ def update_goofy_week_mode():
         
         return jsonify({'status': 'success'})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': _client_error(e)})
 
 @app.route('/update_profile_picture', methods=['POST'])
 @login_required
@@ -19154,7 +19273,14 @@ def update_profile_picture():
         return redirect(url_for('profile'))
 
     if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
+        # Named by user id and a random suffix, never by the uploaded name. The
+        # folder is shared by every user, so a name-derived path let one user
+        # overwrite another's picture - and the client uploads every crop as
+        # "profile_picture.png", so they all collided on the same file. The
+        # extension is the uploaded one, which allowed_file has just checked;
+        # PIL picks the output format from it.
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        filename = f"u{current_user.id}-{secrets.token_hex(8)}.{ext}"
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
         # Get the current user's profile picture from Redis first
@@ -19390,7 +19516,7 @@ def enable_mfa():
 
         return jsonify({'status': 'success', 'qr_url': qr_url, 'secret': secret})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
     
 @app.route('/verify_mfa', methods=['POST'])
 @login_required
@@ -19566,9 +19692,6 @@ def delete_user(user_id):
     logout_user()
     return jsonify({'status': 'success'})
 
-if __name__ == "__main__":
-    app.run(debug=True)
-
 from flask import jsonify, request
 
 @app.route('/update_currency_type', methods=['POST'])
@@ -19584,7 +19707,7 @@ def update_currency_type():
         
         return jsonify({'status': 'success'})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 ################################################################################
 ############################### RECURRING INCOME ###############################
@@ -25180,7 +25303,7 @@ def update_credit_account():
         log_error(app.logger, 'CREDIT', f"Error updating credit account: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 def initialize_ca_balances_for_account(account_id):
@@ -25607,7 +25730,7 @@ def delete_credit_account():
         return jsonify({'status': 'success'})
     except Exception as e:
         log_error(app.logger, 'CREDIT', f"Error deleting credit account: {e}")
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': _client_error(e)})
 
 @app.route('/get-credit-account-status', methods=['POST'])
 @login_required
@@ -25759,7 +25882,7 @@ def bank_update_account_alias():
 
     except Exception as e:
         log_error(app.logger, 'BANK', f"Error updating account alias: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 @app.route('/api/bank/accounts', methods=['GET'])
@@ -25801,7 +25924,7 @@ def bank_get_accounts():
         
     except Exception as e:
         log_error(app.logger, 'BANK', f"Error getting accounts: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 @app.route('/api/bank/connections', methods=['GET'])
@@ -25874,7 +25997,7 @@ def bank_get_connections():
         
     except Exception as e:
         log_exception(app.logger, 'BANK', f"Error getting connections for user {current_user.id}: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 def _webhook_autobalance(user_id, target_date_str=None, date_to_remainder=None):
@@ -28176,7 +28299,7 @@ def bank_create_recommended_categories():
         
     except Exception as e:
         log_exception(app.logger, 'BANK', f"Error creating recommended categories: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 def _create_single_category(user_id, category_type, category_data, display_order, today, five_years_from_now):
@@ -28444,7 +28567,7 @@ def bank_auto_adjust_checking():
     
     except Exception as e:
         log_exception(app.logger, 'AUTO_ADJUST_CHECKING', f"Error: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 @app.route('/bank/toggle-auto-import', methods=['POST'])
@@ -28462,7 +28585,7 @@ def bank_toggle_auto_import():
         
     except Exception as e:
         log_error(app.logger, 'BANK', f"Error toggling auto-import: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
 ############################################################################################
@@ -28532,6 +28655,10 @@ atexit.register(cleanup_on_exit)
 
 
 if __name__ == '__main__':
-    # Run development server
-    # For production, use WSGI server (gunicorn, uWSGI, etc.)
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # A development server, and nothing else runs this block: under Apache and
+    # mod_wsgi, or gunicorn, app is imported and this never executes. The
+    # debugger is off unless asked for - it runs code typed into the browser -
+    # and the bind address is loopback unless asked for, for the same reason.
+    app.run(host=os.getenv('FLASK_RUN_HOST', '127.0.0.1'),
+            port=int(os.getenv('FLASK_RUN_PORT', '5000')),
+            debug=os.getenv('FLASK_DEBUG', '0').strip().lower() in ('1', 'true', 'yes'))
