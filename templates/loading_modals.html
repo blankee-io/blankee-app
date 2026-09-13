@@ -90,6 +90,26 @@
         </div>
     </div>
 
+    <!-- Restored from the back/forward cache, the page comes back exactly as it
+         left - and it left with the overlay up, because clicking a link is one
+         of the things that raises it. Nothing re-runs on that kind of restore:
+         DOMContentLoaded and load have already happened for this document, so
+         whatever would have hidden the spinner never fires again and it sits
+         over a page that finished loading long ago.
+
+         pageshow is the one event that does fire, and `persisted` is what tells
+         a cache restore apart from an ordinary load. Only the full-page spinner
+         is cleared: the setup and update screens belong to flows that are still
+         running behind them, and hiding those would say the work had finished
+         when it had not. -->
+    <script>
+        window.addEventListener('pageshow', function (event) {
+            if (!event.persisted) { return; }
+            var screen = document.getElementById('loading-screen');
+            if (screen) { screen.style.display = 'none'; }
+        });
+    </script>
+
     <!-- Fixed loading spinner for bottom left -->
     <div id="dashboard-loading-spinner-container">
         <span class="dashboard-spinner-circle">
