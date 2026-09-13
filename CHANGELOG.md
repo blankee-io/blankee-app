@@ -8,6 +8,18 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.38.2 — 2026-09-13
+
+### Fixed
+- **An update ran again every minute after it had finished.** Since 1.38.0 the
+  updater runs as the `blankee` service user, which could read the request flag
+  in `blankee.conf` but not write it back to 0 - the file was 640 - so the same
+  request was picked up on every timer tick, each time fetching the repository
+  and finding nothing to do. The file is now 660 (the updater is in its group
+  and writes it in place, so the web user stays its owner). An installation in
+  that loop heals itself: the next tick applies this release, the permissions
+  step sets the mode, and the tick after that clears the flag.
+
 ## 1.38.1 — 2026-09-13
 
 ### Changed

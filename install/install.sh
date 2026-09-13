@@ -136,7 +136,8 @@ install_signers() {
 
 # The user the updater runs as. System account, no shell, home is the tree it
 # owns so git has somewhere to look for nothing. A member of www-data's group
-# ONLY so it can read blankee.conf (640 www-data:www-data, the request flag)
+# ONLY so it can read and clear the request flag in blankee.conf (660
+# www-data:www-data - it consumes UPDATE_REQUESTED by writing 0 in place)
 # and traverse CONFIG_DIR (750 root:www-data); .env is 600 and stays out of
 # reach, which is the point of the split.
 install_service_user() {
@@ -591,6 +592,13 @@ apply_permissions() {
   # read them. Blankee's own logs only - never a blanket pass over /var/log.
   find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -exec chgrp www-data {} + 2>/dev/null || true
   find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -exec chmod 640 {} + 2>/dev/null || true
+  # The request flag file. The web user owns it and sets the flags; the updater
+  # has to write UPDATE_REQUESTED=0 back into it when it has taken a request,
+  # and it does so in place, so the owner stays www-data. Group-writable is what
+  # lets a non-root updater do that; without it every timer tick re-runs the
+  # same request. Enforced here so installs that predate 1.38.2 pick it up.
+  [[ -f "$CONF_FILE" ]] && chmod 660 "$CONF_FILE" 2>/dev/null || true
+
   # The updater appends its own lines to the LIVE error log so an update shows
   # up in /admin/logs. It runs as $SERVICE_USER, a member of the www-data
   # group, so group-write on that one file is what lets it in. That is not a
@@ -993,8 +1001,13 @@ if [[ ! -f "$CONF_FILE" ]]; then
   fi
 fi
 if [[ -f "$CONF_FILE" ]]; then
+  # Owned by the web user, which sets the flags in it; group-writable because
+  # the updater - $SERVICE_USER, a member of www-data - has to set
+  # UPDATE_REQUESTED back to 0 when it has consumed a request, in place, or
+  # the timer re-runs the same request every minute. 1.38.0 shipped this as
+  # 640 and did exactly that.
   chown www-data:www-data "$CONF_FILE"
-  chmod 640 "$CONF_FILE"
+  chmod 660 "$CONF_FILE"
 fi
 
 # Database credentials for root-run tooling. The updater and migrate.py need
