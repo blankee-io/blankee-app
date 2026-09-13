@@ -245,10 +245,11 @@ def ensure_config_file():
     try:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(_TEMPLATE)
-        # 640: the web server reads and writes it, nobody else reads it. It holds
-        # no secret today, but a config file that can enable a password reset is
-        # not something to leave world-readable either.
-        os.chmod(path, 0o640)
+        # 660: the web server owns it and sets the flags; the updater, a member
+        # of its group, clears UPDATE_REQUESTED in place once it has taken a
+        # request. Nobody else reads it - it holds no secret today, but a file
+        # the machine acts on is not something to leave world-readable either.
+        os.chmod(path, 0o660)
         log_info(logger, 'CONFIG', f'Created {path}')
     except Exception as e:
         # Not an error, and the expected outcome when the web user runs this:

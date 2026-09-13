@@ -82,7 +82,10 @@ capability set and `LoadCredential=` for the DB credentials. From then on root
 is the three helpers only, and the updater cannot write anything it does not
 own. The live error log is made group-writable (660) so the updater's lines
 still reach `/admin/logs`; the web workers already held a writable descriptor
-to that file, so nothing new is granted.
+to that file, so nothing new is granted. 1.38.2 made `blankee.conf` 660 as
+well: the updater consumes a request by writing `UPDATE_REQUESTED=0` back into
+that file in place, and at 640 it could not, so the timer re-ran the same
+request every minute.
 
 Two things follow that are easy to forget.
 
