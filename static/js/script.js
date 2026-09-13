@@ -279,6 +279,15 @@ function _removeToast(el) {
  * @param {object} cat  Category object with name, is_bundle, is_recurring, is_credit_account, is_auto_adjustment, is_interest
  * @returns {string} HTML string for the icon <i> element
  */
+// For anything that goes into innerHTML and came from a person - category
+// names, account labels. The icon helpers below return markup on purpose;
+// the names beside them must not.
+function escapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function getCategoryIcon(cat) {
     if (!cat) return '<i class="fa-regular fa-folder category-icon"></i>';
     if (cat.is_bundle) return '<i class="fa-regular fa-seedling category-icon"></i>';

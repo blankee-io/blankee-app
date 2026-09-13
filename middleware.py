@@ -189,6 +189,22 @@ def init_redis_middleware(app):
                  status=response.status_code, duration_ms=duration_ms)
         return response
 
+    @app.after_request
+    def security_headers(response):
+        """
+        The response headers every page should carry and none did. setdefault,
+        so a route that has a reason to say otherwise can.
+
+        No Content-Security-Policy yet: the templates carry inline scripts and
+        styles throughout, so a policy that means anything is its own project.
+        No Strict-Transport-Security: TLS terminates in front of this app and
+        the proxy that does it is where that header belongs.
+        """
+        response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+        response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+        return response
+
     @app.errorhandler(Exception)
     def handle_unhandled_exception(e):
         """
