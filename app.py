@@ -20,6 +20,7 @@ logger = get_logger(__name__)
 from flask import (Flask, render_template, request, redirect, url_for, session,
                    flash, send_file, abort, Response, g)
 from flask_bcrypt import Bcrypt
+from flask_wtf.csrf import CSRFProtect, CSRFError
 from flask import jsonify
 from datetime import date as datetime_date, date, datetime, timedelta
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -84,16 +85,24 @@ app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=30)
 # larger gets a 413 - see _request_too_large.
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
-# There is no CSRF token anywhere in this application. Today the state-changing
-# routes are protected only by accident: they read JSON, so a cross-site form
-# POST arrives form-encoded and parses to {}, and browsers happen to default
-# cookies to Lax. Stating Lax explicitly turns that accident into a decision -
-# the browser will not send this cookie on a cross-site POST at all, which is
-# what stands between a malicious page an administrator visits and every admin
-# action in the console. Not a substitute for real CSRF tokens, which remain
-# worth adding; this is the one-line half that costs nothing.
+# Two layers against cross-site request forgery. SameSite=Lax means the browser
+# does not send the session cookie on a cross-site POST at all; the token below
+# means that even a request which does carry the cookie is refused unless it
+# also carries a value only a page we rendered could know. Either alone would
+# do on a modern browser; both, so that a subdomain going wrong, an old
+# browser, or a future exemption does not quietly become the whole defence.
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['REMEMBER_COOKIE_SAMESITE'] = 'Lax'
+
+# The token itself: Flask-WTF's, checked on every POST/PUT/PATCH/DELETE from
+# either the X-CSRFToken header (fetch and jQuery add it - templates/_csrf.html)
+# or a csrf_token form field (the ten plain forms). No time limit: the token is
+# bound to the session, and a page left open overnight should still be able to
+# save. SSL_STRICT off: that check compares the Referer to the host, and behind
+# a TLS-terminating proxy the two legitimately differ.
+app.config['WTF_CSRF_TIME_LIMIT'] = None
+app.config['WTF_CSRF_SSL_STRICT'] = False
+csrf = CSRFProtect(app)
 # Defence in depth rather than a fix: the cookie is already inaccessible to
 # script, and marking it so removes one way a stored-XSS bug could become
 # session theft.
@@ -938,6 +947,25 @@ def _local_only():
     """
     if request.remote_addr not in ('127.0.0.1', '::1'):
         abort(404)
+
+
+@app.errorhandler(CSRFError)
+def _csrf_failed(e):
+    """
+    A request without a valid token. Almost always a page rendered before a
+    sign-in that has since changed sessions, or a form kept open across one;
+    occasionally the thing this exists to stop. Either way, refuse and say so.
+    """
+    log_warning(app.logger, 'AUTH',
+                f"CSRF check failed on {request.method} {request.path}: {e.description}")
+    wants_json = (request.path.startswith('/api/') or request.is_json
+                  or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+                  or 'application/json' in request.headers.get('Accept', ''))
+    message = 'Your session token is missing or stale. Reload the page and try again.'
+    if wants_json:
+        return jsonify({'status': 'error', 'message': message}), 400
+    flash(message)
+    return redirect(request.referrer or url_for('login'))
 
 
 @app.errorhandler(413)
@@ -15564,7 +15592,11 @@ def dashboard_summary():
 # of itself would never be revocable. This path falls outside the prefix, so it
 # is reachable only with a real session - the app calls it from inside the web
 # view's login, and nowhere else.
+# Exempt: called by the iOS app's native code, which has the session cookie
+# but no page and therefore no token. The response is what matters here and a
+# forged request could not read it; SameSite keeps the cookie off it anyway.
 @app.route('/api/widget-token', methods=['POST'])
+@csrf.exempt
 @login_required
 def issue_widget_token():
     """Issue a token for this device's home screen widget.
@@ -15598,6 +15630,7 @@ def issue_widget_token():
 
 
 @app.route('/api/widget-token', methods=['DELETE'])
+@csrf.exempt
 @login_required
 def revoke_widget_tokens():
     """Drop this user's widget tokens. The app calls it on sign-out and when
@@ -16398,7 +16431,10 @@ def bank_accounts():
         )
     )
 
+# Exempt for the same reason as /api/widget-token: native iOS code registers
+# and unregisters the device, with the session cookie and nothing else.
 @app.route('/api/notifications/register', methods=['POST'])
+@csrf.exempt
 @login_required
 def register_device_token():
     """Register or update a device token for the current user."""
@@ -16420,6 +16456,7 @@ def register_device_token():
 
 
 @app.route('/api/notifications/unregister', methods=['POST'])
+@csrf.exempt
 @login_required
 def unregister_device_token():
     """Remove a device token for the current user."""

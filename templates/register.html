@@ -39,6 +39,7 @@
 
         <!-- Registration form -->
         <form method="POST" action="{{ url_for('register') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <!-- Input group for the email address -->
             <div class="login-row" id="Username">
                 <label for="username">Email Address:</label>
