@@ -43,6 +43,7 @@
 
         {% if mfa_step %}
             <form method="POST" action="{{ url_for('login_mfa') }}" id="login-mfa-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="mfa-row">
                     <label for="mfa_code">Enter 6-digit code from your authenticator app:</label>
                     <div class="mfa-code-inputs">
@@ -77,6 +78,7 @@
             <p><a href="{{ url_for('login') }}">Back to Login</a></p>
         {% else %}
             <form method="POST" action="{{ url_for('login') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="login-row">
                     <label for="username">Email Address:</label>
                     <input type="text" name="username" class="login-input" required>

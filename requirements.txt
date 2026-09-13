@@ -8,6 +8,8 @@ dnspython==2.1.0
 Flask==3.0.3
 Flask-Bcrypt==1.0.1
 Flask-Login==0.6.3
+Flask-WTF==1.2.1
+WTForms==3.1.2
 idna==3.3
 itsdangerous==2.2.0
 Jinja2==3.1.4

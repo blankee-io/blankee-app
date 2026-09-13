@@ -60,6 +60,7 @@
                                 <div id="uploadModalOverlay" class="center-modal-overlay">
                                     <div id="uploadPrompt" class="center-modal-content">
                                         <form id="profile-upload-form" method="POST" action="{{ url_for('update_profile_picture') }}" enctype="multipart/form-data">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                             <div id="image-crop-container">
                                                 <div class="zoom-buttons">
                                                     <button type="button" id="zoom-out-btn"><i class="fas fa-magnifying-glass-minus"></i></button>
@@ -84,6 +85,7 @@
                             </div>
                             <!-- Form for changing the first name -->
                             <form method="POST" action="{{ url_for('update_first_name') }}" class="profile-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <div class="input-group">
                                     <label for="first_name">Change First Name:</label>
                                     <input type="text" name="first_name" id="profile-first-name" class="login-input" value="{{ first_name }}" required> <!-- Input field for first name -->
@@ -95,6 +97,7 @@
 
                             <!-- Form for changing the last name -->
                             <form method="POST" action="{{ url_for('update_last_name') }}" class="profile-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <div class="input-group">
                                     <label for="last_name">Change Last Name:</label>
                                     <input type="text" name="last_name" id="profile-last-name" class="login-input" value="{{ last_name }}" required> <!-- Input field for last name -->
@@ -105,6 +108,7 @@
                             </form>
                             <!-- Form for changing the email -->
                             <form method="POST" action="{{ url_for('update_username') }}" class="profile-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <div class="input-group">
                                     <label for="username">Change Email:</label>
                                     <input type="text" name="username" id="profile-username" class="login-input" value="{{ current_username }}" required> <!-- Input field for new email -->
