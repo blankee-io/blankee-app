@@ -390,27 +390,39 @@ the right thing.
 If email delivery is set up, use the Forgot Password link on the login page.
 If it isn't, reset it like this:
 
-1. Turn the flag on:
+1. Open the window by writing a fresh value - today's date is a good one - to
+   the **root-owned** server configuration:
 
    ```bash
-   sudo -u www-data sed -i 's/^RESET_ADMIN_PASSWORD=0/RESET_ADMIN_PASSWORD=1/' \
-        /var/www/budget_env/blankee.conf
+   sudo sed -i "s/^RESET_ADMIN_PASSWORD=.*/RESET_ADMIN_PASSWORD=$(date +%F)/" \
+        /etc/blankee/blankee.conf
    ```
 
-   Under Docker the file is inside the `config` volume:
+   Not `blankee.conf` beside `.env`. That file belongs to the web server, and a
+   flag that hands out the administrator password must not be one the web
+   server can set; writing `RESET_ADMIN_PASSWORD` there does nothing.
+
+   Under Docker everything in the container runs as one user and there is no
+   separate root file, so create it for the occasion (it goes away with the
+   container, which is fine):
 
    ```bash
-   docker compose exec app sed -i 's/^RESET_ADMIN_PASSWORD=0/RESET_ADMIN_PASSWORD=1/' \
-        /config/blankee.conf
+   docker compose exec app sh -c \
+     'mkdir -p /etc/blankee && echo "RESET_ADMIN_PASSWORD=$(date +%F)" > /etc/blankee/blankee.conf'
    ```
 
-2. Reload the site — the recovery page is now the landing page.
+2. Open the site - the recovery page is now the landing page.
 
 3. Set a new password, then sign in with it.
 
-The flag turns itself back off at step 3. While it is on, anyone who can reach
-the site can set the administrator password, so confirm it closed:
+The window closes itself at step 3: the application records the value it
+consumed (`RESET_ADMIN_PASSWORD_USED` in its own `blankee.conf`) and stays
+closed until the root file holds a value it has not seen. So to use this again
+later, write a *new* value, not the same one. While it is open, anyone who can
+reach the site can set the administrator password, so confirm it closed:
 
 ```bash
-grep '^RESET_ADMIN_PASSWORD' /var/www/budget_env/blankee.conf
+grep '^RESET_ADMIN_PASSWORD' /etc/blankee/blankee.conf /var/www/budget_env/blankee.conf
 ```
+
+The `_USED` value in the second file should equal the value in the first.

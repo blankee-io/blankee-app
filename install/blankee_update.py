@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Apply an update, as root, when the admin console asks for one.
+Apply an update when the admin console asks for one.
 
 Run by the blankee-update systemd service every minute. Exits immediately and
 writes nothing unless UPDATE_REQUESTED=1 is set in blankee.conf, so the ordinary
@@ -26,8 +26,19 @@ So the fifteen lines of KEY=VALUE parsing are duplicated here on purpose.
 
 The privilege boundary: the web process (www-data) can only set a flag in a file
 it owns. It never chooses a ref, a branch, a remote or a path - if it could, it
-would be choosing what root checks out and runs. This script takes nothing from
-that file except "yes" and an opaque id.
+would be choosing what gets checked out and run. This script takes nothing from
+that file except "yes" and an opaque id. In particular it does NOT take the
+location of the signing key from there: that comes from the unit's own
+environment, and the file it names must be root's - see verify_signature().
+
+WHO THIS RUNS AS. Either root, or the `blankee` service user the installer
+creates. Nine of the twelve steps need only ownership of the tree, the venv and
+the WSGI file, and the service user has exactly that. The three that touch the
+system - re-applying permissions, rewriting the units, refreshing the Apache
+directives - and the Apache restart the reload falls back to, go through
+helper(): in-process when this is root, and otherwise as a request file that a
+root-owned .path unit picks up and answers, each helper allowed to write one
+directory. That is the same shape as the web-to-updater hand-off, one level up.
 """
 
 import argparse
@@ -54,6 +65,20 @@ STATUS_FILE = os.environ.get('BLANKEE_UPDATE_STATUS',
                              os.path.join(CONFIG_DIR, 'update-status.json'))
 LOCK_FILE = os.path.join(CONFIG_DIR, '.update.lock')
 
+# The public key releases are signed with, in ssh allowed-signers format. From
+# the unit's environment or this default - NEVER from blankee.conf. That file is
+# owned by the web user, and a web process that can name the trust anchor can
+# blank the name (no verification) or point it at a key it wrote itself. The
+# installer pins this file once and neither it nor the updater ever rewrites it.
+SIGNERS_FILE = os.environ.get('BLANKEE_SIGNERS', '/etc/blankee/allowed_signers')
+
+# Where a non-root updater leaves requests for the root helpers, and where the
+# helpers leave their answers. A tmpfiles.d entry keeps it 0770 root:blankee.
+HELPER_DIR = os.environ.get('BLANKEE_HELPER_DIR', '/run/blankee-update')
+
+# The service user. Anything else that is not root is refused in main().
+SERVICE_USER = 'blankee'
+
 BRANCH = 'main'
 STATUS_SCHEMA = 1
 STALE_AFTER = 15 * 60
@@ -70,7 +95,9 @@ TRUTHY = ('1', 'true', 'yes', 'on')
 # as to the journal puts an update in the log an operator already reads, instead
 # of in a second place they have to know about. Overridable for a layout that is
 # not Debian's; on a container there is no Apache and the path will not exist.
-APP_LOG = os.environ.get('BLANKEE_APP_LOG', '/var/log/apache2/blankee_error.log')
+# 1.4.0 moved the logs to /var/log/blankee; the unit passes the path in, and
+# this default is for a shell run.
+APP_LOG = os.environ.get('BLANKEE_APP_LOG', '/var/log/blankee/blankee_error.log')
 
 
 def _app_log(message, level):
@@ -256,9 +283,14 @@ def status_write():
                 f.flush()
                 os.fsync(f.fileno())
             os.chmod(tmp, 0o640)
+            # Readable by the web user's group either way. As root the file is
+            # handed to root:www-data as before; as the service user it stays
+            # blankee-owned and only the group is set, which is all the web
+            # tier needs to read it.
             try:
                 import grp
-                os.chown(tmp, 0, grp.getgrnam('www-data').gr_gid)
+                gid = grp.getgrnam('www-data').gr_gid
+                os.chown(tmp, 0 if os.geteuid() == 0 else -1, gid)
             except Exception:
                 pass
             os.replace(tmp, STATUS_FILE)
@@ -335,15 +367,44 @@ def run(argv, cwd=None, env=None, timeout=600):
     return (proc.returncode, output)
 
 
+_git_global = None
+
+
+def git_env():
+    """
+    Environment for git: our own "global" config and no system one.
+
+    The tree belongs to the service user, and an operator at a root shell still
+    runs this; git refuses that mismatch ("dubious ownership") unless the
+    directory is named in safe.directory - and it honours that key ONLY from
+    the global or system scope, never from -c or the repository's own config.
+    So a one-line global config is written to a private temp file and handed
+    to git through GIT_CONFIG_GLOBAL. Trusting this one directory is safe ONLY
+    because owned_safely() has already applied a stricter rule than git's -
+    every ancestor trusted, none of it web-writable - and nothing here runs git
+    before that check. GIT_CONFIG_NOSYSTEM keeps /etc/gitconfig out of it too.
+    """
+    global _git_global
+    if _git_global is None:
+        fd, path = tempfile.mkstemp(prefix='blankee-git-', suffix='.gitconfig')
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write('[safe]' + chr(10) + chr(9) + 'directory = ' + APP_DIR + chr(10))
+        _git_global = path
+    env = dict(os.environ)
+    env['GIT_CONFIG_GLOBAL'] = _git_global
+    env['GIT_CONFIG_NOSYSTEM'] = '1'
+    return env
+
+
 def git(*args, timeout=600):
     argv = ['git',
             # A repository whose hooks or config the web user could write would
-            # be root code execution. Ownership is checked in the preflight; this
-            # makes the hooks inert regardless.
+            # be code execution for whoever runs git in it. Ownership is checked
+            # in the preflight; this makes the hooks inert regardless.
             '-c', 'core.hooksPath=/dev/null',
             '-c', 'core.fsmonitor=false',
             '-C', APP_DIR] + list(args)
-    return run(argv, timeout=timeout)
+    return run(argv, env=git_env(), timeout=timeout)
 
 
 def read_kv(path, keys):
@@ -364,15 +425,56 @@ def read_kv(path, keys):
     return found
 
 
-def owned_by_root(path):
-    """True when path and every directory above it are owned by root."""
+def web_ids():
+    """(uid, gid) of the web user, or (None, None) where there is none."""
+    try:
+        import pwd
+        entry = pwd.getpwnam('www-data')
+        return (entry.pw_uid, entry.pw_gid)
+    except Exception:
+        return (None, None)
+
+
+def service_uid():
+    """uid of the service user, or None before the installer has created it."""
+    try:
+        import pwd
+        return pwd.getpwnam(SERVICE_USER).pw_uid
+    except Exception:
+        return None
+
+
+def owned_safely(path):
+    """
+    True when path and every directory above it are owned by root, by the
+    service user or by the user running this, and none of them can be written
+    by the web user.
+
+    This used to demand root all the way up, and the reason was never root as
+    such: it was that a .git the web user could write is code execution for
+    whoever runs git in it, through hooks or a rewritten config. The service
+    user owning the tree keeps that guarantee - what must not own it, or be able
+    to write it, is www-data. So that is what is checked. Never work around a
+    failure here with safe.directory; fix the ownership.
+    """
+    trusted = {0, os.geteuid()}
+    if service_uid() is not None:
+        trusted.add(service_uid())
+    web_uid, web_gid = web_ids()
     current = os.path.abspath(path)
     while True:
         try:
-            if os.stat(current).st_uid != 0:
-                return (False, current)
+            info = os.stat(current)
         except OSError as e:
             return (False, f'{current} ({e})')
+        if info.st_uid not in trusted:
+            return (False, f'{current} is owned by uid {info.st_uid}')
+        if web_uid is not None and info.st_uid == web_uid:
+            return (False, f'{current} is owned by the web user')
+        if info.st_mode & stat.S_IWOTH:
+            return (False, f'{current} is world-writable')
+        if (info.st_mode & stat.S_IWGRP) and web_gid is not None and info.st_gid == web_gid:
+            return (False, f'{current} is writable by the web group')
         parent = os.path.dirname(current)
         if parent == current:
             return (True, None)
@@ -397,10 +499,28 @@ def read_version_file():
         return None
 
 
+def credentials_path():
+    """
+    Where the DB credentials are this run.
+
+    Root reads /etc/blankee/db.conf directly. The service user cannot - the file
+    stays root-only on disk - so the unit hands it over with LoadCredential=,
+    which places a copy under $CREDENTIALS_DIRECTORY readable by this process
+    alone for exactly as long as it runs. Either way the source is the same
+    root-written file, and never .env.
+    """
+    cred_dir = os.environ.get('CREDENTIALS_DIRECTORY')
+    if cred_dir:
+        handed = os.path.join(cred_dir, 'db.conf')
+        if os.path.isfile(handed):
+            return handed
+    return DB_CONF
+
+
 def db_env():
     """DB_* from the root-only credential file, never from .env."""
     wanted = ('DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME')
-    found = read_kv(DB_CONF, wanted)
+    found = read_kv(credentials_path(), wanted)
     missing = [k for k in wanted if not found.get(k)]
     return (found, missing)
 
@@ -415,9 +535,17 @@ def wait_for_site(seconds=60):
     import urllib.error
     import urllib.request
 
-    env = read_kv(os.path.join(CONFIG_DIR, '.env'), ('APP_URL',))
-    app_url = env.get('APP_URL', '')
+    # The port comes from the unit (the installer reads it off the vhost it
+    # wrote), because .env is the web user's and a non-root updater cannot
+    # read it; the .env read is kept for a shell run with no unit behind it,
+    # and 18420 is the installer's default when neither says.
     port, host = '18420', None
+    app_url = ''
+    if os.environ.get('BLANKEE_HTTP_PORT'):
+        port = os.environ['BLANKEE_HTTP_PORT']
+    else:
+        env = read_kv(os.path.join(CONFIG_DIR, '.env'), ('APP_URL',))
+        app_url = env.get('APP_URL', '')
     if '://' in app_url:
         rest = app_url.split('://', 1)[1].split('/', 1)[0]
         if ':' in rest:
@@ -446,6 +574,77 @@ def wait_for_site(seconds=60):
     return (False, last)
 
 
+def helper(name, verb='run', timeout=300):
+    """
+    Run one of the three things that still need root: `permissions`, `units`,
+    `apache` (verb `run` refreshes the directives; `restart` restarts Apache).
+
+    As root, exactly what this script always did: install.sh in-process. As the
+    service user it cannot, and polkit is not assumed, so it asks the way the
+    web tier asks it - a request file, watched by a root-owned .path unit that
+    starts blankee-update-<name>.service. That unit runs install.sh --helper
+    <name> under ProtectSystem=strict with one directory writable, reads the
+    verb, deletes the request, and leaves <name>.result: the exit code on the
+    first line, the output after it. (returncode, output), like run().
+
+    Polled rather than waited on with inotify: the helper is a separate process
+    under systemd's control, and a timeout is the honest outcome when it never
+    appears - which is what an un-enabled .path unit looks like from here.
+    """
+    if os.geteuid() == 0:
+        if name == 'apache' and verb == 'restart':
+            rc, out = run(['apache2ctl', 'configtest'], timeout=60)
+            if rc != 0:
+                return (rc, out)
+            return run(['systemctl', 'restart', 'apache2'], timeout=180)
+        mode = {'permissions': '--permissions-only', 'units': '--units-only',
+                'apache': '--apache-conf'}[name]
+        return run(['bash', os.path.join(APP_DIR, 'install', 'install.sh'), mode],
+                   timeout=timeout)
+
+    request = os.path.join(HELPER_DIR, name + '.request')
+    result = os.path.join(HELPER_DIR, name + '.result')
+    try:
+        os.unlink(result)
+    except OSError:
+        pass
+    try:
+        fd, tmp = tempfile.mkstemp(dir=HELPER_DIR, prefix='.' + name + '-')
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(verb + chr(10))
+        # Two of the helpers run as root with an EMPTY capability set, which
+        # means root bound by file modes like anyone else: a 660 file owned by
+        # the service user is unreadable to them. 664 inside a directory only
+        # root and the service user can enter gives away nothing.
+        os.chmod(tmp, 0o664)
+        os.replace(tmp, request)
+    except Exception as e:
+        return (127, f'could not ask the {name} helper: {e}')
+    say(f'    -> asked blankee-update-{name} ({verb})')
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.isfile(result):
+            time.sleep(0.2)     # let the helper finish its rename
+            try:
+                with open(result, 'r', encoding='utf-8') as f:
+                    text = f.read()
+                os.unlink(result)
+            except Exception as e:
+                return (127, f'could not read the {name} helper result: {e}')
+            first, _, rest = text.partition(chr(10))
+            try:
+                rc = int(first.strip())
+            except ValueError:
+                rc = 127
+            for line in rest.strip().splitlines()[-40:]:
+                say('      ' + line)
+            return (rc, rest.strip())
+        time.sleep(1)
+    return (124, f'the {name} helper did not answer within {timeout}s; '
+                 f'is blankee-update-{name}.path enabled?')
+
+
 def reload_app():
     """
     Pick up the new code without restarting Apache.
@@ -470,15 +669,13 @@ def reload_app():
         return (True, '; '.join(detail))
 
     detail.append(f'no answer after the touch (last: {code})')
-    rc, out = run(['apache2ctl', 'configtest'], timeout=60)
-    detail.append(f'configtest rc={rc}')
-    if rc != 0:
-        # The code on disk is new and the running process is old. Templates and
-        # static files are read from disk, so this is a genuinely mixed state.
-        return (False, '; '.join(detail))
-
-    rc, out = run(['systemctl', 'restart', 'apache2'], timeout=180)
+    # configtest then restart, through the apache helper so it needs no root
+    # here. A failed configtest comes back as the helper's exit code: the code
+    # on disk is new and the running process is old, a genuinely mixed state.
+    rc, out = helper('apache', verb='restart', timeout=240)
     detail.append(f'restart rc={rc}')
+    if rc != 0:
+        return (False, '; '.join(detail))
     ok, code = wait_for_site()
     detail.append(f'after restart: {code}')
     return (ok, '; '.join(detail))
@@ -551,17 +748,82 @@ def check_only():
     return 0
 
 
+def verify_signature(target):
+    """
+    Refuse a commit not signed by the pinned key. None, or a failure.
+
+    Nothing about a git fetch says who wrote what it fetched. HTTPS proves the
+    server is github.com and no more; whoever can push to the release branch can
+    run code on every installation that updates, because this script runs
+    install.sh out of the checkout it just made. The control for that is a
+    signature, and it is only a control if the KEY cannot be replaced by the
+    same push - which is why the key file is pinned by the installer, never
+    rewritten, and why its LOCATION comes from the unit's environment rather
+    than from a file the web user owns.
+
+    The key file must itself be root's and not group- or world-writable. A
+    signers file the web user could rewrite is the same hole by another door.
+
+    No key pinned at all (an installation upgraded in place from before signing
+    existed): this run proceeds unverified and says so, and the units step
+    seeds the key from install/allowed_signers, so the NEXT run verifies. That
+    converges every installation without a human on any of them; refusing here
+    instead would strand exactly the installations that most need to update.
+    """
+    try:
+        fd = os.open(SIGNERS_FILE, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as e:
+        if e.errno == errno.ENOENT:
+            say(f'  no signing key pinned at {SIGNERS_FILE}; this update is '
+                f'unverified and will seed one for the next')
+            return None
+        if e.errno == errno.ELOOP:
+            # Only root can put a symlink there, and the installer never does;
+            # whatever it points at is not the pinned file. Not "absent".
+            return finish_failed(f'{SIGNERS_FILE} is a symlink. Refusing to '
+                                 'update unverified.', '', [f'ls -l {SIGNERS_FILE}'])
+        return finish_failed(f'Could not open {SIGNERS_FILE}: {e}', '',
+                             [f'ls -l {SIGNERS_FILE}'])
+    try:
+        info = os.fstat(fd)
+    finally:
+        os.close(fd)
+    if not stat.S_ISREG(info.st_mode):
+        return finish_failed(f'{SIGNERS_FILE} is not a regular file. Refusing to '
+                             'update unverified.', '', [f'ls -l {SIGNERS_FILE}'])
+    if info.st_uid != 0 or (info.st_mode & 0o022):
+        return finish_failed(
+            f'{SIGNERS_FILE} must be owned by root and writable by root alone '
+            f'(it is uid {info.st_uid}, mode {oct(info.st_mode & 0o777)}). '
+            'A key file anyone else can write is no trust anchor. Refusing to '
+            'update unverified.', '',
+            [f'sudo chown root:root {SIGNERS_FILE}', f'sudo chmod 644 {SIGNERS_FILE}'])
+
+    step('verify', f'Verifying the signature on {target[:7]}')
+    rc, out = git('-c', 'gpg.ssh.allowedSignersFile=' + SIGNERS_FILE,
+                  'verify-commit', '--raw', target, timeout=60)
+    if rc != 0:
+        return finish_failed(
+            f'The signature on {target[:7]} did not verify. Nothing was '
+            'checked out and the deployment is unchanged. Either the release '
+            'is not signed by a trusted key, or it is not what it claims to '
+            'be.', out,
+            [f'cd {APP_DIR}', f'git verify-commit {target[:7]}'])
+    step_done('signed by a trusted key')
+    return None
+
+
 def preflight(creds, missing):
     """Everything that must be true before anything is changed. None, or a failure."""
     problems = []
     if not os.path.isdir(os.path.join(APP_DIR, '.git')):
         problems.append(f'{APP_DIR} is not a git checkout')
-    ok, offender = owned_by_root(os.path.join(APP_DIR, '.git'))
+    ok, offender = owned_safely(os.path.join(APP_DIR, '.git'))
     if not ok:
-        # An install predating the root-owned tree has a www-data-owned .git,
-        # where root running git executes the web user's code through hooks or a
-        # rewritten config. Never work around this with safe.directory.
-        problems.append(f'{offender} is not owned by root; re-run install/install.sh')
+        # A .git the web user owns or can write is code execution for whoever
+        # runs git in it, through hooks or a rewritten config. Never work around
+        # this with safe.directory - see owned_safely.
+        problems.append(f'{offender}; re-run install/install.sh')
     if missing:
         problems.append(f'{DB_CONF} is missing {", ".join(missing)}')
     try:
@@ -635,41 +897,9 @@ def do_update(dry_run):
 
     requirements_before = file_hash(os.path.join(APP_DIR, 'requirements.txt'))
 
-    # Nothing about a git fetch says who wrote what it fetched. HTTPS proves the
-    # server is github.com and no more; whoever can push to the release branch
-    # can run code as root on every installation that updates, because this
-    # script is root and runs install.sh out of the checkout it just made. That
-    # is inherent to self-updating, and the control for it is a signature.
-    #
-    # Off unless UPDATE_VERIFY_SIGNERS names an allowed-signers file, because
-    # every release published so far is unsigned and turning this on by default
-    # would strand every existing installation on the version it already has -
-    # including, permanently, any release that would have fixed it.
-    #
-    # Set it once signed releases exist:
-    #   UPDATE_VERIFY_SIGNERS=/etc/blankee/allowed_signers
-    # in blankee.conf, holding the publisher's public key in ssh allowed-signers
-    # format. A commit that fails to verify stops the update; nothing is checked
-    # out, and the deployment keeps serving what it already had.
-    signers = read_kv(CONFIG_FILE, {'UPDATE_VERIFY_SIGNERS'}).get(
-        'UPDATE_VERIFY_SIGNERS', '').strip().strip('"').strip("'")
-    if signers:
-        step('verify', f'Verifying the signature on {target[:7]}')
-        if not os.path.isfile(signers):
-            return finish_failed(
-                f'UPDATE_VERIFY_SIGNERS points at {signers}, which does not exist. '
-                'Refusing to update unverified.', '',
-                [f'check UPDATE_VERIFY_SIGNERS in {CONFIG_FILE}'])
-        rc, out = git('-c', 'gpg.ssh.allowedSignersFile=' + signers,
-                      'verify-commit', '--raw', target, timeout=60)
-        if rc != 0:
-            return finish_failed(
-                f'The signature on {target[:7]} did not verify. Nothing was '
-                'checked out and the deployment is unchanged. Either the '
-                'release is not signed by a trusted key, or it is not what it '
-                'claims to be.', out,
-                [f'cd {APP_DIR}', f'git verify-commit {target[:7]}'])
-        step_done('signed by a trusted key')
+    failure = verify_signature(target)
+    if failure is not None:
+        return failure
 
     # Land whatever is still only in Redis before the code changes underneath it.
     #
@@ -705,8 +935,7 @@ def do_update(dry_run):
     # git creates new files with root's umask, so on a host with a restrictive
     # one every added file is unreadable by www-data and the site 500s the moment
     # it reloads. The installer owns these rules; calling it keeps one copy.
-    rc, out = run(['bash', os.path.join(APP_DIR, 'install', 'install.sh'),
-                   '--permissions-only'], timeout=300)
+    rc, out = helper('permissions', timeout=300)
     if rc != 0:
         return finish_failed('Could not re-apply permissions.', out,
                              [f'sudo {APP_DIR}/install/install.sh --permissions-only'])
@@ -718,8 +947,7 @@ def do_update(dry_run):
     # how 1.1.0 shipped an automatic-update toggle whose nightly timer nobody had
     # installed. Not fatal if it fails: the code is already updated and the site
     # still works, it is the next update that would be affected.
-    rc, out = run(['bash', os.path.join(APP_DIR, 'install', 'install.sh'),
-                   '--units-only'], timeout=120)
+    rc, out = helper('units', timeout=180)
     if rc == 0:
         step_done()
     else:
@@ -736,8 +964,7 @@ def do_update(dry_run):
     #
     # Not fatal. The code is already updated and the site still works without it;
     # what is lost is a header, not the application.
-    rc, out = run(['bash', os.path.join(APP_DIR, 'install', 'install.sh'),
-                   '--apache-conf'], timeout=120)
+    rc, out = helper('apache', timeout=180)
     if rc == 0:
         step_done()
     else:
@@ -835,9 +1062,17 @@ def main():
         return mark_aborted()
 
     if os.geteuid() != 0:
-        say('This must run as root: it replaces root-owned code and reloads the '
-            'web server.')
-        return 2
+        # The service user is the intended one; root is for an operator at a
+        # shell. Anyone else - the web user above all - would be replacing
+        # code it is not meant to be able to touch.
+        try:
+            import pwd
+            who = pwd.getpwuid(os.geteuid()).pw_name
+        except Exception:
+            who = str(os.geteuid())
+        if who != SERVICE_USER:
+            say(f'This must run as root or as the {SERVICE_USER} service user, not {who}.')
+            return 2
 
     # Not the flag, and not systemd's own serialisation: this covers a manual run
     # racing the timer.
