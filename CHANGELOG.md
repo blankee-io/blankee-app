@@ -8,6 +8,25 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.40.0 — 2026-09-13
+
+### Security
+- **Cross-site request forgery tokens.** Every request that changes something
+  - a form post, a fetch, a jQuery ajax call - now has to carry a token that
+  only a page this server rendered could know, on top of the `SameSite=Lax`
+  cookie that already kept the session off cross-site posts. Pages get the
+  token from one shared include; `fetch()` and jQuery add it themselves, so
+  the application's two hundred call sites did not change; the ten plain
+  forms carry it as a hidden field. A request without it is refused with a
+  message to reload the page. Tokens do not expire on their own - a page left
+  open overnight can still save - they end with the session.
+
+### Notes
+- The iOS widget-token and push-registration endpoints are exempt: they are
+  called by the app's native code, which has the session but no page. They are
+  the only exemptions, and each says why in the source.
+- New dependency: Flask-WTF (with WTForms). The updater installs it.
+
 ## 1.39.0 — 2026-09-13
 
 A hardening pass over the application itself, following the one over the
