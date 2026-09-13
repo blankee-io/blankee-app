@@ -196,25 +196,37 @@ write_if_changed() {
 # `systemd-analyze security blankee-update.service`, which read 9.6 (UNSAFE)
 # before any of this existed.
 #
+# The updater runs as $SERVICE_USER, not root. It owns the code tree, the
+# virtualenv and the WSGI file, which is what nine of its twelve steps write;
+# the three that touch the system go to the root helpers below by request file.
+# So the capability set is EMPTY - there is nothing left in this unit that
+# needs one - and the writable paths are the four the service user owns or is
+# let into. The DB credentials stay root-only on disk; LoadCredential= hands
+# the unit a private copy under $CREDENTIALS_DIRECTORY for exactly as long as
+# it runs, and blankee_update.py reads them from there.
+#
 # ProtectSystem=strict makes the whole filesystem read-only except what is
 # listed; a listed path that does not exist yet (the request directory before
 # tmpfiles has run) must not stop the unit starting, hence the - prefixes.
 # ProtectHome=tmpfs shows an empty home rather than an inaccessible one, so git
-# finds no .gitconfig instead of warning that it may not look; it breaks pip's
-# cache under /root, so the cache is turned off instead, and it would break an
-# SSH origin (known_hosts) - the installer sets HTTPS. @system-service contains
-# @chown, which the permissions step needs. MemoryDenyWriteExecute is
+# finds no .gitconfig instead of warning that it may not look; pip's cache is
+# turned off rather than given a home; it would break an SSH origin
+# (known_hosts) - the installer sets HTTPS. MemoryDenyWriteExecute is
 # deliberately absent: pip loads native extensions.
 #
-# This release keeps the main units running as root, with the capability set
-# cut to what the three system steps use; the next release moves them to
-# $SERVICE_USER with an empty set, once this one has created the user and
-# re-owned the tree - the old updater is what applies these files, so the user
-# has to exist one release before the unit that runs as it.
+# Order of releases: the user has to exist and own the tree BEFORE a unit can
+# run as it, and the previous release's updater is what applies these files -
+# so 1.37.0 created the user and re-owned the tree with the units still root,
+# and this is the release that switches them. --units-only on a machine that
+# never took 1.37.0 would install a unit whose user does not exist; the
+# install_service_user call in install_updater_units covers that.
 read -r -d '' UPDATER_HARDENING <<HARD || true
+User=$SERVICE_USER
+Group=$SERVICE_USER
+LoadCredential=db.conf:$DB_CONF
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=-$APP_DIR -$CONFIG_DIR -$HELPER_DIR -/etc/systemd/system -/etc/cron.d -/etc/apache2 -/etc/blankee -/etc/tmpfiles.d -$LOG_DIR -/var/log/apache2 -/run/apache2 -/run/lock/apache2
+ReadWritePaths=-$APP_DIR -$CONFIG_DIR -$HELPER_DIR -$LOG_DIR
 ProtectHome=tmpfs
 Environment=PIP_NO_CACHE_DIR=1
 PrivateTmp=yes
@@ -232,7 +244,7 @@ LockPersonality=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
-CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_SETUID CAP_SETGID CAP_KILL
+CapabilityBoundingSet=
 HARD
 
 # What the helpers share. Same protections; ReadWritePaths is added per helper,
@@ -579,14 +591,14 @@ apply_permissions() {
   # read them. Blankee's own logs only - never a blanket pass over /var/log.
   find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -exec chgrp www-data {} + 2>/dev/null || true
   find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -exec chmod 640 {} + 2>/dev/null || true
-  # The updater appends its own lines to the live error log so an update shows
-  # up in /admin/logs. The directory stays root:www-data for Apache and the web
-  # tier; the service user gets in by ACL rather than by loosening the group.
-  # Best effort - without setfacl the updater still logs to the journal.
-  if command -v setfacl >/dev/null 2>&1; then
-    setfacl -m "u:$SERVICE_USER:rwx" "$LOG_DIR" 2>/dev/null || true
-    [[ -f "$LOG_DIR/blankee_error.log" ]] && setfacl -m "u:$SERVICE_USER:rw" "$LOG_DIR/blankee_error.log" 2>/dev/null || true
-  fi
+  # The updater appends its own lines to the LIVE error log so an update shows
+  # up in /admin/logs. It runs as $SERVICE_USER, a member of the www-data
+  # group, so group-write on that one file is what lets it in. That is not a
+  # new power for the web tier: mod_wsgi's workers already hold a writable
+  # descriptor to this exact file - it is where their stderr goes. The rotated
+  # copies stay 640; nothing appends to those. (An ACL would be tidier, but the
+  # acl package is not a given, and the updater cannot install packages.)
+  [[ -f "$LOG_DIR/blankee_error.log" ]] && chmod 660 "$LOG_DIR/blankee_error.log" 2>/dev/null || true
 }
 
 # The self-updater calls this after every checkout. Kept as early as possible so
