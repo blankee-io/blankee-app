@@ -8,6 +8,70 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.37.0 — 2026-09-12
+
+The first of two releases that take root away from the self-updater. This one
+is applied by the old updater, still running as root, and leaves behind a
+sandboxed root updater, a `blankee` service user that owns the code, and three
+small root helpers. The next release moves the updater itself onto that user.
+A machine that takes this release and never the next is strictly better off
+than before and loses nothing.
+
+### Security
+- **The updater's signing key is looked up where root says, not where the web
+  server says.** Whether a release's signature was checked, and against which
+  key, used to depend on `UPDATE_VERIFY_SIGNERS` in `blankee.conf` - a file the
+  web server owns. A compromised web process could blank that line (no check)
+  or point it at a key of its own. The key's path now comes from the updater's
+  own unit (`BLANKEE_SIGNERS`, default `/etc/blankee/allowed_signers`), the
+  file must be root's and writable by root alone, and a symlink or a directory
+  there is refused. `UPDATE_VERIFY_SIGNERS` is dead; setting it does nothing.
+  An installation with no key pinned - one upgraded in place from before
+  signing existed - is updated once unverified, says so, and is seeded the key
+  by the same update, so it verifies from the next one on.
+- **The updater runs in a sandbox.** `ProtectSystem=strict` with only the
+  directories it writes made writable, an empty home, a private `/tmp`, the
+  capability set cut to what the three system steps use, and the rest of
+  systemd's Protect*/Restrict* family. `systemd-analyze security` on the unit
+  went from 9.6 (UNSAFE) to 2.8; the three helpers score 2.1.
+- **The administrator password reset opens only from a root-owned file.** The
+  recovery page was gated on `RESET_ADMIN_PASSWORD` in `blankee.conf`, which the
+  web server owns - so the route's promise that "only someone with access to
+  the machine" could open it was not true. It is now read from
+  `/etc/blankee/blankee.conf`, owned by root; the application records the value
+  it consumed in its own file, so it can close the window after a reset and can
+  never open one. The README's recovery steps are updated to match.
+
+### Added
+- **A `blankee` service user.** The installer creates it and re-owns the code
+  tree, the virtualenv and the WSGI file to it. The web user still cannot write
+  any of them, which was the point of root owning them; the updater now can,
+  which is what lets the next release stop being root.
+- **Three root helpers.** `permissions`, `units` and `apache` are the only
+  things the updater does that need root. Each is now a oneshot unit started
+  by a `.path` unit watching a request file in `/run/blankee-update`, under the
+  same sandbox, allowed to write one place. A root updater does the work
+  in-process as before; a non-root one asks.
+- `install.sh --helper NAME`, what those units run.
+
+### Changed
+- **Unit files are written only when their content changes.** An update that
+  touches no unit no longer rewrites five of them and reloads systemd.
+- `install.sh --units-only` pins the signing key when none is pinned.
+- The installer hands the updater the port the site answers on, read off the
+  vhost it wrote, so a non-root updater need not read `.env` for it.
+
+### Fixed
+- **Updater lines reach `/admin/logs` again.** The updater was still appending
+  to `/var/log/apache2/blankee_error.log`; the logs moved to `/var/log/blankee`
+  in 1.4.0.
+
+### Notes
+- Rolling back past this release means re-owning the tree by hand; the
+  commands are in `docs/RELEASING.md` under "The updater's privileges".
+- An origin reached over SSH will not work from inside the sandbox (no
+  `known_hosts` in an empty home). The installer sets an HTTPS origin.
+
 ## 1.36.0 — 2026-09-12
 
 ### Fixed
