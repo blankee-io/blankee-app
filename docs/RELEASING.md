@@ -77,10 +77,12 @@ the WSGI file to it, and installs three root helpers - `permissions`, `units`,
 `/run/blankee-update/<name>.request`, each allowed to write one place. The
 updater uses them only when it is not root, which in A is never.
 
-**The next release (release B).** The main units switch to `User=blankee`, an
-empty capability set and `LoadCredential=` for the DB credentials. From then on
-root is the three helpers only, and the updater cannot write anything it does
-not own.
+**1.38.0 (release B).** The main units switch to `User=blankee`, an empty
+capability set and `LoadCredential=` for the DB credentials. From then on root
+is the three helpers only, and the updater cannot write anything it does not
+own. The live error log is made group-writable (660) so the updater's lines
+still reach `/admin/logs`; the web workers already held a writable descriptor
+to that file, so nothing new is granted.
 
 Two things follow that are easy to forget.
 
