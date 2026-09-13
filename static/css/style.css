@@ -12869,15 +12869,30 @@ td.credit-account-action-cell button {
 
 /* The list itself reuses .category-dropdown wholesale, so item padding, hover
    tint and separators are shared with the daily dashboard by definition. */
-.styled-dropdown-list {
+/* Two classes on purpose: .category-dropdown is declared further down and
+   sets width and overflow too, and with equal specificity the later rule
+   would win, leaving the list as narrow as the trigger. */
+.styled-dropdown .styled-dropdown-list {
     display: none;
+    /* .category-dropdown sizes itself to its parent, which here is the
+       trigger - and at header size the options are wider than the label
+       ("September" under "Q3"), so they clipped behind a horizontal scrollbar.
+       Size to the widest option instead, never narrower than the trigger. */
+    width: max-content;
     min-width: 100%;
-    /* The month/year header is up to 25px and bold, and the list would inherit
-       that. Reset to normal body type so the options look like the ones on the
-       daily dashboard rather than a stack of headings. */
-    font-size: 1rem;
+    max-width: 90vw;
+    white-space: nowrap;
+    overflow-x: hidden;
+    /* Flush with the left edge of the label it belongs to; the options sit
+       inside, left-aligned, with their own padding as the inset. */
+    left: 0;
+    /* The list inherits the header's size and colour on purpose - the choices
+       and the label they change are visibly the same control, and the size
+       follows the header down on narrow screens. Only the weight is reset,
+       so the open list reads as a list rather than a stack of headings; the
+       selected item is the one that stays heavier. */
     font-weight: 400;
-    color: var(--text-dark);
+    color: var(--primary);
     text-align: left;
 }
 
