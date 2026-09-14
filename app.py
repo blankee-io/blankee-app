@@ -9235,213 +9235,223 @@ def update_monthly_ca_totals(user_id, start_date):
 @app.route('/save_totals_remainders_d', methods=['POST'])
 @login_required
 def save_totals_remainders_d():
+    """The route. Parses the request; the work is in the function below."""
+    data = request.get_json(silent=True) or {}
+    start_date = None
+    if data.get('start_date'):
+        try:
+            start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
+        except Exception:
+            return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
     try:
-        data = request.get_json(silent=True) or {}
-        start_date_str = data.get('start_date')
-        user_id = current_user.id
+        return jsonify(_recalc_totals_remainders(current_user.id, start_date))
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-        # Fetch goofy_week_mode for the current user (Redis first, then MySQL)
-        goofy_week_mode = None
-        if app.config.get('REDIS_OK'):
-            try:
-                cached = _redis_client.get(f"users:v1:{user_id}")
-                if cached:
-                    user_data = json.loads(cached)
-                    if 'goofy_week_mode' in user_data:
-                        goofy_week_mode = bool(int(user_data['goofy_week_mode']))
-            except Exception:
-                pass
-        if goofy_week_mode is None:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-                row = cursor.fetchone()
-                goofy_week_mode = bool(row[0]) if row else False
-                cursor.close()
 
-        # Determine the starting date for incremental update
-        if start_date_str:
-            try:
-                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-            except Exception:
-                return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
-        else:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT MIN(date) FROM totals_remainders_d WHERE user_id = %s", (user_id,))
-                min_date_row = cursor.fetchone()
-                start_date = min_date_row[0] if min_date_row and min_date_row[0] else _user_today_for(current_user.id)
-                cursor.close()
+def _recalc_totals_remainders(user_id, start_date=None):
+    """
+    Recompute the daily, weekly and monthly totals from start_date (default:
+    the earliest day on record) and return what the pages redraw from.
 
-        date_to_remainder = {}
+    No request in sight: the bank importer calls this from a pull, where
+    there is no request and no current_user, and the route above is only
+    the HTTP face of the same work.
+    """
 
-        # Run daily, weekly, and monthly updates (these now update Redis automatically)
-        update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
-        update_daily_savings_for_savings_category(user_id, start_date)
-        update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
-        update_monthly_totals(user_id, start_date, date_to_remainder)
-
-        # Try to fetch from Redis first, fallback to MySQL
-        cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id, start_date)
-        cached_weekly = _get_totals_remainders_from_redis('totals_remainders', user_id, start_date)
-        cached_monthly = _get_totals_remainders_from_redis('totals_remainders_m', user_id, start_date)
-        cached_savings = _get_savings_entries_from_redis(user_id, start_date)
-        
-        if cached_daily and cached_weekly and cached_monthly and cached_savings:
-            # Redis hit - use cached data
-            
-            # Enrich daily totals with last_week_remainder
-            results = []
-            weekly_by_date = {row['date']: row for row in cached_weekly}
-            
-            for daily_row in cached_daily:
-                current_date = datetime.strptime(daily_row['date'], '%Y-%m-%d').date() if isinstance(daily_row['date'], str) else daily_row['date']
-                
-                # Find the most recent previous week-end date
-                # In goofy mode, weekly data is stored on Thursday (weekday 3)
-                # In normal mode, weekly data is stored on Friday (weekday 4)
-                if goofy_week_mode:
-                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
-                else:
-                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
-                
-                prev_week_end_str = prev_week_end.isoformat()
-                last_week_remainder = float(weekly_by_date.get(prev_week_end_str, {}).get('remainder', 0.0))
-                
-                result = {
-                    'date': current_date if isinstance(current_date, date) else datetime.strptime(current_date, '%Y-%m-%d').date(),
-                    'total_income': float(daily_row.get('total_income', 0)),
-                    'total_expenses': float(daily_row.get('total_expenses', 0)),
-                    'remainder': float(daily_row.get('remainder', 0)),
-                    'last_day_remainder': float(daily_row.get('last_day_remainder', 0)),
-                    'last_week_remainder': last_week_remainder
-                }
-                results.append(result)
-            
-            # Format monthly results
-            monthly_results = [
-                {
-                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
-                    'total_income': float(row.get('total_income', 0)),
-                    'total_expenses': float(row.get('total_expenses', 0)),
-                    'remainder': float(row.get('remainder', 0)),
-                    'last_month_remainder': float(row.get('last_month_remainder', 0))
-                }
-                for row in cached_monthly
-            ]
-            
-            # Format savings entries
-            savings_entries = [
-                {
-                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
-                    'amount': float(row.get('amount', 0))
-                }
-                for row in cached_savings
-            ]
-            
-            # Check for negative remainders and create notifications
-            check_negative_remainders(user_id)
-            
-            return jsonify({
-                "status": "success",
-                "updated_totals_remainders": results,
-                "updated_monthly_totals_remainders": monthly_results,
-                "updated_savings_entries": savings_entries
-            })
-        
-        # Redis miss - fallback to MySQL
-        
-        # Prepare the response: for each date, fetch last_week_remainder from totals_remainders table
+    # Fetch goofy_week_mode for the current user (Redis first, then MySQL)
+    goofy_week_mode = None
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(f"users:v1:{user_id}")
+            if cached:
+                user_data = json.loads(cached)
+                if 'goofy_week_mode' in user_data:
+                    goofy_week_mode = bool(int(user_data['goofy_week_mode']))
+        except Exception:
+            pass
+    if goofy_week_mode is None:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT date FROM totals_remainders_d
-                WHERE user_id = %s AND date >= %s
-                ORDER BY date ASC
-            """, (user_id, start_date))
-            all_dates = [row[0] for row in cursor.fetchall()]
-
-            results = []
-            for current_date in all_dates:
-                # Find the most recent previous week-end date
-                # In goofy mode, weekly data is stored on Thursday (weekday 3)
-                # In normal mode, weekly data is stored on Friday (weekday 4)
-                if goofy_week_mode:
-                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
-                else:
-                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
-
-                cursor.execute("""
-                    SELECT remainder FROM totals_remainders
-                    WHERE user_id = %s AND date = %s
-                """, (user_id, prev_week_end))
-                last_week_remainder_row = cursor.fetchone()
-                last_week_remainder = float(last_week_remainder_row[0]) if last_week_remainder_row else 0.0
-
-                cursor.execute("""
-                    SELECT total_income, total_expenses, remainder, last_day_remainder
-                    FROM totals_remainders_d
-                    WHERE user_id = %s AND date = %s
-                """, (user_id, current_date))
-                row = cursor.fetchone()
-                if not row:
-                    continue
-
-                result = {
-                    'date': current_date,
-                    'total_income': float(row[0]),
-                    'total_expenses': float(row[1]),
-                    'remainder': float(row[2]),
-                    'last_day_remainder': float(row[3]),
-                    'last_week_remainder': float(last_week_remainder)
-                }
-                results.append(result)
-
-            # Fetch updated monthly totals
-            cursor.execute("""
-                SELECT date, total_income, total_expenses, remainder, last_month_remainder
-                FROM totals_remainders_m
-                WHERE user_id = %s AND date >= %s
-                ORDER BY date ASC
-            """, (user_id, start_date))
-            monthly_results = [
-                {
-                    'date': row[0],
-                    'total_income': float(row[1]),
-                    'total_expenses': float(row[2]),
-                    'remainder': float(row[3]),
-                    'last_month_remainder': float(row[4])
-                }
-                for row in cursor.fetchall()
-            ]
-
-            # --- Fetch updated savings entries ---
-            cursor.execute("""
-                SELECT date, amount FROM savings_entries
-                WHERE user_id = %s AND date >= %s
-                ORDER BY date ASC
-            """, (user_id, start_date))
-            savings_entries = [
-                {'date': row[0], 'amount': float(row[1])}
-                for row in cursor.fetchall()
-            ]
+            cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+            row = cursor.fetchone()
+            goofy_week_mode = bool(row[0]) if row else False
             cursor.close()
 
+    # Determine the starting date for incremental update
+    if start_date is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT MIN(date) FROM totals_remainders_d WHERE user_id = %s", (user_id,))
+            min_date_row = cursor.fetchone()
+            start_date = min_date_row[0] if min_date_row and min_date_row[0] else _user_today_for(user_id)
+            cursor.close()
+
+    date_to_remainder = {}
+
+    # Run daily, weekly, and monthly updates (these now update Redis automatically)
+    update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
+    update_daily_savings_for_savings_category(user_id, start_date)
+    update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
+    update_monthly_totals(user_id, start_date, date_to_remainder)
+
+    # Try to fetch from Redis first, fallback to MySQL
+    cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id, start_date)
+    cached_weekly = _get_totals_remainders_from_redis('totals_remainders', user_id, start_date)
+    cached_monthly = _get_totals_remainders_from_redis('totals_remainders_m', user_id, start_date)
+    cached_savings = _get_savings_entries_from_redis(user_id, start_date)
+    
+    if cached_daily and cached_weekly and cached_monthly and cached_savings:
+        # Redis hit - use cached data
+        
+        # Enrich daily totals with last_week_remainder
+        results = []
+        weekly_by_date = {row['date']: row for row in cached_weekly}
+        
+        for daily_row in cached_daily:
+            current_date = datetime.strptime(daily_row['date'], '%Y-%m-%d').date() if isinstance(daily_row['date'], str) else daily_row['date']
+            
+            # Find the most recent previous week-end date
+            # In goofy mode, weekly data is stored on Thursday (weekday 3)
+            # In normal mode, weekly data is stored on Friday (weekday 4)
+            if goofy_week_mode:
+                prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
+            else:
+                prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
+            
+            prev_week_end_str = prev_week_end.isoformat()
+            last_week_remainder = float(weekly_by_date.get(prev_week_end_str, {}).get('remainder', 0.0))
+            
+            result = {
+                'date': current_date if isinstance(current_date, date) else datetime.strptime(current_date, '%Y-%m-%d').date(),
+                'total_income': float(daily_row.get('total_income', 0)),
+                'total_expenses': float(daily_row.get('total_expenses', 0)),
+                'remainder': float(daily_row.get('remainder', 0)),
+                'last_day_remainder': float(daily_row.get('last_day_remainder', 0)),
+                'last_week_remainder': last_week_remainder
+            }
+            results.append(result)
+        
+        # Format monthly results
+        monthly_results = [
+            {
+                'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                'total_income': float(row.get('total_income', 0)),
+                'total_expenses': float(row.get('total_expenses', 0)),
+                'remainder': float(row.get('remainder', 0)),
+                'last_month_remainder': float(row.get('last_month_remainder', 0))
+            }
+            for row in cached_monthly
+        ]
+        
+        # Format savings entries
+        savings_entries = [
+            {
+                'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                'amount': float(row.get('amount', 0))
+            }
+            for row in cached_savings
+        ]
+        
         # Check for negative remainders and create notifications
         check_negative_remainders(user_id)
         
-        return jsonify({
+        return ({
             "status": "success",
             "updated_totals_remainders": results,
             "updated_monthly_totals_remainders": monthly_results,
             "updated_savings_entries": savings_entries
         })
-
-    except mysql.connector.Error as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
     
+    # Redis miss - fallback to MySQL
+    
+    # Prepare the response: for each date, fetch last_week_remainder from totals_remainders table
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT date FROM totals_remainders_d
+            WHERE user_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (user_id, start_date))
+        all_dates = [row[0] for row in cursor.fetchall()]
+
+        results = []
+        for current_date in all_dates:
+            # Find the most recent previous week-end date
+            # In goofy mode, weekly data is stored on Thursday (weekday 3)
+            # In normal mode, weekly data is stored on Friday (weekday 4)
+            if goofy_week_mode:
+                prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
+            else:
+                prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
+
+            cursor.execute("""
+                SELECT remainder FROM totals_remainders
+                WHERE user_id = %s AND date = %s
+            """, (user_id, prev_week_end))
+            last_week_remainder_row = cursor.fetchone()
+            last_week_remainder = float(last_week_remainder_row[0]) if last_week_remainder_row else 0.0
+
+            cursor.execute("""
+                SELECT total_income, total_expenses, remainder, last_day_remainder
+                FROM totals_remainders_d
+                WHERE user_id = %s AND date = %s
+            """, (user_id, current_date))
+            row = cursor.fetchone()
+            if not row:
+                continue
+
+            result = {
+                'date': current_date,
+                'total_income': float(row[0]),
+                'total_expenses': float(row[1]),
+                'remainder': float(row[2]),
+                'last_day_remainder': float(row[3]),
+                'last_week_remainder': float(last_week_remainder)
+            }
+            results.append(result)
+
+        # Fetch updated monthly totals
+        cursor.execute("""
+            SELECT date, total_income, total_expenses, remainder, last_month_remainder
+            FROM totals_remainders_m
+            WHERE user_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (user_id, start_date))
+        monthly_results = [
+            {
+                'date': row[0],
+                'total_income': float(row[1]),
+                'total_expenses': float(row[2]),
+                'remainder': float(row[3]),
+                'last_month_remainder': float(row[4])
+            }
+            for row in cursor.fetchall()
+        ]
+
+        # --- Fetch updated savings entries ---
+        cursor.execute("""
+            SELECT date, amount FROM savings_entries
+            WHERE user_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (user_id, start_date))
+        savings_entries = [
+            {'date': row[0], 'amount': float(row[1])}
+            for row in cursor.fetchall()
+        ]
+        cursor.close()
+
+    # Check for negative remainders and create notifications
+    check_negative_remainders(user_id)
+    
+    return ({
+        "status": "success",
+        "updated_totals_remainders": results,
+        "updated_monthly_totals_remainders": monthly_results,
+        "updated_savings_entries": savings_entries
+    })
+
+
 @app.route('/api/credit-interest-entries')
 @login_required
 def api_credit_interest_entries():
@@ -9561,177 +9571,184 @@ def api_credit_interest_entries():
 @app.route('/save_ca_daily_balance', methods=['POST'])
 @login_required
 def save_ca_daily_balance():
+    """The route. Parses the request; the work is in the function below."""
+    data = request.get_json(silent=True) or {}
+    start_date = None
+    if data.get('start_date'):
+        try:
+            start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
+        except Exception:
+            return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
     try:
-        data = request.get_json(silent=True) or {}
-        start_date_str = data.get('start_date')
-        user_id = current_user.id
+        return jsonify(_recalc_ca_daily_balance(current_user.id, start_date))
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-        # Fetch goofy_week_mode for the current user (Redis first, then MySQL)
-        goofy_week_mode = None
-        if app.config.get('REDIS_OK'):
-            try:
-                cached = _redis_client.get(f"users:v1:{user_id}")
-                if cached:
-                    user_data = json.loads(cached)
-                    if 'goofy_week_mode' in user_data:
-                        goofy_week_mode = bool(int(user_data['goofy_week_mode']))
-            except Exception:
-                pass
-        if goofy_week_mode is None:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-                row = cursor.fetchone()
-                goofy_week_mode = bool(row[0]) if row else False
-                cursor.close()
 
-        # Determine the starting date for incremental update
-        if start_date_str:
-            try:
-                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-            except Exception:
-                return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
-        else:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT MIN(date) FROM c_a_balances_d
-                    WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
-                """, (user_id,))
-                min_date_row = cursor.fetchone()
-                start_date = min_date_row[0] if min_date_row and min_date_row[0] else _user_today_for(current_user.id)
-                cursor.close()
+def _recalc_ca_daily_balance(user_id, start_date=None):
+    """
+    Recompute the credit-card balances (daily, weekly, monthly) from
+    start_date and return what the pages redraw from. See
+    _recalc_totals_remainders for why this is not the route itself.
+    """
 
-        # Update CA balances (daily, weekly, monthly) - these now update Redis automatically
-        update_daily_ca_totals(user_id, start_date)
-        update_weekly_ca_totals(user_id, start_date, goofy_week_mode)
-        update_monthly_ca_totals(user_id, start_date)
+    # Fetch goofy_week_mode for the current user (Redis first, then MySQL)
+    goofy_week_mode = None
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(f"users:v1:{user_id}")
+            if cached:
+                user_data = json.loads(cached)
+                if 'goofy_week_mode' in user_data:
+                    goofy_week_mode = bool(int(user_data['goofy_week_mode']))
+        except Exception:
+            pass
+    if goofy_week_mode is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+            row = cursor.fetchone()
+            goofy_week_mode = bool(row[0]) if row else False
+            cursor.close()
 
-        # Try to fetch from Redis first, fallback to MySQL
-        cached_daily = _get_ca_balances_from_redis('c_a_balances_d', user_id, start_date=start_date)
-        cached_weekly = _get_ca_balances_from_redis('c_a_balances', user_id, start_date=start_date)
-        cached_monthly = _get_ca_balances_from_redis('c_a_balances_m', user_id, start_date=start_date)
-        
-        if cached_daily and cached_weekly and cached_monthly:
-            # Redis hit - use cached data
-            
-            # Format daily balances
-            ca_balances_d = [
-                {
-                    'id': row.get('id'),
-                    'account_id': row.get('account_id'),
-                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
-                    'total_expenses': float(row.get('total_expenses', 0)),
-                    'balance': float(row.get('balance', 0))
-                }
-                for row in cached_daily
-            ]
-            
-            # Format weekly balances
-            ca_balances = [
-                {
-                    'id': row.get('id'),
-                    'account_id': row.get('account_id'),
-                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
-                    'total_expenses': float(row.get('total_expenses', 0)),
-                    'balance': float(row.get('balance', 0))
-                }
-                for row in cached_weekly
-            ]
-            
-            # Format monthly balances
-            ca_balances_m = [
-                {
-                    'id': row.get('id'),
-                    'account_id': row.get('account_id'),
-                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
-                    'total_expenses': float(row.get('total_expenses', 0)),
-                    'balance': float(row.get('balance', 0))
-                }
-                for row in cached_monthly
-            ]
-            
-            return jsonify({
-                "status": "success",
-                "updated_ca_balances_d": ca_balances_d,
-                "updated_ca_balances": ca_balances,
-                "updated_ca_balances_m": ca_balances_m
-            })
-        
-        # Redis miss - fallback to MySQL
-        
-        # Fetch updated daily CA balances
+    # Determine the starting date for incremental update
+    if start_date is None:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT * FROM c_a_balances_d
-                WHERE account_id IN (
-                    SELECT id FROM credit_accounts WHERE user_id = %s
-                ) AND date >= %s
-                ORDER BY account_id ASC, date ASC
-            """, (user_id, start_date))
-            ca_balances_d = [
-                {
-                    'id': row[0],
-                    'account_id': row[1],
-                    'date': row[2],
-                    'total_expenses': float(row[3]) if row[3] is not None else 0.0,
-                    'balance': float(row[4]) if row[4] is not None else 0.0
-                }
-                for row in cursor.fetchall()
-            ]
-
-            # Fetch updated weekly CA balances
-            cursor.execute("""
-                SELECT * FROM c_a_balances
-                WHERE account_id IN (
-                    SELECT id FROM credit_accounts WHERE user_id = %s
-                ) AND date >= %s
-                ORDER BY account_id ASC, date ASC
-            """, (user_id, start_date))
-            ca_balances = [
-                {
-                    'id': row[0],
-                    'account_id': row[1],
-                    'date': row[2],
-                    'total_expenses': float(row[3]) if row[3] is not None else 0.0,
-                    'balance': float(row[4]) if row[4] is not None else 0.0
-                }
-                for row in cursor.fetchall()
-            ]
-
-            # Fetch updated monthly CA balances
-            cursor.execute("""
-                SELECT * FROM c_a_balances_m
-                WHERE account_id IN (
-                    SELECT id FROM credit_accounts WHERE user_id = %s
-                ) AND date >= %s
-                ORDER BY account_id ASC, date ASC
-            """, (user_id, start_date))
-            ca_balances_m = [
-                {
-                    'id': row[0],
-                    'account_id': row[1],
-                    'date': row[2],
-                    'total_expenses': float(row[3]) if row[3] is not None else 0.0,
-                    'balance': float(row[4]) if row[4] is not None else 0.0
-                }
-                for row in cursor.fetchall()
-            ]
+                SELECT MIN(date) FROM c_a_balances_d
+                WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+            """, (user_id,))
+            min_date_row = cursor.fetchone()
+            start_date = min_date_row[0] if min_date_row and min_date_row[0] else _user_today_for(user_id)
             cursor.close()
 
-        return jsonify({
+    # Update CA balances (daily, weekly, monthly) - these now update Redis automatically
+    update_daily_ca_totals(user_id, start_date)
+    update_weekly_ca_totals(user_id, start_date, goofy_week_mode)
+    update_monthly_ca_totals(user_id, start_date)
+
+    # Try to fetch from Redis first, fallback to MySQL
+    cached_daily = _get_ca_balances_from_redis('c_a_balances_d', user_id, start_date=start_date)
+    cached_weekly = _get_ca_balances_from_redis('c_a_balances', user_id, start_date=start_date)
+    cached_monthly = _get_ca_balances_from_redis('c_a_balances_m', user_id, start_date=start_date)
+    
+    if cached_daily and cached_weekly and cached_monthly:
+        # Redis hit - use cached data
+        
+        # Format daily balances
+        ca_balances_d = [
+            {
+                'id': row.get('id'),
+                'account_id': row.get('account_id'),
+                'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                'total_expenses': float(row.get('total_expenses', 0)),
+                'balance': float(row.get('balance', 0))
+            }
+            for row in cached_daily
+        ]
+        
+        # Format weekly balances
+        ca_balances = [
+            {
+                'id': row.get('id'),
+                'account_id': row.get('account_id'),
+                'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                'total_expenses': float(row.get('total_expenses', 0)),
+                'balance': float(row.get('balance', 0))
+            }
+            for row in cached_weekly
+        ]
+        
+        # Format monthly balances
+        ca_balances_m = [
+            {
+                'id': row.get('id'),
+                'account_id': row.get('account_id'),
+                'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                'total_expenses': float(row.get('total_expenses', 0)),
+                'balance': float(row.get('balance', 0))
+            }
+            for row in cached_monthly
+        ]
+        
+        return ({
             "status": "success",
             "updated_ca_balances_d": ca_balances_d,
             "updated_ca_balances": ca_balances,
             "updated_ca_balances_m": ca_balances_m
         })
-
-    except mysql.connector.Error as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
     
+    # Redis miss - fallback to MySQL
+    
+    # Fetch updated daily CA balances
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM c_a_balances_d
+            WHERE account_id IN (
+                SELECT id FROM credit_accounts WHERE user_id = %s
+            ) AND date >= %s
+            ORDER BY account_id ASC, date ASC
+        """, (user_id, start_date))
+        ca_balances_d = [
+            {
+                'id': row[0],
+                'account_id': row[1],
+                'date': row[2],
+                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
+                'balance': float(row[4]) if row[4] is not None else 0.0
+            }
+            for row in cursor.fetchall()
+        ]
+
+        # Fetch updated weekly CA balances
+        cursor.execute("""
+            SELECT * FROM c_a_balances
+            WHERE account_id IN (
+                SELECT id FROM credit_accounts WHERE user_id = %s
+            ) AND date >= %s
+            ORDER BY account_id ASC, date ASC
+        """, (user_id, start_date))
+        ca_balances = [
+            {
+                'id': row[0],
+                'account_id': row[1],
+                'date': row[2],
+                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
+                'balance': float(row[4]) if row[4] is not None else 0.0
+            }
+            for row in cursor.fetchall()
+        ]
+
+        # Fetch updated monthly CA balances
+        cursor.execute("""
+            SELECT * FROM c_a_balances_m
+            WHERE account_id IN (
+                SELECT id FROM credit_accounts WHERE user_id = %s
+            ) AND date >= %s
+            ORDER BY account_id ASC, date ASC
+        """, (user_id, start_date))
+        ca_balances_m = [
+            {
+                'id': row[0],
+                'account_id': row[1],
+                'date': row[2],
+                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
+                'balance': float(row[4]) if row[4] is not None else 0.0
+            }
+            for row in cursor.fetchall()
+        ]
+        cursor.close()
+
+    return ({
+        "status": "success",
+        "updated_ca_balances_d": ca_balances_d,
+        "updated_ca_balances": ca_balances,
+        "updated_ca_balances_m": ca_balances_m
+    })
+
+
 def _move_returns_to_forecast(user_id, entry, new_date):
     """
     Whether moving this entry to new_date turns it back into a forecast.
@@ -22903,7 +22920,7 @@ def get_user_device_tokens(user_id, platform=None):
         cursor.close()
         return tokens or []
 
-def add_notification(user_id, message, notification_date=None, kind=None):
+def add_notification(user_id, message, notification_date=None, kind=None, notification_type=None):
     """
     Create a new notification for a user and optionally send via email.
     
@@ -22914,6 +22931,8 @@ def add_notification(user_id, message, notification_date=None, kind=None):
         kind: Which sort of notification this is, from notification_kinds. Only
             the email is affected - the in-app notification is always created,
             because the per-type switches are about what lands in a mailbox.
+        notification_type: what goes in notifications.type, so a later
+            writer can find this notification without matching its text.
     
     Returns:
         The ID of the created notification
@@ -22926,9 +22945,9 @@ def add_notification(user_id, message, notification_date=None, kind=None):
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("""
-            INSERT INTO notifications (user_id, date, message, is_read)
-            VALUES (%s, %s, %s, 0)
-        """, (user_id, notification_date, message))
+            INSERT INTO notifications (user_id, date, message, is_read, type)
+            VALUES (%s, %s, %s, 0, %s)
+        """, (user_id, notification_date, message, notification_type))
         notification_id = cursor.lastrowid
         
         # Check if user has email notifications enabled
@@ -23011,145 +23030,15 @@ def add_notification(user_id, message, notification_date=None, kind=None):
     return notification_id
 
 
-def _create_pending_transactions_notification(user_id, new_count):
-    """
-    Create a notification for pending transactions waiting for categorization.
-    Removes any previous pending transaction notifications before creating new one.
-    
-    Args:
-        user_id: The user ID to create the notification for
-        new_count: Number of new transactions that were auto-imported
-    """
-    # Get total count of pending transactions (entries with pending=1)
-    total_pending = 0
-    
-    try:
-        if app.config.get('REDIS_OK'):
-            # Count pending income entries
-            income_key = f"income_entries:v1:{user_id}"
-            cached = _redis_client.get(income_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-            
-            # Count pending expense entries
-            expense_key = f"expense_entries:v1:{user_id}"
-            cached = _redis_client.get(expense_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-            
-            # Count pending c_expense entries
-            c_expense_key = f"c_expense_entries:v1:{user_id}"
-            cached = _redis_client.get(c_expense_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-    except Exception as e:
-        log_error(app.logger, 'NOTIFICATION', f"Error counting pending transactions: {e}")
-        # Use the new_count as fallback
-        total_pending = new_count
-    
-    if total_pending <= 0:
-        return
-    
-    # Delete any previous pending transaction notifications for this user
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            DELETE FROM notifications
-            WHERE user_id = %s
-            AND message LIKE %s
-        """, (user_id, '%pending transaction%synced from your bank%'))
-        deleted_count = cursor.rowcount
-        conn.commit()
-        cursor.close()
-        if deleted_count > 0:
-            log_info(app.logger, 'NOTIFICATION', f"Deleted {deleted_count} old pending transaction notification(s) for user {user_id}")
-            # Invalidate Redis cache after deleting old notifications
-            if app.config.get('REDIS_OK'):
-                try:
-                    _redis_client.delete(f"notifications:v1:{user_id}")
-                except Exception:
-                    pass
-    
-    # Build message with link to pending transactions page
-    txn_word = "transaction" if total_pending == 1 else "transactions"
-    need_word = "needs" if total_pending == 1 else "need"
-    message = f'You have {total_pending} pending {txn_word} synced from your bank accounts that {need_word} to be categorized. <a href="/pending-transactions">Click here to review</a>.'
-    
-    # Create new notification
-    add_notification(user_id, message, kind='pending_transactions')
-    log_info(app.logger, 'NOTIFICATION', f"Created pending transactions notification for user {user_id}: {total_pending} pending")
+def _create_pending_transactions_notification(user_id, new_count=None):
+    """The bank importer owns this notification now; kept as a name for the routes."""
+    import bank_import
+    bank_import.notify(user_id)
 
 
 def _clear_pending_transactions_notification_if_none(user_id):
-    """
-    Check if there are any remaining pending transactions.
-    If none, delete the pending transactions notification.
-    
-    Args:
-        user_id: The user ID to check
-        
-    Returns:
-        True if notification was deleted, False otherwise
-    """
-    total_pending = 0
-    
-    try:
-        if app.config.get('REDIS_OK'):
-            # Count pending income entries
-            income_key = f"income_entries:v1:{user_id}"
-            cached = _redis_client.get(income_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-            
-            # Count pending expense entries
-            expense_key = f"expense_entries:v1:{user_id}"
-            cached = _redis_client.get(expense_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-            
-            # Count pending c_expense entries
-            c_expense_key = f"c_expense_entries:v1:{user_id}"
-            cached = _redis_client.get(c_expense_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-    except Exception as e:
-        log_error(app.logger, 'NOTIFICATION', f"Error counting pending transactions for cleanup: {e}")
-        return False
-    
-    if total_pending > 0:
-        return False
-    
-    # No pending transactions left - delete the notification
-    try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                DELETE FROM notifications
-                WHERE user_id = %s
-                AND message LIKE %s
-            """, (user_id, '%pending transaction%synced from your bank%'))
-            deleted_count = cursor.rowcount
-            conn.commit()
-            cursor.close()
-            if deleted_count > 0:
-                log_info(app.logger, 'NOTIFICATION', f"Cleared pending transaction notification for user {user_id} (no pending left)")
-                # Invalidate Redis cache after deleting notification
-                if app.config.get('REDIS_OK'):
-                    try:
-                        _redis_client.delete(f"notifications:v1:{user_id}")
-                    except Exception:
-                        pass
-                return True
-    except Exception as e:
-        log_error(app.logger, 'NOTIFICATION', f"Error deleting pending transaction notification: {e}")
-    
-    return False
+    import bank_import
+    return bank_import.clear_notification_if_none(user_id)
 
 
 def check_negative_remainders(user_id):

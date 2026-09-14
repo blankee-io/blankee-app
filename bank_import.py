@@ -3,10 +3,9 @@ Transaction import from the bank feed.
 
 What the previous vendor's webhook did in a thousand lines of app.py, done
 as a pull: ask the provider for the transactions since the last time,
-store them, and hand the posted ones to the budget. This module owns the
-first two steps and the rules around them; the budget side (entries,
-guesses, forecasts) is added on top and lives here too, so that the whole
-of "a bank spoke" is one file rather than one file and a corner of app.py.
+store them, and hand the posted ones to the budget. The whole of "a bank
+spoke" lives in this one file - the pull and its rules first, the budget
+side (entries, guesses, forecasts, the notification) after.
 
 The rules that are not obvious from the code:
 
@@ -29,6 +28,26 @@ The rules that are not obvious from the code:
   * Every pull asks for a little history as well as the new days
     (OVERLAP_DAYS), because a bank can post a transaction dated last week
     today. Rows already stored are updated, not duplicated.
+
+  * A posted transaction becomes an entry AT ONCE, in the category the
+    guess chose, marked pending so the person can confirm or change it in
+    the same modal that asks about forecasts. Remainders are right the
+    moment the bank speaks; the person corrects afterwards rather than
+    gating. The guess, in order: the merchant memory, then (when switched
+    on) Claude, then a forecast entry of exactly this amount nearby, then
+    Uncategorized.
+
+  * A guess that names a specific forecast entry turns THAT entry into the
+    real one, at the bank's amount and date - the same thing the evening
+    prompt's "came through, different amount" does. A guess that only
+    names a category writes a new entry and lets it deplete the category's
+    forecast the way a typed entry would.
+
+  * A forecast on a bank-fed table that has passed unmatched is moved to
+    tomorrow on each pull, exactly as a "No" in the evening prompt moves
+    it. The bank now answers for those tables, so the prompt stops asking
+    about them; this is what keeps an unmatched forecast from being
+    counted as spent.
 
 Redis-first, like the rest of the app: linked_transactions is written
 through bank_redis and the flush persists it. The user is hydrated first
@@ -73,6 +92,22 @@ PENDING_GRACE_DAYS = 3
 # The kinds of linked account whose transactions become entries.
 IMPORTED_KINDS = ('checking', 'credit')
 
+# Forecast entries this close to a transaction's date are offered as what it
+# might be, and searched for an exact amount.
+CANDIDATE_DAYS = 7
+
+ENTRY_TABLES = {
+    'income': 'income_entries',
+    'expense': 'expense_entries',
+    'c_expense': 'c_expense_entries',
+    'c_payment': 'c_payment_entries',
+}
+
+# The entry tables that carry a pending flag - the ones the modal lists.
+PENDING_TABLES = ('income_entries', 'expense_entries', 'c_expense_entries')
+
+NOTIFICATION_TYPE = 'pending_transactions'
+
 
 # ------------------------------------------------------------------ helpers
 
@@ -101,6 +136,11 @@ def _flag(value) -> int:
 
 def _parse(iso: str) -> date:
     return datetime.strptime(iso, '%Y-%m-%d').date()
+
+
+def _user_today(user_id: int) -> date:
+    from bucket_confirmation import _user_today as f
+    return f(user_id)
 
 
 # ----------------------------------------------------------------- accounts
@@ -337,10 +377,449 @@ def _ensure_hydrated(user_id: int) -> None:
     _hydrate_user_data is the thread's target and is safe to call inline.
     """
     import redis_manager
-    if redis_manager.is_user_hydrated(user_id):
-        return
-    log_info(logger, TAG, f'user {user_id}: hydrating before the pull')
-    redis_manager._hydrate_user_data(user_id)
+    if not redis_manager.is_user_hydrated(user_id):
+        log_info(logger, TAG, f'user {user_id}: hydrating before the pull')
+        redis_manager._hydrate_user_data(user_id)
+    # Hydration writes no key for a table with no rows, and add_entry only
+    # appends to a key that exists - so a first entry into an empty table
+    # would reach MySQL and not the cache the pages read. An empty list is
+    # the same thing hydration would have written had it written anything.
+    for table in ENTRY_TABLES.values():
+        if redis_manager.get_table_cache(table, user_id) is None:
+            redis_manager.set_table_cache(table, user_id, [], mark_dirty=False)
+
+
+# ------------------------------------------------------------- the budget
+
+def route(user_id: int, row: Dict[str, Any], account: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Where a posted transaction goes: {'entry_type', 'table',
+    'credit_account_id'}. None when it has nowhere to go yet - a card with
+    no Blankee account behind it - in which case the row stays unimported
+    and is tried again on the next pull.
+    """
+    from bank_redis import linked_account_kind, get_credit_account_for_linked_account
+    kind = linked_account_kind(account)
+    outflow = (row.get('transaction_type') == 'expense')
+    if kind == 'checking':
+        entry_type = 'expense' if outflow else 'income'
+        return {'entry_type': entry_type, 'table': ENTRY_TABLES[entry_type], 'credit_account_id': None}
+    if kind == 'credit':
+        card = get_credit_account_for_linked_account(user_id, str(row.get('account_id')))
+        if not card or card.get('id') is None:
+            log_warning(logger, TAG, f"user {user_id}: no Blankee card behind linked account "
+                                     f"{row.get('account_id')}; transaction {row.get('transaction_id')} waits")
+            return None
+        # Money in on a card is a payment towards it; money out is a purchase.
+        entry_type = 'c_expense' if outflow else 'c_payment'
+        return {'entry_type': entry_type, 'table': ENTRY_TABLES[entry_type], 'credit_account_id': int(card['id'])}
+    return None
+
+
+def _category_names(user_id: int, table: str) -> Dict[int, str]:
+    from bucket_confirmation import _categories
+    return _categories(table, user_id)
+
+
+def _card_category_ids(user_id: int, credit_account_id: Optional[int]) -> Optional[set]:
+    """The c_expense category ids of one card, or None when no card is meant."""
+    if credit_account_id is None:
+        return None
+    import redis_manager
+    cats = redis_manager.get_table_cache('c_expense_categories', user_id) or []
+    out = set()
+    for c in cats:
+        try:
+            if int(c.get('account_id') or 0) == int(credit_account_id) and c.get('id') is not None:
+                out.add(int(c['id']))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def candidates(user_id: int, table: str, txn_date: str,
+               credit_account_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Forecast entries in `table` dated within CANDIDATE_DAYS of the
+    transaction, nearest first:
+        [{entry_id, category_id, category_name, forecast_amount, forecast_date, gap}]
+    For a card, only that card's categories. What the amount guess searches,
+    and what the modal offers as "this might be that".
+    """
+    import redis_manager
+    entries = redis_manager.get_table_cache(table, user_id) or []
+    names = _category_names(user_id, table)
+    allowed = _card_category_ids(user_id, credit_account_id) if table == 'c_expense_entries' else None
+    when = _parse(txn_date)
+    out = []
+    for e in entries:
+        if _flag(e.get('is_bucket')) != 1:
+            continue
+        try:
+            amount = float(e.get('amount') or 0)
+            cid = int(e.get('category_id'))
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0 or (allowed is not None and cid not in allowed):
+            continue
+        d = _iso(e.get('date'))
+        if not d:
+            continue
+        gap = abs((_parse(d) - when).days)
+        if gap > CANDIDATE_DAYS:
+            continue
+        out.append({'entry_id': e.get('id'), 'category_id': cid, 'category_name': names.get(cid, ''),
+                    'forecast_amount': amount, 'forecast_date': d, 'gap': gap})
+    out.sort(key=lambda c: (c['gap'], c['forecast_date']))
+    return out
+
+
+def _canonical(user_id: int, entry_type: str, category_id: Optional[int]) -> Optional[int]:
+    """The user-level category id behind a table-level one (a card's mirror -> the expense category)."""
+    if category_id is None:
+        return None
+    if entry_type != 'c_expense':
+        return int(category_id)
+    try:
+        from app import _canonical_expense_category_id
+        return _canonical_expense_category_id(user_id, category_id)
+    except Exception:
+        return None
+
+
+def guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
+          cands: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    What a posted transaction is, and why:
+        {'category_id', 'canonical_id', 'name', 'confidence', 'forecast'}
+    category_id is what the entry table takes (a card's own category for a
+    card); canonical_id the user-level one for the memory columns; forecast
+    the candidate this IS when the guess named one, else None.
+
+    In order: the merchant memory; (Claude, when it is switched on); a
+    forecast nearby of exactly this amount; Uncategorized, with no
+    confidence at all.
+    """
+    from redis_crud import lookup_category_memory, resolve_suggestion_for_entry, get_uncategorized_category_id
+    entry_type, table, card = plan['entry_type'], plan['table'], plan['credit_account_id']
+    direction = 'incoming' if entry_type == 'income' else 'outgoing'
+    account_type = 'CREDIT' if card is not None else 'DEPOSITORY'
+    names = _category_names(user_id, table)
+
+    seen = set()
+    for key in (row.get('description'), row.get('merchant_name')):
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        m = lookup_category_memory(user_id, description=key, category_type=direction, account_type=account_type)
+        if m and m.get('category_id'):
+            canonical = int(m['category_id'])
+            cid = resolve_suggestion_for_entry(user_id, entry_type, card, canonical)
+            if cid:
+                return {'category_id': int(cid), 'canonical_id': canonical, 'name': names.get(int(cid), ''),
+                        'confidence': 'memory', 'forecast': None}
+
+    cents = _cents(row.get('amount'))
+    for c in cands:
+        if _cents(c['forecast_amount']) == cents:
+            return {'category_id': c['category_id'], 'canonical_id': _canonical(user_id, entry_type, c['category_id']),
+                    'name': c['category_name'], 'confidence': 'amount', 'forecast': c}
+
+    unc = get_uncategorized_category_id(user_id, entry_type, account_id=card)
+    return {'category_id': int(unc) if unc else None, 'canonical_id': _canonical(user_id, entry_type, unc),
+            'name': names.get(int(unc), 'Uncategorized') if unc else 'Uncategorized',
+            'confidence': None, 'forecast': None}
+
+
+def _snapshot(table: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Enough of a forecast entry to put it back later."""
+    return {
+        'table': table,
+        'entry_id': entry.get('id'),
+        'category_id': entry.get('category_id'),
+        'date': _iso(entry.get('date')),
+        'original_date': _iso(entry.get('original_date')),
+        'amount': float(entry.get('amount') or 0),
+        'original_amount': (float(entry['original_amount']) if entry.get('original_amount') is not None else None),
+        'recurring_id': entry.get('recurring_id'),
+    }
+
+
+def apply_guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
+                g: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Write the entry the guess describes and say how the linked row should
+    record it. None when nothing could be written (the row stays unimported
+    and is tried again).
+
+    A card payment is written confirmed: there is no category to ask about.
+    Everything else is written pending, for the modal.
+    """
+    from redis_crud import add_entry, update_entry
+    entry_type, table, card = plan['entry_type'], plan['table'], plan['credit_account_id']
+    amount = float(row['amount'])
+    when = _iso(row['date'])
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    mark = {'transaction_id': row['transaction_id'], 'imported_entry_type': entry_type, 'imported_at': now}
+
+    if entry_type == 'c_payment':
+        eid = add_entry(table, {'account_id': card, 'date': when, 'amount': amount, 'recurring_id': None,
+                                'processed': 1, 'auto_confirmed': 0, 'is_auto_adjustment': 0}, user_id)
+        if not eid:
+            return None
+        return dict(mark, imported_to_entry_id=int(eid))
+
+    if g.get('category_id') is None:
+        log_warning(logger, TAG, f"user {user_id}: no category at all for {table}; transaction "
+                                 f"{row.get('transaction_id')} waits")
+        return None
+    cid = int(g['category_id'])
+    direction = 'incoming' if entry_type == 'income' else 'outgoing'
+    suggestion = {
+        'custom_category_suggestion': g.get('name'),
+        'custom_category_id': g.get('canonical_id'),
+        'custom_category_type': direction,
+        'custom_category_confidence': g.get('confidence'),
+        'custom_suggestion_at': now if g.get('confidence') else None,
+    }
+
+    forecast = g.get('forecast')
+    if forecast and forecast.get('entry_id') is not None:
+        # The forecast becomes the record, at the bank's figure and on the
+        # bank's day - what the evening prompt's "came through, different
+        # amount" does, then dated when the money actually moved.
+        import redis_manager
+        from bucket_confirmation import resolve
+        entries = redis_manager.get_table_cache(table, user_id) or []
+        target = next((e for e in entries if str(e.get('id')) == str(forecast['entry_id'])), None)
+        if target is None:
+            return None
+        snapshot = _snapshot(table, target)
+        ok, msg, change = resolve(user_id, table, forecast['entry_id'], 'came_through_amount', amount)
+        if not ok or change is None:
+            log_warning(logger, TAG, f"user {user_id}: forecast {forecast['entry_id']} could not be taken: {msg}")
+            return None
+        update_entry(table, forecast['entry_id'], {'date': when, 'original_date': None, 'pending': 1,
+                                                   'auto_confirmed': 0}, user_id)
+        return dict(mark, imported_to_entry_id=int(forecast['entry_id']), depleted_bucket=snapshot, **suggestion)
+
+    # A category, not a particular forecast: a new entry, depleting the
+    # category's forecast the way a typed entry does (a bill's due
+    # occurrence in full, an allowance by the amount).
+    from bucket_utils import find_next_bucket_for_category, process_manual_entry_with_bucket
+    snapshot = None
+    try:
+        bucket = find_next_bucket_for_category(table, cid, user_id)
+        if bucket:
+            snapshot = _snapshot(table, bucket)
+    except Exception as e:
+        log_warning(logger, TAG, f'user {user_id}: could not look ahead at the forecast for {table}/{cid}: {e}')
+    data = {'category_id': cid, 'date': when, 'original_date': None, 'amount': amount, 'recurring_id': None,
+            'is_bucket': 0, 'original_amount': None, 'processed': 1, 'auto_confirmed': 0,
+            'is_auto_adjustment': 0, 'pending': 1}
+    if table != 'income_entries':
+        data['bundle_item_id'] = None
+    eid = add_entry(table, data, user_id)
+    if not eid:
+        return None
+    try:
+        process_manual_entry_with_bucket(table, cid, when, Decimal(str(amount)), user_id)
+    except Exception as e:
+        log_exception(logger, TAG, f'user {user_id}: depleting the forecast for {table}/{cid} failed: {e}')
+    return dict(mark, imported_to_entry_id=int(eid), depleted_bucket=snapshot, **suggestion)
+
+
+def create_entries(user_id: int) -> Dict[str, Any]:
+    """
+    Every posted, unimported transaction becomes an entry. Returns
+    {'imported', 'skipped', 'cards', 'earliest'} - cards says whether a
+    card's figures moved, earliest is the first day the totals changed on.
+    """
+    from bank_redis import get_linked_transactions, bulk_upsert_linked_transactions
+    accounts = importable_accounts(user_id)
+    stored = list(get_linked_transactions(user_id) or [])
+    updates: List[Dict[str, Any]] = []
+    earliest = None
+    cards = False
+    skipped = 0
+    for row in stored:
+        if _flag(row.get('pending')) or row.get('imported_to_entry_id'):
+            continue
+        acc = accounts.get(str(row.get('account_id')))
+        if not acc:
+            continue
+        plan = route(user_id, row, acc)
+        if not plan:
+            skipped += 1
+            continue
+        when = _iso(row.get('date'))
+        if plan['entry_type'] == 'c_payment':
+            g: Dict[str, Any] = {}
+        else:
+            g = guess(user_id, row, plan, candidates(user_id, plan['table'], when, plan['credit_account_id']))
+        update = apply_guess(user_id, dict(row, date=when), plan, g)
+        if not update:
+            skipped += 1
+            continue
+        updates.append(update)
+        cards = cards or plan['credit_account_id'] is not None
+        earliest = when if earliest is None or when < earliest else earliest
+    if updates:
+        bulk_upsert_linked_transactions(updates, user_id)
+    return {'imported': len(updates), 'skipped': skipped, 'cards': cards, 'earliest': earliest}
+
+
+def fed_tables(user_id: int) -> Dict[str, Optional[set]]:
+    """
+    {table: category ids, or None for all of them} for the entry tables a
+    bank feed now answers for: income and expense when a checking account
+    is linked, and a linked card's own categories.
+    """
+    from bank_redis import get_user_linked_account_flags
+    flags = get_user_linked_account_flags(user_id)
+    out: Dict[str, Optional[set]] = {}
+    if flags.get('has_checking'):
+        out['income_entries'] = None
+        out['expense_entries'] = None
+    allowed = set()
+    for cid in flags.get('linked_credit_ids') or []:
+        allowed |= _card_category_ids(user_id, int(cid)) or set()
+    if allowed:
+        out['c_expense_entries'] = allowed
+    return out
+
+
+def defer_unmatched(user_id: int) -> Tuple[int, Optional[str]]:
+    """
+    Move every forecast on a bank-fed table that has passed unmatched to
+    tomorrow - exactly what "No, ask me tomorrow" does in the evening
+    prompt, and through the same code. Returns (moved, earliest date any
+    of them sat on), the latter so the totals can be recomputed from there.
+    """
+    import redis_manager
+    from bucket_confirmation import resolve
+    today = _user_today(user_id).isoformat()
+    moved = 0
+    earliest = None
+    for table, allowed in fed_tables(user_id).items():
+        entries = redis_manager.get_table_cache(table, user_id) or []
+        due = []
+        for e in entries:
+            if _flag(e.get('is_bucket')) != 1:
+                continue
+            try:
+                amount = float(e.get('amount') or 0)
+                cid = int(e.get('category_id'))
+            except (TypeError, ValueError):
+                continue
+            if amount <= 0 or (allowed is not None and cid not in allowed):
+                continue
+            d = _iso(e.get('date'))
+            if d and d < today:
+                due.append((e.get('id'), d))
+        for eid, d in due:
+            ok, msg, change = resolve(user_id, table, eid, 'defer')
+            if ok and change:
+                moved += 1
+                earliest = d if earliest is None or d < earliest else earliest
+    return moved, earliest
+
+
+def recalc(user_id: int, since: Optional[str], cards: bool) -> None:
+    """The totals, from the first day that changed; the cards' too when one moved."""
+    from app import app, _recalc_totals_remainders, _recalc_ca_daily_balance
+    start = _parse(since) if since else None
+    with app.app_context():
+        _recalc_totals_remainders(user_id, start)
+        if cards:
+            _recalc_ca_daily_balance(user_id, start)
+
+
+# ------------------------------------------------------------- notification
+
+def _count_pending_db(user_id: int) -> int:
+    queries = (
+        "SELECT COUNT(*) FROM income_entries e JOIN income_categories c ON c.id = e.category_id "
+        " WHERE c.user_id = %s AND e.pending = 1",
+        "SELECT COUNT(*) FROM expense_entries e JOIN expense_categories c ON c.id = e.category_id "
+        " WHERE c.user_id = %s AND e.pending = 1",
+        "SELECT COUNT(*) FROM c_expense_entries e JOIN c_expense_categories c ON c.id = e.category_id "
+        "  JOIN credit_accounts a ON a.id = c.account_id WHERE a.user_id = %s AND e.pending = 1",
+    )
+    total = 0
+    try:
+        with get_db_pool().get_cursor() as cursor:
+            for sql in queries:
+                cursor.execute(sql, (user_id,))
+                row = cursor.fetchone()
+                if row:
+                    total += int((row[0] if not isinstance(row, dict) else list(row.values())[0]) or 0)
+    except Exception as e:
+        log_exception(logger, TAG, f'user {user_id}: could not count pending entries: {e}')
+    return total
+
+
+def count_pending(user_id: int) -> int:
+    """How many imported entries still wait for the person - Redis when hydrated, MySQL otherwise."""
+    import redis_manager
+    if not redis_manager.is_user_hydrated(user_id):
+        return _count_pending_db(user_id)
+    total = 0
+    for table in PENDING_TABLES:
+        rows = redis_manager.get_table_cache(table, user_id)
+        if rows is None:
+            return _count_pending_db(user_id)
+        total += sum(1 for e in rows if _flag(e.get('pending')))
+    return total
+
+
+def _forget_notifications_cache(user_id: int) -> None:
+    """Every notification writer must do this, or the badge counts one the page does not show."""
+    import redis_manager
+    try:
+        if redis_manager._redis_client:
+            redis_manager._redis_client.delete(f'notifications:v1:{user_id}')
+    except Exception:
+        pass
+
+
+def _delete_notification(user_id: int) -> int:
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            cursor.execute("DELETE FROM notifications WHERE user_id = %s AND type = %s", (user_id, NOTIFICATION_TYPE))
+            n = cursor.rowcount
+    except Exception as e:
+        log_error(logger, TAG, f'user {user_id}: could not clear the pending notification: {e}')
+        return 0
+    if n:
+        _forget_notifications_cache(user_id)
+    return n
+
+
+def notify(user_id: int) -> int:
+    """
+    One notification, replaced rather than added to, saying how many
+    imported entries wait. Found again by notifications.type, not by its
+    wording. The link is the dashboard: the modal opens there by itself,
+    and the push deep-links wherever the message's href points.
+    """
+    total = count_pending(user_id)
+    _delete_notification(user_id)
+    if total <= 0:
+        return 0
+    from app import add_notification
+    one = total == 1
+    message = (f'{total} bank transaction{"" if one else "s"} {"was" if one else "were"} added with a guessed '
+               f'category. <a href="/dashboard">Check {"it" if one else "them"}</a>.')
+    add_notification(user_id, message, kind=NOTIFICATION_TYPE, notification_type=NOTIFICATION_TYPE)
+    return total
+
+
+def clear_notification_if_none(user_id: int) -> bool:
+    """Drop the notification once nothing waits. True when one was dropped."""
+    if count_pending(user_id) > 0:
+        return False
+    return _delete_notification(user_id) > 0
 
 
 # -------------------------------------------------------------------- pull
@@ -348,11 +827,13 @@ def _ensure_hydrated(user_id: int) -> None:
 def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
     """
     One pull for one user: fetch, normalize, reconcile with what is stored,
-    store. Returns what happened, for the button's toast and the daily
-    pull's ledger:
+    store; then the posted rows into the budget, unmatched forecasts moved
+    on, the totals recomputed, the notification refreshed. Returns what
+    happened, for the button's toast and the daily pull's ledger:
 
         {'ok', 'error', 'message', 'fetched', 'new', 'updated', 'matched',
-         'removed', 'pending', 'window_start', 'balances', 'errors'}
+         'removed', 'pending', 'imported', 'skipped', 'deferred',
+         'window_start', 'balances', 'errors'}
 
     'error' is a short stable code (the provider's, or 'no_accounts');
     'message' is for the person. A provider failure has already been
@@ -364,6 +845,7 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
     result: Dict[str, Any] = {
         'ok': False, 'error': None, 'message': '', 'source': source,
         'fetched': 0, 'new': 0, 'updated': 0, 'matched': 0, 'removed': 0, 'pending': 0,
+        'imported': 0, 'skipped': 0, 'deferred': 0,
         'window_start': None, 'balances': [], 'errors': [],
     }
     provider = get_bank_provider()
@@ -413,8 +895,26 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
         store(user_id, upserts, deletes)
         result.update(counts)
         result['pending'] = sum(1 for r in rows if r['pending'])
-
         update_last_linked_transaction_date(user_id)
+
+        # Into the budget. The store is flushed first so an entry created
+        # below can never outlive the transaction row it points at.
+        redis_manager.flush_dirty_tables_for_user(user_id)
+        made = create_entries(user_id)
+        moved, moved_from = defer_unmatched(user_id)
+        result.update(imported=made['imported'], skipped=made['skipped'], deferred=moved)
+        if made['imported'] or moved:
+            since = min(d for d in (made['earliest'], moved_from) if d) if (made['earliest'] or moved_from) else None
+            try:
+                recalc(user_id, since, made['cards'])
+            except Exception as e:
+                log_exception(logger, TAG, f'user {user_id}: recalculation after the pull failed: {e}')
+        if made['imported']:
+            try:
+                notify(user_id)
+            except Exception as e:
+                log_warning(logger, TAG, f'user {user_id}: notification after the pull: {e}')
+
         try:
             redis_manager.flush_dirty_tables_for_user(user_id)
         except Exception as e:
@@ -430,7 +930,8 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
         log_info(logger, TAG, f'user {user_id} ({source}): window from {window_start}, '
                               f'{result["fetched"]} fetched, {counts["new"]} new, {counts["updated"]} updated, '
                               f'{counts["matched"]} matched, {counts["removed"]} removed, '
-                              f'{result["pending"]} pending')
+                              f'{result["pending"]} pending; {made["imported"]} into the budget, '
+                              f'{made["skipped"]} waiting, {moved} forecast(s) moved on')
         return result
     except Exception as e:
         log_exception(logger, TAG, f'user {user_id}: pull failed: {e}')
@@ -443,6 +944,8 @@ def _summary(result: Dict[str, Any]) -> str:
     parts = []
     if result['new']:
         parts.append(f"{result['new']} new transaction{'s' if result['new'] != 1 else ''}")
+    if result['imported']:
+        parts.append(f"{result['imported']} added to the budget")
     if result['updated']:
         parts.append(f"{result['updated']} updated")
     if result['removed']:
