@@ -1,11 +1,16 @@
 """
 Claude (Anthropic) as the enrichment provider.
 
-Phase 1 of the bank work: configuration, verification and gating only. The
-enrichment itself - batching imported transactions through the Messages API
-and answering suggest_category - arrives with the transaction import; until
-then enrich() returns its input untouched and suggest_category() returns None,
-exactly as the null provider does. What is real now:
+Two halves. The first is configuration, verification and gating; the second
+is the work itself - a batch of imported transactions goes through the
+Messages API once per pull and comes back sorted into the person's own
+categories, by name, which is then checked against the list that was sent
+(a name that is not on it is dropped, never invented). What is sent, and
+all that is sent: each transaction's description, amount and direction, and
+the names of the person's categories. enrich() still returns its input
+untouched - there is no per-transaction enrichment beyond the category.
+
+The first half:
 
   * a per-user API key, Fernet-encrypted in user_ai_settings (not Redis-first:
     a credential must not sit in a 7-day cache - the same rule as
@@ -23,6 +28,8 @@ Keyed on Blankee's user_id throughout, as providers/base.py requires.
 """
 
 import hashlib
+import json
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -45,7 +52,28 @@ MODELS = [
 DEFAULT_MODEL = MODELS[0][0]
 _MODEL_IDS = {m for m, _ in MODELS}
 
-_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+
+# Transactions per request. A day's pull is a handful; a first pull after a
+# quiet spell can be more, and forty lines is well inside what a small model
+# answers accurately in one go.
+BATCH_SIZE = 40
+
+# The instruction. The category names follow it in the same system prompt,
+# so the whole of it is the same for every batch of one user's.
+SYSTEM_PROMPT = (
+    "You sort a person's bank transactions into their own budget categories.\n"
+    "Below are the names of their categories for money going out and for money coming in. "
+    "Then, one per line, the transactions to sort: index | direction | amount | description. "
+    "Bank descriptions are terse - abbreviated merchant names, reference numbers, city names.\n\n"
+    "Answer with a JSON array and nothing else, one object per transaction you are reasonably "
+    "sure about: {\"i\": <index>, \"category\": \"<name exactly as listed>\", "
+    "\"confidence\": \"high\" | \"medium\" | \"low\"}. Use the names exactly as given, from the "
+    "list for the transaction's direction. Leave out any transaction you are not reasonably "
+    "sure about. Never invent a category."
+)
+
+CONFIDENCES = ('high', 'medium', 'low')
 
 
 def _fernet():
@@ -106,6 +134,66 @@ def has_active_linked_account(user_id: int) -> bool:
     except Exception as e:
         log_warning(logger, 'AI', f'Could not determine linked accounts for user {user_id}: {e}')
         return False
+
+
+def _parse_answer(text: str) -> List[Dict[str, Any]]:
+    """
+    The JSON array out of an answer, forgiving the wrapping a model adds -
+    a code fence, a sentence before it. Anything that is not a list of
+    objects is nothing at all.
+    """
+    raw = (text or '').strip()
+    if '```' in raw:
+        inner = raw.split('```')
+        raw = max(inner, key=len).strip()
+        if raw.lower().startswith('json'):
+            raw = raw[4:].strip()
+    start, end = raw.find('['), raw.rfind(']')
+    if start < 0 or end <= start:
+        return []
+    try:
+        parsed = json.loads(raw[start:end + 1])
+    except ValueError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [p for p in parsed if isinstance(p, dict)]
+
+
+def _record_error(user_id: int, message: str) -> None:
+    """The panel shows this. The fingerprint stays: a failed batch is not an unverified key."""
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            cursor.execute("UPDATE user_ai_settings SET last_error = %s WHERE user_id = %s",
+                           ((message or '')[:255], user_id))
+    except Exception as e:
+        log_warning(logger, 'AI', f'Could not record the error for user {user_id}: {e}')
+
+
+def _category_options(user_id: int) -> Dict[str, List[Dict[str, Any]]]:
+    """The user's own categories by direction, for a one-off suggest_category call."""
+    out: Dict[str, List[Dict[str, Any]]] = {'outgoing': [], 'incoming': []}
+    tables = {'outgoing': 'expense_categories', 'incoming': 'income_categories'}
+    for direction, table in tables.items():
+        rows = None
+        try:
+            import redis_manager
+            rows = redis_manager.get_table_cache(table, user_id)
+        except Exception:
+            rows = None
+        if rows is None:
+            try:
+                with get_db_pool().get_cursor(dictionary=True) as cursor:
+                    cursor.execute(f"SELECT id, name, hidden FROM {table} WHERE user_id = %s", (user_id,))
+                    rows = cursor.fetchall()
+            except Exception as e:
+                log_warning(logger, 'AI', f'Could not read {table} for user {user_id}: {e}')
+                rows = []
+        for r in rows or []:
+            if r.get('id') is None or int(r.get('hidden') or 0):
+                continue
+            out[direction].append({'id': int(r['id']), 'name': r.get('name') or ''})
+    return out
 
 
 def user_opted_in(user_id: int) -> bool:
@@ -247,53 +335,162 @@ class ClaudeEnrichmentProvider(EnrichmentProvider):
 
     @staticmethod
     def _probe(api_key: str, model: str) -> Tuple[bool, str]:
-        payload = {
-            'model': model,
-            'max_tokens': 8,
-            'messages': [{'role': 'user', 'content': 'Reply with the single word OK.'}],
-        }
-        headers = {'x-api-key': api_key, 'anthropic-version': API_VERSION, 'content-type': 'application/json'}
-        try:
-            with httpx.Client(timeout=_TIMEOUT) as client:
-                resp = client.post(API_URL, json=payload, headers=headers)
-        except httpx.HTTPError as e:
-            return (False, f'Could not reach Anthropic ({type(e).__name__}). Try again.')
-        if resp.status_code == 200:
+        ok, text, _status = ClaudeEnrichmentProvider._messages(
+            api_key, model, None, 'Reply with the single word OK.', max_tokens=8)
+        if ok:
             return (True, 'The key works. AI categorization can be turned on.')
+        return (False, text)
+
+    @staticmethod
+    def _messages(api_key: str, model: str, system: Optional[str], user_text: str,
+                  max_tokens: int = 4000) -> Tuple[bool, str, Optional[int]]:
+        """
+        One Messages request. Returns (ok, text, status): the answer's text
+        when ok, a sentence for the person when not.
+
+        Raw HTTP rather than the SDK, as the key test has been since it was
+        written - one endpoint, one shape, and no dependency to ship. Rate
+        limits and overloads get one retry after a pause; anything else is
+        reported as it is.
+        """
+        payload: Dict[str, Any] = {
+            'model': model,
+            'max_tokens': max_tokens,
+            'messages': [{'role': 'user', 'content': user_text}],
+        }
+        if system:
+            payload['system'] = system
+        # Sorting is not thinking work. Haiku takes no effort setting.
+        if not model.startswith('claude-haiku'):
+            payload['output_config'] = {'effort': 'low'}
+        headers = {'x-api-key': api_key, 'anthropic-version': API_VERSION, 'content-type': 'application/json'}
+        resp = None
+        for attempt in (1, 2):
+            try:
+                with httpx.Client(timeout=_TIMEOUT) as client:
+                    resp = client.post(API_URL, json=payload, headers=headers)
+            except httpx.HTTPError as e:
+                if attempt == 1:
+                    time.sleep(2)
+                    continue
+                return (False, f'Could not reach Anthropic ({type(e).__name__}). Try again.', None)
+            if resp.status_code in (429, 529, 503) and attempt == 1:
+                time.sleep(2)
+                continue
+            break
+        if resp is None:
+            return (False, 'Could not reach Anthropic. Try again.', None)
+        if resp.status_code == 200:
+            try:
+                body = resp.json()
+            except ValueError:
+                return (False, 'Anthropic sent an unreadable answer.', 200)
+            if body.get('stop_reason') == 'refusal':
+                return (False, 'Anthropic declined to answer this request.', 200)
+            text = ''.join((b.get('text') or '') for b in (body.get('content') or []) if b.get('type') == 'text')
+            return (True, text, 200)
         detail = ''
         try:
             detail = (resp.json().get('error') or {}).get('message') or ''
         except ValueError:
             pass
         if resp.status_code == 401:
-            return (False, 'Anthropic rejected the key. Check it was copied whole, or create a new one.')
+            return (False, 'Anthropic rejected the key. Check it was copied whole, or create a new one.', 401)
         if resp.status_code == 403:
-            return (False, 'Anthropic refused the request for this key. Check the key\'s permissions on platform.claude.com.')
+            return (False, 'Anthropic refused the request for this key. Check the key\'s permissions on platform.claude.com.', 403)
         if resp.status_code == 404 or 'model' in detail.lower():
-            return (False, f'That model is not available to this key ({detail or "not found"}). Try the other model.')
+            return (False, f'That model is not available to this key ({detail or "not found"}). Try the other model.', resp.status_code)
         if resp.status_code == 400 and 'credit' in detail.lower():
-            return (False, 'The key works but the account has no credit. Add billing on platform.claude.com.')
+            return (False, 'The key works but the account has no credit. Add billing on platform.claude.com.', 400)
         if resp.status_code == 429:
-            return (False, 'Anthropic is rate-limiting this key right now. Try again in a minute.')
+            return (False, 'Anthropic is rate-limiting this key right now. Try again in a minute.', 429)
         if resp.status_code in (529, 503):
-            return (False, 'Anthropic is overloaded at the moment. Try again shortly.')
-        return (False, f'Anthropic answered with status {resp.status_code}{": " + detail if detail else ""}.')
+            return (False, 'Anthropic is overloaded at the moment. Try again shortly.', resp.status_code)
+        return (False, f'Anthropic answered with status {resp.status_code}{": " + detail if detail else ""}.', resp.status_code)
 
-    # ----------------------------------------------- the contract (phase 2)
+    # ------------------------------------------------------- the sorting
+
+    def suggest_categories_batch(self, user_id: int, items: List[Dict[str, Any]],
+                                 options: Dict[str, List[Dict[str, Any]]]) -> Dict[int, Dict[str, Any]]:
+        """
+        Sort many transactions in one request (BATCH_SIZE per request).
+
+        items:   [{'i', 'direction': 'outgoing'|'incoming', 'amount', 'description'}]
+        options: {'outgoing': [{'id', 'name'}], 'incoming': [{'id', 'name'}]} -
+                 the names the answer may use, and the ids they stand for.
+
+        Returns {i: {'category_id', 'category_type', 'category_name',
+        'confidence'}} for the transactions answered with a listed name; the
+        rest are simply absent. Nothing here when the gate is closed. A
+        failed request is logged and shown on the panel, and the batches
+        answered so far are kept.
+        """
+        if not items or not self.is_active(user_id):
+            return {}
+        cfg = self.get_config(user_id)
+        if not cfg['api_key'] or not cfg['verified']:
+            return {}
+        by_name = {d: {(o.get('name') or '').strip().lower(): o for o in (options.get(d) or []) if o.get('name')}
+                   for d in ('outgoing', 'incoming')}
+        system = (SYSTEM_PROMPT
+                  + '\n\nCategories for money going out:\n'
+                  + '\n'.join('- ' + o['name'] for o in (options.get('outgoing') or []))
+                  + '\n\nCategories for money coming in:\n'
+                  + '\n'.join('- ' + o['name'] for o in (options.get('incoming') or [])))
+        out: Dict[int, Dict[str, Any]] = {}
+        for start in range(0, len(items), BATCH_SIZE):
+            chunk = items[start:start + BATCH_SIZE]
+            by_index = {int(it['i']): it for it in chunk}
+            lines = []
+            for it in chunk:
+                direction = 'in' if it.get('direction') == 'incoming' else 'out'
+                description = (it.get('description') or '').replace('\n', ' ').strip()[:120]
+                lines.append(f"{int(it['i'])} | {direction} | {float(it.get('amount') or 0):.2f} | {description}")
+            ok, answer, status = self._messages(cfg['api_key'], cfg['model'], system, '\n'.join(lines))
+            if not ok:
+                log_warning(logger, 'AI', f'user {user_id}: categorisation request failed ({status}): {answer}')
+                _record_error(user_id, answer)
+                return out
+            for parsed in _parse_answer(answer):
+                try:
+                    i = int(parsed.get('i'))
+                except (TypeError, ValueError):
+                    continue
+                item = by_index.get(i)
+                if item is None or i in out:
+                    # Not asked about, or already answered: the first answer stands.
+                    continue
+                name = str(parsed.get('category') or '').strip().lower()
+                option = by_name.get(item.get('direction') or 'outgoing', {}).get(name)
+                if not option:
+                    continue
+                confidence = str(parsed.get('confidence') or 'medium').strip().lower()
+                if confidence not in CONFIDENCES:
+                    confidence = 'medium'
+                out[i] = {'category_id': int(option['id']), 'category_type': item.get('direction'),
+                          'category_name': option['name'], 'confidence': confidence}
+        log_info(logger, 'AI', f'user {user_id}: {len(out)} of {len(items)} transaction(s) sorted by Claude')
+        return out
+
+    # ------------------------------------------------------- the contract
 
     def sync_categories(self, user_id: int) -> bool:
-        # Categories travel with each enrichment request; nothing to push.
+        # Categories travel with each request; nothing to push.
         return False
 
     def enrich(self, user_id: int, transactions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        # Phase 2. Returning the input, never an empty list - see the null
-        # provider for why.
+        # The category is the enrichment, and the importer asks for it in
+        # batches through suggest_categories_batch. Returning the input,
+        # never an empty list - see the null provider for why.
         return transactions
 
     def suggest_category(self, user_id: int, transaction: Dict[str, Any],
                          account_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        # Phase 2.
-        return None
+        """One transaction, against the user's own categories. The batch of one."""
+        direction = 'incoming' if transaction.get('transaction_type') == 'income' else 'outgoing'
+        item = {'i': 0, 'direction': direction, 'amount': abs(float(transaction.get('amount') or 0)),
+                'description': transaction.get('description') or transaction.get('merchant_name') or ''}
+        return self.suggest_categories_batch(user_id, [item], _category_options(user_id)).get(0)
 
     def recurrence_map(self, user_id: int) -> Dict[str, Any]:
         return {}

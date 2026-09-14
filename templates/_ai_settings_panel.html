@@ -93,10 +93,12 @@
           {% elif ai.enabled %}On. New transactions get a suggested category to confirm.
           {% else %}Off. Nothing is sent anywhere until you switch this on.{% endif %}
         </p>
-        <p class="ai-privacy-note">When this is on, the description and amount of each imported
-           transaction are sent to Anthropic under your key so Claude can suggest a category.
-           Nothing else is sent, and Anthropic's API terms do not use it for training. Your key
-           stays stored, encrypted, even if you turn this off or disconnect your bank.</p>
+        <p class="ai-privacy-note">When this is on, the description, amount and direction of each
+           imported transaction, together with the names of your own categories, are sent to
+           Anthropic under your key so Claude can pick a category. Nothing else is sent - no
+           balances, no account details, no history - and Anthropic's API terms do not use it for
+           training. Your key stays stored, encrypted, even if you turn this off or disconnect
+           your bank.</p>
       </div>
     </div>
   </div>

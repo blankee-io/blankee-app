@@ -428,9 +428,12 @@ The wizard (step 4, only after a bank is linked) and the profile page hold the
 key (encrypted), the model choice, a **Test** button, and the switch. The
 switch cannot be turned on without a tested key and a linked bank account;
 disconnecting the last bank turns it off while keeping the key. When it is on,
-the description and amount of imported transactions are sent to Anthropic;
-nothing else is, and Anthropic's API terms do not use it for training. To turn
-the feature off for an installation, set `ENRICHMENT_PROVIDER=null`.
+each pull sends Anthropic one request with the description, amount and
+direction of the transactions that came in, together with the names of your
+categories; nothing else is sent - no balances, no account details - and
+Anthropic's API terms do not use it for training. A transaction the merchant
+memory already knows is not sent at all. To turn the feature off for an
+installation, set `ENRICHMENT_PROVIDER=null`.
 
 ## Forgotten administrator password
 

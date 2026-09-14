@@ -488,25 +488,12 @@ def _canonical(user_id: int, entry_type: str, category_id: Optional[int]) -> Opt
         return None
 
 
-def guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
-          cands: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    What a posted transaction is, and why:
-        {'category_id', 'canonical_id', 'name', 'confidence', 'forecast'}
-    category_id is what the entry table takes (a card's own category for a
-    card); canonical_id the user-level one for the memory columns; forecast
-    the candidate this IS when the guess named one, else None.
-
-    In order: the merchant memory; (Claude, when it is switched on); a
-    forecast nearby of exactly this amount; Uncategorized, with no
-    confidence at all.
-    """
-    from redis_crud import lookup_category_memory, resolve_suggestion_for_entry, get_uncategorized_category_id
-    entry_type, table, card = plan['entry_type'], plan['table'], plan['credit_account_id']
+def _memory_pick(user_id: int, row: Dict[str, Any], plan: Dict[str, Any]) -> Optional[int]:
+    """The canonical category the merchant memory holds for this row, or None."""
+    from redis_crud import lookup_category_memory
+    entry_type, card = plan['entry_type'], plan['credit_account_id']
     direction = 'incoming' if entry_type == 'income' else 'outgoing'
     account_type = 'CREDIT' if card is not None else 'DEPOSITORY'
-    names = _category_names(user_id, table)
-
     seen = set()
     for key in (row.get('description'), row.get('merchant_name')):
         if not key or key in seen:
@@ -514,15 +501,140 @@ def guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
         seen.add(key)
         m = lookup_category_memory(user_id, description=key, category_type=direction, account_type=account_type)
         if m and m.get('category_id'):
-            canonical = int(m['category_id'])
-            cid = resolve_suggestion_for_entry(user_id, entry_type, card, canonical)
-            if cid:
-                return {'category_id': int(cid), 'canonical_id': canonical, 'name': names.get(int(cid), ''),
-                        'confidence': 'memory', 'forecast': None}
+            return int(m['category_id'])
+    return None
+
+
+def _category_options(user_id: int, table: str, credit_account_id: Optional[int]) -> List[Dict[str, Any]]:
+    """
+    [{'id', 'name'}] a row on `table` may be sorted into: the direction's
+    categories, or a card's own. Hidden categories and interest charges
+    are nobody's to choose.
+    """
+    import redis_manager
+    from bucket_confirmation import ENTRY_TABLES as CATEGORY_TABLES
+    cats = redis_manager.get_table_cache(CATEGORY_TABLES[table], user_id) or []
+    allowed = _card_category_ids(user_id, credit_account_id) if table == 'c_expense_entries' else None
+    out = []
+    for c in cats:
+        try:
+            cid = int(c['id'])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if _flag(c.get('hidden')) or _flag(c.get('is_interest')):
+            continue
+        if allowed is not None and cid not in allowed:
+            continue
+        out.append({'id': cid, 'name': c.get('name') or ''})
+    return out
+
+
+def _claude_picks(user_id: int, todo: List[Tuple[Dict[str, Any], Dict[str, Any], Optional[int]]]) -> Dict[str, Dict[str, Any]]:
+    """
+    Claude's answer for every row the memory had none for, one request per
+    pull (per set of categories - a card's rows are asked against the
+    card's categories). {transaction_id: {'category_id', 'canonical_id',
+    'name', 'confidence'}}. Empty when the feature is off for this user.
+
+    What leaves the server: each row's description, amount and direction,
+    and the names of the categories. Nothing else.
+    """
+    from providers import get_enrichment_provider
+    provider = get_enrichment_provider()
+    if getattr(provider, 'name', '') != 'claude' or not hasattr(provider, 'suggest_categories_batch'):
+        return {}
+    asks = [(row, plan) for row, plan, mem in todo if mem is None and plan['entry_type'] != 'c_payment']
+    if not asks:
+        return {}
+    try:
+        if not provider.is_active(user_id):
+            log_info(logger, TAG, f'user {user_id}: AI categorisation is off; {len(asks)} row(s) left to the other guesses')
+            return {}
+    except Exception as e:
+        log_warning(logger, TAG, f'user {user_id}: could not tell whether AI is on: {e}')
+        return {}
+
+    groups: Dict[Tuple[str, Optional[int]], List[Tuple[Dict[str, Any], Dict[str, Any]]]] = {}
+    for row, plan in asks:
+        key = ('card', plan['credit_account_id']) if plan['table'] == 'c_expense_entries' else ('cash', None)
+        groups.setdefault(key, []).append((row, plan))
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for (kind, card_id), members in groups.items():
+        if kind == 'card':
+            options = {'outgoing': _category_options(user_id, 'c_expense_entries', card_id), 'incoming': []}
+        else:
+            options = {'outgoing': _category_options(user_id, 'expense_entries', None),
+                       'incoming': _category_options(user_id, 'income_entries', None)}
+        items = []
+        for i, (row, plan) in enumerate(members):
+            items.append({'i': i,
+                          'direction': 'incoming' if plan['entry_type'] == 'income' else 'outgoing',
+                          'amount': float(row.get('amount') or 0),
+                          'description': row.get('description') or row.get('merchant_name') or ''})
+        try:
+            answers = provider.suggest_categories_batch(user_id, items, options) or {}
+        except Exception as e:
+            log_exception(logger, TAG, f'user {user_id}: Claude categorisation failed: {e}')
+            continue
+        for i, a in answers.items():
+            try:
+                row, plan = members[int(i)]
+            except (IndexError, ValueError, TypeError):
+                continue
+            out[str(row.get('transaction_id'))] = {
+                'category_id': int(a['category_id']),
+                'canonical_id': _canonical(user_id, plan['entry_type'], int(a['category_id'])),
+                'name': a.get('category_name') or '',
+                'confidence': a.get('confidence') or 'medium',
+            }
+    return out
+
+
+def guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any], cands: List[Dict[str, Any]],
+          mem: Optional[int] = None, ai: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    What a posted transaction is, and why:
+        {'category_id', 'canonical_id', 'name', 'confidence', 'forecast'}
+    category_id is what the entry table takes (a card's own category for a
+    card); canonical_id the user-level one for the memory columns; forecast
+    the candidate this IS when the guess named one, else None.
+
+    In order: the merchant memory (mem, looked up beforehand); Claude's
+    answer (ai, asked beforehand in one batch); a forecast nearby of exactly
+    this amount; Uncategorized, with no confidence at all.
+
+    A category with a forecast nearby makes that forecast the entry - but
+    only when the forecast is a bill, a wage or a one-off, something one
+    payment settles. An allowance is money for a period, and one purchase
+    does not fulfil it; that guess writes an entry and lets it deplete the
+    allowance the way a typed one would.
+    """
+    from redis_crud import resolve_suggestion_for_entry, get_uncategorized_category_id
+    from bucket_confirmation import _wage_bill_map
+    entry_type, table, card = plan['entry_type'], plan['table'], plan['credit_account_id']
+    names = _category_names(user_id, table)
+    settled_in_one = _wage_bill_map(table, user_id)
+
+    def fulfilled(cid: int) -> Optional[Dict[str, Any]]:
+        if not settled_in_one.get(cid, 1):
+            return None
+        return next((c for c in cands if c['category_id'] == cid), None)
+
+    if mem is not None:
+        cid = resolve_suggestion_for_entry(user_id, entry_type, card, mem)
+        if cid:
+            return {'category_id': int(cid), 'canonical_id': mem, 'name': names.get(int(cid), ''),
+                    'confidence': 'memory', 'forecast': fulfilled(int(cid))}
+
+    if ai and ai.get('category_id') in names:
+        cid = int(ai['category_id'])
+        return {'category_id': cid, 'canonical_id': ai.get('canonical_id'), 'name': names.get(cid, ''),
+                'confidence': ai.get('confidence') or 'medium', 'forecast': fulfilled(cid)}
 
     cents = _cents(row.get('amount'))
     for c in cands:
-        if _cents(c['forecast_amount']) == cents:
+        if _cents(c['forecast_amount']) == cents and settled_in_one.get(c['category_id'], 1):
             return {'category_id': c['category_id'], 'canonical_id': _canonical(user_id, entry_type, c['category_id']),
                     'name': c['category_name'], 'confidence': 'amount', 'forecast': c}
 
@@ -673,6 +785,10 @@ def create_entries(user_id: int) -> Dict[str, Any]:
     earliest = None
     cards = False
     skipped = 0
+    # Two passes: what each row is and what the memory says, then one
+    # request to Claude for the rows the memory had nothing for, then the
+    # writing. Asking per row would be a request per transaction.
+    todo: List[Tuple[Dict[str, Any], Dict[str, Any], Optional[int]]] = []
     for row in stored:
         if _flag(row.get('pending')) or row.get('imported_to_entry_id'):
             continue
@@ -683,11 +799,16 @@ def create_entries(user_id: int) -> Dict[str, Any]:
         if not plan:
             skipped += 1
             continue
+        mem = None if plan['entry_type'] == 'c_payment' else _memory_pick(user_id, row, plan)
+        todo.append((row, plan, mem))
+    picks = _claude_picks(user_id, todo)
+    for row, plan, mem in todo:
         when = _iso(row.get('date'))
         if plan['entry_type'] == 'c_payment':
             g: Dict[str, Any] = {}
         else:
-            g = guess(user_id, row, plan, candidates(user_id, plan['table'], when, plan['credit_account_id']))
+            g = guess(user_id, row, plan, candidates(user_id, plan['table'], when, plan['credit_account_id']),
+                      mem=mem, ai=picks.get(str(row.get('transaction_id'))))
         update = apply_guess(user_id, dict(row, date=when), plan, g)
         if not update:
             skipped += 1
@@ -781,24 +902,11 @@ def _choices(user_id: int, table: str, txn_date: str, credit_account_id: Optiona
     when one sits within CANDIDATE_DAYS - so the list reads as "this might
     be that" rather than as bare names.
     """
-    import redis_manager
-    from bucket_confirmation import ENTRY_TABLES as CATEGORY_TABLES
-    cats = redis_manager.get_table_cache(CATEGORY_TABLES[table], user_id) or []
-    allowed = _card_category_ids(user_id, credit_account_id) if table == 'c_expense_entries' else None
     nearby: Dict[int, Dict[str, Any]] = {}
     for c in candidates(user_id, table, txn_date, credit_account_id):
         nearby.setdefault(c['category_id'], {'amount': c['forecast_amount'], 'date': c['forecast_date']})
-    out = []
-    for c in cats:
-        try:
-            cid = int(c['id'])
-        except (TypeError, ValueError, KeyError):
-            continue
-        if _flag(c.get('hidden')) or _flag(c.get('is_interest')):
-            continue
-        if allowed is not None and cid not in allowed:
-            continue
-        out.append({'category_id': cid, 'name': c.get('name') or '', 'forecast': nearby.get(cid)})
+    out = [{'category_id': o['id'], 'name': o['name'], 'forecast': nearby.get(o['id'])}
+           for o in _category_options(user_id, table, credit_account_id)]
     out.sort(key=lambda o: o['name'].lower())
     return out
 
