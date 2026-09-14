@@ -830,10 +830,7 @@ def upsert_linked_transaction(transaction_data: Dict[str, Any], user_id: Optiona
                 break
         
         if not found:
-            # Generate temporary ID for new transaction
-            import time
-            temp_id = int(time.time() * 1000) % 1000000
-            db_id = temp_id
+            db_id = _next_temp_id(cached_data)
             new_txn = {
                 'id': db_id,
                 'user_id': user_id,
@@ -849,6 +846,88 @@ def upsert_linked_transaction(transaction_data: Dict[str, Any], user_id: Optiona
     except Exception as e:
         log_exception(logger, 'BANK', f"Error upserting linked transaction: {e}")
         return None
+
+
+def _next_temp_id(rows: List[Dict[str, Any]]) -> int:
+    """
+    A temporary id for a row that has no MySQL id yet: negative, and below
+    every id already in the list, so it can collide with neither a real id
+    nor another temporary one. The flush never sends this id for
+    linked_transactions - the row is keyed on (user_id, transaction_id) - so
+    it only has to be unique within the cached list.
+
+    The old scheme, milliseconds modulo a million, could hand two rows the
+    same id inside one busy second and had no answer for a bulk insert.
+    """
+    lowest = 0
+    for r in rows:
+        try:
+            lowest = min(lowest, int(r.get('id') or 0))
+        except (TypeError, ValueError):
+            continue
+    return lowest - 1
+
+
+def bulk_upsert_linked_transactions(rows: List[Dict[str, Any]], user_id: int) -> int:
+    """
+    Insert or update many linked transactions in one Redis write.
+
+    A pull brings tens of rows at once; writing the cached list once per row
+    is tens of round trips and tens of dirty marks for one change. Each row
+    is matched on transaction_id: an existing row is updated in place (keys
+    it already has and the row does not mention are kept - imported_to_entry_id
+    survives a re-pull), a new one is appended with a temporary id.
+    """
+    cached = _get_from_redis('linked_transactions', user_id)
+    if cached is None:
+        cached = list(get_linked_transactions(user_id) or [])
+    by_id = {str(t.get('transaction_id')): t for t in cached}
+    written = 0
+    for row in rows:
+        tid = row.get('transaction_id')
+        if not tid:
+            continue
+        current = by_id.get(str(tid))
+        if current is not None:
+            current.update(row)
+        else:
+            new = {'id': _next_temp_id(cached), 'user_id': user_id, **row}
+            cached.append(new)
+            by_id[str(tid)] = new
+        written += 1
+    if written:
+        _set_to_redis('linked_transactions', user_id, cached)
+    return written
+
+
+def delete_linked_transactions(transaction_ids: List[str], user_id: int) -> int:
+    """
+    Remove linked transactions by provider id, from Redis and from MySQL.
+
+    MySQL directly as well, because the flush has no orphan pass for this
+    table (its deletion marker only covers a whole connection going away): a
+    row dropped from the cached list alone would sit in MySQL until the next
+    hydration brought it back. The importer uses this for a pending
+    transaction the bank withdrew or replaced with a posted one.
+    """
+    ids = {str(t) for t in (transaction_ids or []) if t}
+    if not ids:
+        return 0
+    cached = _get_from_redis('linked_transactions', user_id)
+    if cached is None:
+        cached = list(get_linked_transactions(user_id) or [])
+    kept = [t for t in cached if str(t.get('transaction_id')) not in ids]
+    removed = len(cached) - len(kept)
+    if removed:
+        _set_to_redis('linked_transactions', user_id, kept)
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            placeholders = ', '.join(['%s'] * len(ids))
+            cursor.execute(f"DELETE FROM linked_transactions WHERE user_id = %s AND transaction_id IN ({placeholders})",
+                           (user_id, *ids))
+    except Exception as e:
+        log_error(logger, 'BANK', f"Error deleting linked transactions from MySQL for user {user_id}: {e}")
+    return removed
 
 
 def update_transaction_recurrence(recurrence_map: dict, user_id: int) -> int:

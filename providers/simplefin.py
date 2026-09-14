@@ -119,12 +119,18 @@ def _decimal(value) -> Optional[float]:
         return None
 
 
-def _epoch_to_date(epoch) -> Optional[str]:
+def _epoch_int(epoch) -> Optional[int]:
+    """The bank's epoch as an int, or None for anything that is not one."""
     try:
         epoch = int(epoch)
     except (TypeError, ValueError):
         return None
-    if epoch <= 0:
+    return epoch if epoch > 0 else None
+
+
+def _epoch_to_date(epoch) -> Optional[str]:
+    epoch = _epoch_int(epoch)
+    if epoch is None:
         return None
     return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime('%Y-%m-%d')
 
@@ -431,6 +437,18 @@ class SimpleFINBankProvider(BankProvider):
         screen shows, and what the bank page refreshes from.
         """
         body = self._get(user_id, {'balances-only': '1'})
+        connections, accounts = self._parse_accounts(body)
+        return {'connections': connections, 'accounts': accounts,
+                'errors': body.get('errlist') or []}
+
+    @staticmethod
+    def _parse_accounts(body: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        (connections, accounts) from one /accounts body, in the shapes the
+        pages use. The same body carries transactions when they were asked
+        for, so an overview and a transaction pull parse their accounts here
+        alike.
+        """
         connections = {}
         for c in body.get('connections') or []:
             cid = str(c.get('conn_id') or '')
@@ -484,8 +502,7 @@ class SimpleFINBankProvider(BankProvider):
             if err.get('conn_id') and err['conn_id'] in connections:
                 connections[err['conn_id']]['status'] = 'ERROR_REPAIRABLE' if err['code'] == 'con.auth' else 'ERROR'
                 connections[err['conn_id']]['error_msg'] = err['msg']
-        return {'connections': list(connections.values()), 'accounts': accounts,
-                'errors': body.get('errlist') or []}
+        return list(connections.values()), accounts
 
     def list_connections(self, user_id: int) -> List[Dict[str, Any]]:
         try:
@@ -506,12 +523,22 @@ class SimpleFINBankProvider(BankProvider):
     def fetch_transactions(self, user_id: int, start: Optional[str] = None,
                            end: Optional[str] = None,
                            account_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        Transactions in the normalized shape from providers/base.py.
+        """Transactions in the normalized shape from providers/base.py."""
+        return self.fetch_transactions_and_balances(user_id, start, end, account_id)['transactions']
 
-        Implemented now so the shape is settled; nothing calls it until the
-        transaction import lands. Windows are clamped to SimpleFIN's 90 days;
-        pending transactions are requested and flagged.
+    def fetch_transactions_and_balances(self, user_id: int, start: Optional[str] = None,
+                                        end: Optional[str] = None,
+                                        account_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        One request, two answers: the transactions in the window, and the
+        accounts with their balances as of the same moment. The Bridge sends
+        both in one body, the daily pull needs both, and a request is a
+        twentieth of the day's budget - asking twice would be paying twice.
+
+        {'transactions': [normalized, plus 'posted_at' epoch when the bank
+        gave one], 'connections': [...], 'accounts': [...] as fetch_overview
+        returns them, 'errors': errlist}. Windows are clamped to SimpleFIN's
+        90 days; pending transactions are requested and flagged.
         """
         try:
             start_d = datetime.strptime(start, '%Y-%m-%d').date() if start else None
@@ -554,9 +581,12 @@ class SimpleFINBankProvider(BankProvider):
                     'pending': pending,
                     'transaction_type': 'expense' if amount < 0 else 'income',
                     'provider_created_at': transacted or posted,
+                    'posted_at': _epoch_int(t.get('posted')),
                     'enrichment': {},
                 })
-        return out
+        connections, accounts = self._parse_accounts(body)
+        return {'transactions': out, 'connections': connections, 'accounts': accounts,
+                'errors': body.get('errlist') or []}
 
     def fetch_account_balances(self, user_id: int) -> List[Dict[str, Any]]:
         try:
