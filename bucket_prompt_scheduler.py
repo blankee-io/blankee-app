@@ -86,8 +86,13 @@ def _worker():
         _shutdown.wait(CHECK_INTERVAL)
 
 
-def _is_due(tz_name, now_utc):
-    """(due, local_date) for a user in `tz_name` right now."""
+def _is_due(tz_name, now_utc, hour=PROMPT_HOUR, window=WINDOW_MINUTES):
+    """
+    (due, local_date) for a user in `tz_name` right now.
+
+    hour and window are parameters so the bank pull scheduler, which runs
+    the same walk at a different hour, asks the same question the same way.
+    """
     try:
         local = now_utc.astimezone(ZoneInfo(tz_name))
     except (ZoneInfoNotFoundError, ValueError, TypeError):
@@ -95,9 +100,9 @@ def _is_due(tz_name, now_utc):
         # per pass rather than silently dropping the user forever.
         log_warning(logger, 'BUCKET_PROMPT', f"Unknown timezone {tz_name!r}; skipping user")
         return False, None
-    if local.hour != PROMPT_HOUR:
+    if local.hour != hour:
         return False, local.date()
-    return local.minute < WINDOW_MINUTES, local.date()
+    return local.minute < window, local.date()
 
 
 def run_once(now_utc=None):

@@ -375,6 +375,14 @@ if _redis_client:
     except Exception as _e:
         log_exception(logger, 'BUCKET_PROMPT',
                       f"Could not start the bucket prompt scheduler: {_e}")
+    # The morning bank pull, on its own thread: a pull can take minutes and
+    # must not hold up the evening walk above.
+    try:
+        import bank_pull_scheduler
+        bank_pull_scheduler.start()
+    except Exception as _e:
+        log_exception(logger, 'BANK_PULL',
+                      f"Could not start the bank pull scheduler: {_e}")
 
     # Initialize Redis middleware and routes
     init_redis_middleware(app)
