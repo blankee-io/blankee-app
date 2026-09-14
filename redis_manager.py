@@ -44,6 +44,20 @@ FLUSH_INTERVAL = 15  # 15 seconds (balanced flush interval)
 REDIS_KEY_VERSION = "v1"
 REDIS_TTL = 604800  # 7 days in seconds
 
+
+def _json_or_none(value):
+    """
+    A JSON column's value as the driver wants it: a string or None.
+
+    A row read back from Redis holds the parsed object; MySQL wants the text.
+    Pass a string through untouched so a value that never left the database
+    is not encoded twice.
+    """
+    if value is None or isinstance(value, str):
+        return value
+    return json.dumps(value, default=str)
+
+
 # Tables to hydrate for each user
 USER_TABLES = [
     'income_categories',
@@ -3333,7 +3347,9 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         row.get('custom_category_confidence'),
                         row.get('custom_suggestion_at'),
                         # Finicity metadata
-                        row.get('provider_created_date')
+                        row.get('provider_created_date'),
+                        row.get('matched_pending_id'),
+                        _json_or_none(row.get('depleted_bucket')),
                     ))
                 
                 cursor.executemany("""
@@ -3346,8 +3362,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                      enrichment_avg_amount, enrichment_first_payment_date, enrichment_last_payment_date,
                      enrichment_person, enrichment_transaction_type, enriched_at,
                      custom_category_suggestion, custom_category_id, custom_category_type, custom_category_confidence, custom_suggestion_at,
-                     provider_created_date)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     provider_created_date, matched_pending_id, depleted_bucket)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         date = VALUES(date),
                         description = VALUES(description),
@@ -3383,7 +3399,9 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         custom_category_type = VALUES(custom_category_type),
                         custom_category_confidence = VALUES(custom_category_confidence),
                         custom_suggestion_at = VALUES(custom_suggestion_at),
-                        provider_created_date = VALUES(provider_created_date)
+                        provider_created_date = VALUES(provider_created_date),
+                        matched_pending_id = VALUES(matched_pending_id),
+                        depleted_bucket = VALUES(depleted_bucket)
                 """, batch_data)
                 
                 conn.commit()
@@ -5159,12 +5177,12 @@ def flush_dirty_tables_for_user(user_id: int):
             # The bank tables, in the periodic worker's order, so a disconnect
             # or a link lands in MySQL now rather than when (and if) the worker
             # gets to this user - its deletion markers expire in five minutes.
-            'linked_provider_profiles',
-            'linked_connections',
-            'linked_accounts',
-            'linked_transactions',
-            'linked_connections_deleted',
-            'linked_accounts_deleted',
+            'linked_provider_profiles',
+            'linked_connections',
+            'linked_accounts',
+            'linked_transactions',
+            'linked_connections_deleted',
+            'linked_accounts_deleted',
             'linked_transactions_deleted',
         ]
         

@@ -53,6 +53,7 @@ MIGRATIONS = [
     'add_simplefin_credentials.sql',
     'add_user_ai_settings.sql',
     'add_users_ai_categorization.sql',
+    'add_bank_import.sql',
 ]
 
 # install/sql/ holds only what a fresh install applies. The rollback scripts and

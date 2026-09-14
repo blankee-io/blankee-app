@@ -81,7 +81,7 @@ LAST_DAY = 'Last Day'
 # Where a correction lands: the same place the app has always put automatic
 # balance adjustments.
 #
-# _webhook_autobalance has reconciled against bank balances since long before
+# The bank-feed reconciliation has matched bank balances since long before
 # this feature existed, and it never used a category of its own - a checking
 # adjustment goes to Uncategorized, a credit adjustment to that card's
 # Uncategorized, and savings to a savings_adjustments row with no category at

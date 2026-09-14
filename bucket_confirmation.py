@@ -7,9 +7,10 @@ entry dated in the past depletes the matching bucket, so the forecast is consume
 rather than counted twice.
 
 Nothing resolved a bucket whose day simply passed. The only code that turned one
-into a real entry lived inside _sync_bank_transactions_for_user, which has no
-callers, ran only when a bank sync had already imported transactions, and covered
-credit expenses alone - so an unconfirmed forecast stayed in the totals forever.
+into a real entry lived inside the old bank importer (since removed), which had
+no callers, ran only when a bank sync had already imported transactions, and
+covered credit expenses alone - so an unconfirmed forecast stayed in the totals
+forever.
 
 This module is the answer to "did it actually happen?", asked once each evening:
 
