@@ -403,6 +403,23 @@ wizard (step 3) and the Bank Accounts page walk through it:
 
 Blankee keeps the resulting access URL encrypted with `SETTINGS_ENCRYPTION_KEY`
 and pulls from SimpleFIN at most about 20 times a day (the Bridge allows 24).
+
+**What happens after linking.** Every morning at six, in the person's own
+timezone, Blankee pulls what posted to the linked checking account and cards
+since the last pull (savings accounts are not imported - a transfer into
+savings is the checking side's expense, and the savings balance is read from
+the feed). Each posted transaction becomes an entry at once, in a guessed
+category - the merchant memory first, Claude if it is on, else a forecast
+nearby of the same amount, else Uncategorized - and waits in the "Did these
+come through?" modal to be confirmed or moved. Forecasts on a linked account
+are no longer asked about in the evening: a transaction that matches one
+fulfils it, and one nothing matches is moved to tomorrow. After each pull, and
+again when the last bank row is confirmed, the checking, savings and card
+balances are matched to the bank's as of yesterday. **Sync now** on the Bank
+Accounts page runs the same pull by hand (it keeps two of the day's requests
+back for the morning). Import starts at the moment an account is linked -
+history is not fetched.
+
 Disconnecting in Blankee forgets the connection here; to stop SimpleFIN sharing
 a bank, also remove the app under *Apps* on the Bridge. The same applies after
 deleting a Blankee account: its SimpleFIN credentials go with it, the Bridge
@@ -414,8 +431,8 @@ set `BANK_PROVIDER=null` in `.env`.
 ## AI categorization (Claude)
 
 Optional, per person, and off until they switch it on. With a bank linked,
-Blankee can ask Claude to suggest a category for each imported transaction and
-tidy the merchant name - on the person's **own Anthropic API key**, so they
+Blankee can ask Claude to pick a category for each imported transaction the
+merchant memory does not already know - on the person's **own Anthropic API key**, so they
 control it and pay Anthropic directly from usage credits bought in advance. At
 today's prices that is roughly 25¢ per 1,000 transactions on Claude Haiku 4.5 -
 a few cents a month for most users - but Anthropic bills by usage and

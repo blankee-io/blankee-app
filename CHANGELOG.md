@@ -8,6 +8,93 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.0 — 2026-09-14
+
+The bank's transactions come in. 1.41.0 connected the bank; this release
+reads it: every morning, and on demand, what posted to a linked checking
+account or card becomes an entry in the budget, with a guessed category,
+and the balances are matched to the bank's. The person confirms or corrects
+each one in the same "Did these come through?" modal that asks about
+forecasts - the numbers are right the moment the bank speaks, and the person
+tidies afterwards rather than gating.
+
+### Added
+- **The daily pull.** At six in the morning in each person's own timezone,
+  Blankee asks SimpleFIN for what posted since the last pull (re-asking the
+  last week, in case a bank posts late) and brings it in. One request, once a
+  day, claimed per person so that two server processes cannot pull twice. A
+  **Sync now** button on the Bank Accounts page runs the same pull by hand;
+  it refuses within two of the day's ceiling so the morning pull keeps its
+  request. Import starts at the moment an account was linked - nothing
+  already inside the balance matched at link time is counted twice.
+- **A guessed category, applied on arrival.** Each posted transaction
+  becomes a real entry at once, marked for confirmation: in the category the
+  merchant memory remembers, else the one Claude picks (when that is switched
+  on), else the category of a forecast nearby with exactly this amount, else
+  Uncategorized. A guess that names a forecast - a bill, a wage, a one-off -
+  turns that forecast into the record at the bank's amount and date; a
+  category guess writes a new entry and depletes the category's forecast the
+  way a typed entry would. A card's incoming payment is recorded as a payment
+  with nothing to ask.
+- **The bank's rows in the confirm modal.** Above the forecasts: each row with
+  its merchant, account and amount, the guessed category pre-selected, where
+  the guess came from, and the other categories listed with the forecast each
+  would consume. One button confirms. Changing the category puts back the
+  forecast the guess had consumed - dated tomorrow, as "No" would have left
+  it - and consumes the new category's. The choice is remembered for the
+  merchant. One notification (and push) says how many rows wait; it goes when
+  the last is answered.
+- **Balances matched to the bank, twice a day.** After each pull and again
+  when the last bank row is confirmed, the checking, savings and card
+  balances are matched to the bank's figures as of yesterday - today's
+  balance less anything posted today - with the same corrections a typed
+  balance writes. The remainders are right without anyone typing a figure.
+- **Claude sorts what the memory does not know.** Once per pull, the rows the
+  merchant memory has no answer for go to Anthropic in one request: each
+  row's description, amount and direction, with the names of the person's
+  categories. A name not on the list is dropped, never invented. A failed
+  request is shown on the profile page without un-verifying the key.
+- **Pending transactions** are stored and watched, not imported: a
+  transaction the bank still calls pending gets no entry until it posts.
+  Posting under a new id replaces the pending row that matches it (same
+  account, amount to the cent, date within a few days); one the bank stops
+  reporting is withdrawn after three days.
+
+### Changed
+- **Forecasts on a bank-fed table leave the evening prompt.** With a checking
+  account linked, income and expense forecasts are matched by transactions as
+  they post; a linked card's forecasts likewise. One nothing matched is moved
+  to tomorrow on each pull, exactly as "No" moves it, until a transaction
+  matches it or it is removed by hand. The evening prompt and its count still
+  cover everything the bank does not answer for.
+- **Savings-account transactions are not imported.** A transfer into savings
+  is the checking side's expense already, and the savings balance is set
+  from the bank feed on each pull.
+- A balance correction now **adds to** the day's correction rather than
+  replacing it, netted across the income and expense sides, so a second
+  match in one day no longer undoes the first; and the totals are
+  recalculated and stored before a balance is measured and again after the
+  correction is written, so a figure is never compared against a stale
+  remainder.
+- The AI privacy note on the profile page says in full what is sent: the
+  description, amount and direction of each imported transaction and the
+  names of your own categories.
+
+### Removed
+- The old importer and its balance adjustments (`_sync_bank_transactions_for_user`,
+  `_webhook_autobalance`, `/bank/auto-adjust-checking`), none of which had a
+  caller since the previous vendor left; `/bank/confirm-all-transactions`
+  (the modal answers rows one at a time). The widget's link and the dashboard
+  tooltips no longer point at the pending-transactions page removed in 1.41.0.
+
+### Notes
+- Migration `add_bank_import.sql`: `custom_category_confidence` admits
+  `memory` and `amount`; `linked_transactions.matched_pending_id` and
+  `depleted_bucket`; the `bank_pulls` claim table. Backward-compatible.
+- `redis_manager.py` is stored with LF line endings from here on (it was
+  the one file git classed as binary, which turned every edit into a
+  whole-file diff); `*.py` is declared text in `.gitattributes`.
+
 ## 1.41.0 — 2026-09-13
 
 Bank connections are back, through **SimpleFIN Bridge**, and Claude arrives as
