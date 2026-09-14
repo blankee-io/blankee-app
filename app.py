@@ -26444,6 +26444,47 @@ def bank_update_account():
         return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
+@app.route('/bank/sync', methods=['POST'])
+@login_required
+def bank_sync():
+    """
+    Sync now: one pull, the same one the morning runs. Refused while the
+    connection needs a new token (the page already says so), and refused
+    near the day's ceiling so that tonight's automatic pull keeps its
+    request - the button is a convenience, the schedule is the feature.
+    """
+    import bank_import
+    from providers.simplefin import DAILY_SOFT_CEILING
+    provider = _simplefin_provider()
+    user_id = current_user.id
+    st = provider.status(user_id)
+    if not st.get('connected'):
+        return jsonify({'status': 'error', 'message': 'No SimpleFIN connection yet.'}), 400
+    if st.get('needs_new_token'):
+        return jsonify({'status': 'error', 'message': 'SimpleFIN no longer accepts this connection. '
+                                                     'Replace the Setup Token below first.'}), 400
+    reserved = 2
+    if int(st.get('pulls_today') or 0) >= DAILY_SOFT_CEILING - reserved:
+        return jsonify({'status': 'error',
+                        'message': f"{st.get('pulls_today')} of about {DAILY_SOFT_CEILING} pulls are used today; "
+                                   f"the rest is kept for tonight's automatic pull. Try again tomorrow."}), 400
+    try:
+        result = bank_import.pull(user_id, 'manual')
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    if not result.get('ok'):
+        return jsonify({'status': 'error', 'message': result.get('message') or 'The pull failed.',
+                        'code': result.get('error')}), 400
+    message = result['message']
+    note = bank_import.reconcile_summary(result.get('reconciled'))
+    if note:
+        message = f'{message} {note}'
+    counts = {k: result.get(k) for k in ('fetched', 'new', 'updated', 'matched', 'removed', 'pending',
+                                          'imported', 'skipped', 'deferred')}
+    return jsonify({'status': 'success', 'message': message, 'counts': counts,
+                    'bank': provider.connect_widget_config(user_id)})
+
+
 # ------------------------------------------------------------- AI (Claude)
 
 @app.route('/ai/settings', methods=['POST'])

@@ -735,6 +735,139 @@ def recalc(user_id: int, since: Optional[str], cards: bool) -> None:
             _recalc_ca_daily_balance(user_id, start)
 
 
+# ---------------------------------------------------------------- balances
+
+def record_balances(user_id: int, balances: List[Dict[str, Any]]) -> int:
+    """
+    What the bank said each linked account holds at pull time, onto the
+    linked_accounts rows - the bank page shows it, and the reconcile that
+    runs when the modal is completed reuses it rather than asking again.
+    """
+    from bank_redis import update_linked_account_fields, _get_all_linked_accounts_raw
+    active = {str(a.get('account_id')): a for a in (_get_all_linked_accounts_raw(user_id) or [])
+              if _flag(a.get('is_active', 1))}
+    written = 0
+    for b in balances or []:
+        aid = str(b.get('account_id') or '')
+        if aid not in active or b.get('current_balance') is None:
+            continue
+        fields = {'current_balance': b['current_balance']}
+        if b.get('available_balance') is not None:
+            fields['available_balance'] = b['available_balance']
+        try:
+            if update_linked_account_fields(aid, fields, user_id):
+                written += 1
+        except Exception as e:
+            log_warning(logger, TAG, f'user {user_id}: could not record the balance of {aid}: {e}')
+    return written
+
+
+def feed_as_of_yesterday(user_id: int, balances: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], str, List[str]]:
+    """
+    The bank's balances turned into what the app should show for the end of
+    the user's YESTERDAY: today's balance less whatever posted today. As of
+    yesterday because today's forecasts are still open; as of the end of it
+    because the bank's figure is a moment, not a day.
+
+    Returns ({'checking', 'savings', 'cards': {credit_account_id: owed}},
+    yesterday, [account ids skipped for a stale balance date]).
+    """
+    from bank_redis import (_get_all_linked_accounts_raw, linked_account_kind,
+                            get_credit_account_for_linked_account, get_linked_transactions)
+    yesterday = (_user_today(user_id) - timedelta(days=1)).isoformat()
+    active = {str(a.get('account_id')): a for a in (_get_all_linked_accounts_raw(user_id) or [])
+              if _flag(a.get('is_active', 1))}
+
+    # Signed movements posted after yesterday, per account.
+    moved: Dict[str, float] = {}
+    for t in get_linked_transactions(user_id) or []:
+        if _flag(t.get('pending')):
+            continue
+        d = _iso(t.get('date'))
+        if not d or d <= yesterday:
+            continue
+        aid = str(t.get('account_id') or '')
+        signed = float(t.get('amount') or 0) * (1 if t.get('transaction_type') == 'income' else -1)
+        moved[aid] = moved.get(aid, 0.0) + signed
+
+    feed: Dict[str, Any] = {'checking': None, 'savings': None, 'cards': {}}
+    stale: List[str] = []
+    for b in balances or []:
+        aid = str(b.get('account_id') or '')
+        acc = active.get(aid)
+        if not acc or b.get('current_balance') is None:
+            continue
+        if b.get('balance_date') and b['balance_date'] < yesterday:
+            stale.append(aid)
+            continue
+        as_of = float(b['current_balance']) - moved.get(aid, 0.0)
+        kind = linked_account_kind(acc)
+        if kind == 'checking':
+            feed['checking'] = as_of
+        elif kind == 'savings':
+            feed['savings'] = as_of
+        elif kind == 'credit':
+            card = get_credit_account_for_linked_account(user_id, aid)
+            if card and card.get('id') is not None:
+                # A card's balance from the bank is what is owed, negative.
+                feed['cards'][int(card['id'])] = abs(as_of)
+    return feed, yesterday, stale
+
+
+def reconcile(user_id: int, balances: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Bring the app's balances to the bank's, as of the user's yesterday, with
+    the corrections auto_balance writes for a typed figure. Nothing is
+    confirmed on the way: a forecast the feed answers for has been matched
+    or moved on already, and one it does not answer for is the evening
+    prompt's. None when there was nothing to compare.
+    """
+    import auto_balance
+    feed, yesterday, stale = feed_as_of_yesterday(user_id, balances)
+    if feed['checking'] is None and feed['savings'] is None and not feed['cards']:
+        if stale:
+            log_info(logger, TAG, f'user {user_id}: balances not reconciled, the bank\'s figures are older than {yesterday}')
+        return None
+    from app import app
+    with app.app_context():
+        result = auto_balance.reconcile_to_feed(user_id, checking=feed['checking'], savings=feed['savings'],
+                                                cards=feed['cards'], on_date=_parse(yesterday),
+                                                confirm_buckets=False)
+    result['as_of'] = yesterday
+    result['stale'] = stale
+    return result
+
+
+def reconcile_from_stored(user_id: int) -> Optional[Dict[str, Any]]:
+    """The same, from the balances the last pull recorded - when the modal is completed."""
+    from bank_redis import _get_all_linked_accounts_raw
+    balances = []
+    for a in _get_all_linked_accounts_raw(user_id) or []:
+        if _flag(a.get('is_active', 1)) and a.get('current_balance') is not None:
+            balances.append({'account_id': a.get('account_id'), 'current_balance': a.get('current_balance'),
+                             'available_balance': a.get('available_balance'), 'balance_date': None})
+    return reconcile(user_id, balances)
+
+
+def reconcile_summary(result: Optional[Dict[str, Any]]) -> str:
+    """One clause for a toast."""
+    if not result:
+        return ''
+    parts = []
+    chk = result.get('checking') or {}
+    if chk.get('error'):
+        return f"Balances not matched: {chk['error']}"
+    for label, r in (('checking', chk), ('savings', result.get('savings') or {})):
+        if r and r.get('entry_written'):
+            parts.append(f"{label} corrected by {abs(float(r.get('difference') or 0)):.2f}")
+    cards = [c for c in (result.get('cards') or []) if c.get('entry_written')]
+    if cards:
+        parts.append(f"{len(cards)} card{'s' if len(cards) != 1 else ''} corrected")
+    if not parts:
+        return 'Balances match the bank.'
+    return 'Balances matched to the bank: ' + ', '.join(parts) + '.'
+
+
 # ------------------------------------------------------------- notification
 
 def _count_pending_db(user_id: int) -> int:
@@ -845,7 +978,7 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
     result: Dict[str, Any] = {
         'ok': False, 'error': None, 'message': '', 'source': source,
         'fetched': 0, 'new': 0, 'updated': 0, 'matched': 0, 'removed': 0, 'pending': 0,
-        'imported': 0, 'skipped': 0, 'deferred': 0,
+        'imported': 0, 'skipped': 0, 'deferred': 0, 'reconciled': None,
         'window_start': None, 'balances': [], 'errors': [],
     }
     provider = get_bank_provider()
@@ -914,6 +1047,15 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
                 notify(user_id)
             except Exception as e:
                 log_warning(logger, TAG, f'user {user_id}: notification after the pull: {e}')
+
+        # The bank's balances: recorded, then matched. Every pull, so the
+        # remainders are right the moment the bank speaks.
+        record_balances(user_id, result['balances'])
+        try:
+            result['reconciled'] = reconcile(user_id, result['balances'])
+        except Exception as e:
+            log_exception(logger, TAG, f'user {user_id}: reconcile after the pull failed: {e}')
+            result['reconciled'] = None
 
         try:
             redis_manager.flush_dirty_tables_for_user(user_id)

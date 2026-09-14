@@ -1000,8 +1000,9 @@ def _correct_card(user_id, account_id, actual, on_date):
                     f"user {user_id}; nothing written")
         return False, None
 
-    _update_entry_in_redis('c_expense_entries', user_id, category_id,
-                           on_date.isoformat(), float(difference), processed=1)
+    # On top of what the day's cell holds, for the reason in _write_correction.
+    have = _cell_amount('c_expense_entries', user_id, category_id, on_date)
+    _set_cell('c_expense_entries', user_id, category_id, on_date, have + difference)
 
     log_info(logger, 'AUTOBALANCE',
              f"User {user_id} card {account_id} corrected by {difference} "
@@ -1009,14 +1010,110 @@ def _correct_card(user_id, account_id, actual, on_date):
     return True, difference
 
 
+def _flush(user_id):
+    """
+    Push this user's dirty tables to MySQL now.
+
+    The recalculations write the totals to Redis and the readers above
+    (app_balance, savings_balance, card_balances) read MySQL, so without
+    this a correction is measured against whatever the last periodic flush
+    left - which was usually current when a person typed a balance in the
+    evening, and never is when the bank feed reconciles seconds after a
+    pull recalculated.
+    """
+    import redis_manager
+    try:
+        redis_manager.flush_dirty_tables_for_user(user_id)
+    except Exception as e:
+        log_warning(logger, 'AUTOBALANCE', f"Flush before measuring failed for user {user_id}: {e}")
+
+
+def _cell_amount(table, user_id, category_id, on_date):
+    """What a category's cell already holds for one day (real entries only), as a Decimal."""
+    from app import _get_entries_from_redis
+    when = on_date.isoformat()
+    total = Decimal('0')
+    for e in _get_entries_from_redis(table, user_id) or []:
+        try:
+            if (int(e.get('category_id') or 0) == int(category_id)
+                    and str(e.get('date'))[:10] == when
+                    and not int(e.get('is_bucket') or 0)):
+                total += Decimal(str(e.get('amount') or 0))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _clear_cell(table, user_id, category_id, on_date):
+    from app import _delete_entry_in_redis
+    _delete_entry_in_redis(table, user_id, category_id, on_date, on_date)
+
+
+def _set_cell(table, user_id, category_id, on_date, amount):
+    """
+    Leave exactly one real row in a category's cell for the day, holding
+    `amount` - or none at all when the amount is nothing.
+
+    _update_entry_in_redis edits the first row it finds for the category and
+    date, so a cell that has somehow come to hold two rows (a row written in
+    one process before another re-hydrated from MySQL, say) would keep the
+    second and the cell would never again add up to what was asked. Anything
+    other than one row is cleared and written afresh.
+    """
+    from app import _get_entries_from_redis, _update_entry_in_redis
+    when = on_date.isoformat()
+    rows = [e for e in (_get_entries_from_redis(table, user_id) or [])
+            if int(e.get('category_id') or 0) == int(category_id)
+            and str(e.get('date'))[:10] == when and not int(e.get('is_bucket') or 0)]
+    if abs(Decimal(str(amount))) < TOLERANCE:
+        if rows:
+            _clear_cell(table, user_id, category_id, on_date)
+        return
+    if len(rows) != 1:
+        _clear_cell(table, user_id, category_id, on_date)
+    _update_entry_in_redis(table, user_id, category_id, when, float(amount), processed=1)
+
+
+def _write_correction(user_id, on_date, difference):
+    """
+    Put `difference` into the day's cash correction, on top of what is there.
+
+    The day's correction is one figure however many times the balance is
+    matched that day. Each apply() measures against a balance that already
+    includes the earlier corrections, so the difference is what still has to
+    move - it is ADDED to the cell and netted across the income and expense
+    sides, not written over it. Writing over it (which is what
+    _update_entry_in_redis does to a category's cell) was how a second match
+    in one day quietly undid the first.
+    """
+    inc = correction_category_id('income_entries', user_id)
+    exp = correction_category_id('expense_entries', user_id)
+    have = Decimal('0')
+    if inc is not None:
+        have += _cell_amount('income_entries', user_id, inc, on_date)
+    if exp is not None:
+        have -= _cell_amount('expense_entries', user_id, exp, on_date)
+    target = have + Decimal(str(difference))
+    if inc is not None:
+        _set_cell('income_entries', user_id, inc, on_date, target if target > 0 else Decimal('0'))
+    if exp is not None:
+        _set_cell('expense_entries', user_id, exp, on_date, -target if target < 0 else Decimal('0'))
+
+
 def apply(user_id, actual_balance, on_date=None, actual_savings=None,
-          actual_cards=None):
+          actual_cards=None, confirm_buckets=True):
     """
     Reconcile the app against a real balance.
 
     Confirms every outstanding bucket, recalculates the stored totals, reads
     what the app now thinks the balance is, and writes the difference as one
     Uncategorized entry dated today.
+
+    confirm_buckets=False skips the first step. The bank feed reconciles
+    every morning, as of the day before, and by then a forecast on a fed
+    table has already been matched or moved on; a forecast on a table the
+    bank does not answer for (an unlinked card's) is the evening prompt's
+    to ask about, not the feed's to answer.
 
     actual_savings and actual_cards are optional: the savings balance the user
     reports, and {account_id: balance} for whichever cards they filled in. Each
@@ -1028,7 +1125,7 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
     say it rather than guess: confirmed, app_balance, actual, difference,
     direction, entry written or not, and the same for savings and each card.
     """
-    from app import _update_entry_in_redis, save_totals_remainders_d
+    from app import _update_entry_in_redis, _recalc_totals_remainders
 
     # The user's date throughout, so the correction is dated the day they are
     # actually having and measured against that day's stored figures.
@@ -1042,17 +1139,18 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
     # 1. Settle the outstanding confirmations before anything is measured. This
     #    does not move the balance - a bucket already counts and Yes keeps its
     #    amount - but it leaves nothing that a later Skip could shift.
-    confirmed = confirm_pending_buckets(user_id, on_date=on_date)
+    confirmed = confirm_pending_buckets(user_id, on_date=on_date) if confirm_buckets else 0
 
     # 2. remainder is stored rather than derived, so nothing guarantees it
     #    reflects the confirmations above - and a user with no row for today has
     #    no balance for app_balance to return at all.
     try:
-        save_totals_remainders_d()
+        _recalc_totals_remainders(user_id)
     except Exception as e:
         log_exception(logger, 'AUTOBALANCE',
                       f"Could not recalculate totals for user {user_id}: {e}")
         return False, {'error': 'Could not recalculate your totals. Nothing was changed.'}
+    _flush(user_id)
 
     # 3. What the app thinks now.
     current = app_balance(user_id, on_date)
@@ -1099,9 +1197,9 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
                                  f'difference in.')
 
     # Dated today and Paid: it is money that has already moved, which is the
-    # whole premise - the bank balance is the evidence.
-    _update_entry_in_redis(table, user_id, category_id, on_date.isoformat(),
-                           float(amount), processed=1)
+    # whole premise - the bank balance is the evidence. Added to whatever the
+    # day's correction already holds - see _write_correction.
+    _write_correction(user_id, on_date, difference)
 
     # And it depletes a bucket in that category, exactly as the same entry typed
     # by hand would. A correction is the user saying this money moved and they
@@ -1144,10 +1242,10 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
 
 
 def reconcile_to_feed(user_id, checking=None, savings=None, cards=None,
-                      on_date=None):
+                      on_date=None, confirm_buckets=True):
     """
-    Bring the app's balances to what the bank feed reports, the moment
-    accounts are linked from the bank page.
+    Bring the app's balances to what the bank feed reports: the moment
+    accounts are linked from the bank page, and after every pull since.
 
     The same corrections apply() writes when the user states a balance -
     the feed is simply the one stating it. That is why this is deliberately
@@ -1161,12 +1259,16 @@ def reconcile_to_feed(user_id, checking=None, savings=None, cards=None,
     time already starts at the bank's figure). Returns a dict saying what
     happened to each, in the shape apply() uses, so the caller can report it.
     """
-    from app import save_ca_daily_balance, save_totals_remainders_d
+    from app import _recalc_ca_daily_balance, _recalc_totals_remainders
     on_date = on_date or _user_now(user_id).date()
     result = {'checking': None, 'savings': None, 'cards': []}
 
+    # The savings and card readers below read MySQL; a pull has just
+    # recalculated into Redis.
+    _flush(user_id)
+
     if checking is not None:
-        ok, r = apply(user_id, checking, on_date=on_date)
+        ok, r = apply(user_id, checking, on_date=on_date, confirm_buckets=confirm_buckets)
         result['checking'] = {
             'ok': ok,
             'difference': r.get('difference'),
@@ -1177,7 +1279,8 @@ def reconcile_to_feed(user_id, checking=None, savings=None, cards=None,
         # apply() recalculates before it measures; without it, make sure
         # today's rows exist before the savings figure is compared.
         try:
-            save_totals_remainders_d()
+            _recalc_totals_remainders(user_id)
+            _flush(user_id)
         except Exception as e:
             log_exception(logger, 'AUTOBALANCE',
                           f"Could not recalculate totals for user {user_id}: {e}")
@@ -1192,7 +1295,7 @@ def reconcile_to_feed(user_id, checking=None, savings=None, cards=None,
                 'entry_written': written,
             }
             if written:
-                save_totals_remainders_d()
+                _recalc_totals_remainders(user_id)
         except Exception as e:
             log_exception(logger, 'AUTOBALANCE',
                           f"Could not correct savings for user {user_id}: {e}")
@@ -1218,10 +1321,24 @@ def reconcile_to_feed(user_id, checking=None, savings=None, cards=None,
         })
     if touched:
         try:
-            save_ca_daily_balance()
+            _recalc_ca_daily_balance(user_id)
         except Exception as e:
             log_exception(logger, 'AUTOBALANCE',
                           f"Could not recalculate card balances: {e}")
+
+    # The corrections are written; the stored totals still say what they
+    # said before them. Recalculate and flush, so that the remainders are
+    # right the moment this returns rather than after the next page load
+    # happens to recompute them.
+    written = bool((result['checking'] or {}).get('entry_written')
+                   or (result['savings'] or {}).get('entry_written') or touched)
+    if written:
+        try:
+            _recalc_totals_remainders(user_id)
+        except Exception as e:
+            log_exception(logger, 'AUTOBALANCE',
+                          f"Could not recalculate totals after the feed corrections: {e}")
+        _flush(user_id)
 
     log_info(logger, 'AUTOBALANCE',
              f"User {user_id} reconciled to the bank feed: {result}")

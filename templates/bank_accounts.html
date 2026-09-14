@@ -65,7 +65,7 @@
                             the next pull.
                         </div>
                         {% endif %}
-                        <p class="sf-meta">
+                        <p class="sf-meta" id="sf-status-line">
                             Connected to SimpleFIN{% if bank.claimed_at %} since {{ bank.claimed_at[:10] }}{% endif %}.
                             {% if bank.last_pull_at %}Last pull {{ bank.last_pull_at[:16]|replace('T', ' ') }}.{% endif %}
                             {{ bank.pulls_today }} of about {{ bank.daily_ceiling }} pulls used today.
@@ -131,8 +131,8 @@
                             <button type="button" class="guide-button guide-button-secondary" id="sf-choose-accounts-btn">
                                 <i class="fa-solid fa-list-check"></i> Choose accounts again
                             </button>
-                            <button type="button" class="guide-button guide-button-secondary" disabled
-                                    title="Transaction import arrives in the next release">
+                            <button type="button" class="guide-button guide-button-secondary" id="sf-sync-btn"
+                                    {% if bank.needs_new_token %}disabled title="Replace the Setup Token first"{% endif %}>
                                 <i class="fa-solid fa-rotate"></i> Sync now
                             </button>
                         </div>
@@ -237,6 +237,27 @@
                     .then(function (d) { showToast(d.message || 'Saved.', 'success'); setTimeout(function () { window.location.reload(); }, 600); })
                     .catch(function (e) { showToast(e.message, 'error'); sel.disabled = false; });
             });
+        });
+
+        // Sync now: one pull, then the status line is redrawn from what the
+        // server says rather than reloading the page around a toast.
+        var syncBtn = document.getElementById('sf-sync-btn');
+        function statusLine(b) {
+            var s = 'Connected to SimpleFIN' + (b.claimed_at ? ' since ' + b.claimed_at.slice(0, 10) : '') + '.';
+            if (b.last_pull_at) s += ' Last pull ' + b.last_pull_at.slice(0, 16).replace('T', ' ') + '.';
+            s += ' ' + b.pulls_today + ' of about ' + b.daily_ceiling + ' pulls used today.';
+            return s;
+        }
+        if (syncBtn) syncBtn.addEventListener('click', function () {
+            syncBtn.disabled = true;
+            post('/bank/sync')
+                .then(function (d) {
+                    showToast(d.message || 'Synced.', 'success', 8000);
+                    var line = document.getElementById('sf-status-line');
+                    if (line && d.bank) line.textContent = statusLine(d.bank);
+                })
+                .catch(function (e) { showToast(e.message, 'error', 8000); })
+                .finally(function () { syncBtn.disabled = false; });
         });
 
         var attention = document.querySelector('.connection-card-attention');
