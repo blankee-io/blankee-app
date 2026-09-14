@@ -2998,18 +2998,24 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     return 0
                 
                 profile = rows[0]  # Should only be one profile per user
+                # The columns are the current schema's (provider, provider_ref,
+                # metadata); this used to write the old vendor's session fields
+                # and failed on every attempt after the table changed.
+                metadata = profile.get('metadata')
+                if isinstance(metadata, (dict, list)):
+                    metadata = json.dumps(metadata)
                 cursor.execute("""
-                    INSERT INTO linked_provider_profiles (user_id, profile_id, session_token, session_expires_at)
+                    INSERT INTO linked_provider_profiles (user_id, provider, provider_ref, metadata)
                     VALUES (%s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
-                        profile_id = VALUES(profile_id),
-                        session_token = VALUES(session_token),
-                        session_expires_at = VALUES(session_expires_at)
+                        provider = VALUES(provider),
+                        provider_ref = VALUES(provider_ref),
+                        metadata = VALUES(metadata)
                 """, (
                     user_id,
-                    profile.get('profile_id'),
-                    profile.get('session_token'),
-                    profile.get('session_expires_at')
+                    profile.get('provider') or '',
+                    profile.get('provider_ref') or '',
+                    metadata
                 ))
                 
                 conn.commit()
@@ -5150,6 +5156,16 @@ def flush_dirty_tables_for_user(user_id: int):
             'setup_state',  # Setup wizard temporary state
             'recurring_mismatches',  # provider recurring mismatch detection
             'recurring_suggestions',  # the enrichment provider suggested recurring entries
+            # The bank tables, in the periodic worker's order, so a disconnect
+            # or a link lands in MySQL now rather than when (and if) the worker
+            # gets to this user - its deletion markers expire in five minutes.
+            'linked_provider_profiles',
+            'linked_connections',
+            'linked_accounts',
+            'linked_transactions',
+            'linked_connections_deleted',
+            'linked_accounts_deleted',
+            'linked_transactions_deleted',
         ]
         
         # Get dirty tables for this user

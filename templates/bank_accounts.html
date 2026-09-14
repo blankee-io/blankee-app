@@ -13,21 +13,21 @@
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
 </head>
 {#
-  Provider-less Bank Accounts page.
+  Bank Accounts, SimpleFIN edition.
 
-  The previous version of this template was ~2100 lines of aggregator-specific
-  connection management: the vendor's connector SDK, session-token exchange,
-  connection cards, per-account sync toggles, alias editing, and a sendBeacon
-  unload cleanup. All of it described one vendor's objects, so none of it
-  survived that vendor's removal.
+  `bank` is the provider's connect_widget_config(): with the null provider it
+  is empty and the page shows the "no provider" state; with SimpleFIN it says
+  whether this user has claimed a Setup Token, how many of today's pulls are
+  used, and whether the access URL has been refused (needs_new_token).
 
-  The ROUTE and this FILENAME deliberately stay. Notification rows already in
-  the database link to /bank_accounts?reconnect=<id>, and script.js navigates
-  here from the reconnect modal - a 404 there would be a visible regression for
-  no gain. When a new provider lands, its connect button goes in
-  .connect-bank-container and its connection cards replace the empty state
-  (the .connection-card / .account-selection-* rules in style.css were kept
-  for exactly that).
+  Not connected: the guided three-card flow (templates/_simplefin_connect.html).
+  Connected: one card per institution with its accounts, each account's type
+  (the user's own classification - SimpleFIN has none), pause/resume, alias,
+  and the Blankee card it backs; Disconnect; and, folded away unless needed,
+  the same flow again for replacing the token or re-choosing accounts.
+
+  The route and filename stay: notifications link to /bank_accounts?reconnect=<id>
+  and script.js navigates here from the reconnect modal.
 #}
 <body>
     {% include 'nav.html' %}
@@ -48,22 +48,201 @@
         <div class="profile-box profile-bank-connections">
             <div id="bank-connections-section">
                 <div class="section-liner">
+                {% if bank and bank.mode == 'setup_token' %}
+                    {% if bank.connected %}
+                        <h2>Bank connections</h2>
+                        {% if bank.needs_new_token %}
+                        <div class="sf-banner sf-banner-error">
+                            <i class="fa-solid fa-plug-circle-exclamation"></i>
+                            SimpleFIN no longer accepts this connection. Create a new Setup Token on the
+                            Bridge and paste it below under "Replace the Setup Token".
+                        </div>
+                        {% elif reconnect_id %}
+                        <div class="sf-banner sf-banner-warn">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            One of these banks reported a problem. Fix it on the SimpleFIN Bridge
+                            (sign in there and re-authorise the bank), then it will pick up again on
+                            the next pull.
+                        </div>
+                        {% endif %}
+                        <p class="sf-meta">
+                            Connected to SimpleFIN{% if bank.claimed_at %} since {{ bank.claimed_at[:10] }}{% endif %}.
+                            {% if bank.last_pull_at %}Last pull {{ bank.last_pull_at[:16]|replace('T', ' ') }}.{% endif %}
+                            {{ bank.pulls_today }} of about {{ bank.daily_ceiling }} pulls used today.
+                            {% if bank.last_error_msg and not bank.needs_new_token %}<span class="sf-error">{{ bank.last_error_msg }}</span>{% endif %}
+                        </p>
+
+                        {% if not connections %}
+                        <div class="sf-banner sf-banner-warn" id="sf-nothing-chosen">
+                            <i class="fa-solid fa-list-check"></i>
+                            Connected to SimpleFIN, but no accounts have been chosen yet. Your accounts are
+                            loading below, under "Replace the Setup Token" - say what each one is and press Save accounts.
+                        </div>
+                        {% endif %}
+                        {% for conn in connections %}
+                        <div class="connection-card{% if reconnect_id and conn.connection_id == reconnect_id %} connection-card-attention{% endif %}"
+                             data-connection-id="{{ conn.connection_id }}">
+                            <div class="connection-header">
+                                <div class="connection-info">
+                                    <h3><i class="fa-solid fa-building-columns"></i> {{ conn.institution_name or 'Bank' }}</h3>
+                                    {% set st = (conn.status or 'ACTIVE')|lower %}
+                                    <span class="connection-status status-{{ 'synced' if st in ('active', 'synced', 'connected') else st }}">
+                                        {% if st in ('active', 'synced', 'connected') %}<i class="fa-solid fa-circle-check"></i> Connected
+                                        {% elif st in ('error', 'error_repairable', 'error_institution', 'error_provider', 'error_service') %}<i class="fa-solid fa-triangle-exclamation"></i> Needs attention on the Bridge
+                                        {% elif st == 'disconnected' %}<i class="fa-solid fa-plug-circle-xmark"></i> Disconnected
+                                        {% else %}{{ conn.status }}{% endif %}
+                                    </span>
+                                </div>
+                                <button type="button" class="guide-button guide-button-danger sf-disconnect-btn"
+                                        data-connection-id="{{ conn.connection_id }}"
+                                        data-institution="{{ conn.institution_name or 'this bank' }}">
+                                    <i class="fa-solid fa-link-slash"></i> Disconnect
+                                </button>
+                            </div>
+                            <div class="account-selection-list">
+                                {% for acc in conn.accounts %}
+                                <div class="account-selection-item sf-linked-account{% if not acc.is_active %} sf-paused{% endif %}" data-account-id="{{ acc.account_id }}">
+                                    <div class="account-selection-info">
+                                        <div class="account-selection-name">
+                                            {{ acc.alias or acc.account_name }}
+                                            {% if acc.mask %}<span class="account-selection-mask">····{{ acc.mask }}</span>{% endif %}
+                                            {% if acc.card %}<span class="sf-card-badge" title="Backs the Blankee card {{ acc.card.name }}"><i class="fa-regular fa-credit-card"></i> {{ acc.card.name }}</span>{% endif %}
+                                        </div>
+                                        <div class="account-selection-details">
+                                            {% if acc.current_balance is not none %}{{ currency_symbol }}{{ '%.2f'|format(acc.current_balance) }}{% endif %}
+                                            {% if not acc.is_active %}<span class="sf-paused-label">not imported</span>{% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="sf-account-controls">
+                                        <select class="login-input sf-linked-subtype" aria-label="Account type">
+                                            <option value="checking" {% if acc.is_active and acc.account_subtype == 'checking' %}selected{% endif %}>Checking</option>
+                                            <option value="savings" {% if acc.is_active and acc.account_subtype == 'savings' %}selected{% endif %}>Savings</option>
+                                            <option value="credit_card" {% if acc.is_active and acc.account_subtype == 'credit_card' %}selected{% endif %}>Credit card</option>
+                                            <option value="skip" {% if not acc.is_active %}selected{% endif %}>Don't import</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endfor %}
+
+                        <div class="sf-row">
+                            <button type="button" class="guide-button guide-button-secondary" id="sf-choose-accounts-btn">
+                                <i class="fa-solid fa-list-check"></i> Choose accounts again
+                            </button>
+                            <button type="button" class="guide-button guide-button-secondary" disabled
+                                    title="Transaction import arrives in the next release">
+                                <i class="fa-solid fa-rotate"></i> Sync now
+                            </button>
+                        </div>
+
+                        <details class="sf-details" id="sf-replace" {% if bank.needs_new_token %}open{% endif %}>
+                            <summary>Having trouble? Replace the Setup Token</summary>
+                            <p class="sf-meta">A new token from the Bridge replaces the stored connection and keeps the
+                               accounts you have already chosen.</p>
+                            {% set sf_mode = 'replace' %}
+                            {% include '_simplefin_connect.html' %}
+                        </details>
+                    {% else %}
+                        <h2>Connect your bank</h2>
+                        <p class="sf-intro">Blankee reads your accounts through <strong>SimpleFIN Bridge</strong>, a
+                           service you own and control. Three steps, on their site and then back here.</p>
+                        {% set sf_mode = 'page' %}
+                        {% include '_simplefin_connect.html' %}
+                    {% endif %}
+                {% else %}
                     <div class="no-connections">
                         <i class="fa-solid fa-building-columns"></i>
-                        <h3>No bank connected</h3>
-                        <p>Bank connections are temporarily unavailable while we move to a
-                           new Open Banking provider. Manual entry is unaffected, and
-                           everything you have already recorded stays exactly as it is.</p>
+                        <h3>No bank provider configured</h3>
+                        <p>Bank connections are turned off on this installation (BANK_PROVIDER is
+                           not set). Manual entry is unaffected.</p>
                     </div>
-                    <div class="connect-bank-container">
-                        {# Reserved: the replacement provider's connect button #}
-                    </div>
+                {% endif %}
                 </div>
             </div>
         </div>
     </div>
 
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/simplefin_connect.js') }}"></script>
+    <script>
+    (function () {
+        function post(url, body) {
+            return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                                body: JSON.stringify(body || {}) })
+                .then(function (r) { return r.json().then(function (d) { if (!r.ok || d.status === 'error') throw new Error(d.message || 'Request failed'); return d; }); });
+        }
+        var connected = {{ 'true' if bank and bank.connected else 'false' }};
+
+        // The paste flow: on first connect it lands on this page with the
+        // accounts saved; on replace-token it keeps the accounts. Either way
+        // the page re-renders from the server.
+        if (window.SimpleFINConnect) {
+            SimpleFINConnect.init({
+                onLinked: function () { window.location.reload(); },
+                onClaimed: function (data) {
+                    if (connected && data && data.accounts) {
+                        // Replacing the token: the accounts are still chosen;
+                        // show them so a change can be made, but nothing has to be.
+                        showToast('Token replaced. Your accounts are unchanged.', 'success');
+                    }
+                }
+            });
+        }
+
+        var chooseBtn = document.getElementById('sf-choose-accounts-btn');
+        function loadAccounts(scroll) {
+            if (chooseBtn) chooseBtn.disabled = true;
+            return fetch('/bank/simplefin/accounts', { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.status === 'error') { showToast(data.message || 'Could not load accounts.', 'error'); return; }
+                    var details = document.getElementById('sf-replace');
+                    details.open = true;
+                    SimpleFINConnect.render(data);
+                    if (scroll) document.getElementById('sf-accounts').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                })
+                .catch(function () { showToast('Could not load accounts.', 'error'); })
+                .finally(function () { if (chooseBtn) chooseBtn.disabled = false; });
+        }
+        if (chooseBtn) chooseBtn.addEventListener('click', function () { loadAccounts(true); });
+        // Connected but nothing chosen yet: the partial loads the accounts by
+        // itself (data-autoload); open the fold-out so they are visible.
+        if (connected && document.getElementById('sf-nothing-chosen')) {
+            var det = document.getElementById('sf-replace');
+            if (det) det.open = true;
+        }
+
+        document.querySelectorAll('.sf-disconnect-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var name = btn.dataset.institution;
+                if (!window.confirm('Disconnect ' + name + ' from Blankee?\n\nEntries already recorded stay. To stop SimpleFIN sharing this bank, also remove the Blankee app under Apps on the Bridge.')) return;
+                btn.disabled = true;
+                post('/bank/disconnect', { connection_id: btn.dataset.connectionId })
+                    .then(function (d) { showToast(d.message || 'Disconnected.', 'success'); setTimeout(function () { window.location.reload(); }, 900); })
+                    .catch(function (e) { showToast(e.message, 'error'); btn.disabled = false; });
+            });
+        });
+
+        var linkedSelects = document.querySelectorAll('.sf-linked-subtype');
+        if (linkedSelects.length && window.SimpleFINConnect && SimpleFINConnect.enforceSingletons) {
+            SimpleFINConnect.enforceSingletons(linkedSelects);
+        }
+        linkedSelects.forEach(function (sel) {
+            sel.addEventListener('change', function () {
+                var row = sel.closest('.sf-linked-account');
+                sel.disabled = true;
+                post('/bank/update-account', { account_id: row.dataset.accountId, subtype: sel.value })
+                    .then(function (d) { showToast(d.message || 'Saved.', 'success'); setTimeout(function () { window.location.reload(); }, 600); })
+                    .catch(function (e) { showToast(e.message, 'error'); sel.disabled = false; });
+            });
+        });
+
+        var attention = document.querySelector('.connection-card-attention');
+        if (attention) attention.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    })();
+    </script>
 {% include 'footer.html' %}
 
 </body>

@@ -8,6 +8,60 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.41.0 — 2026-09-13
+
+Bank connections are back, through **SimpleFIN Bridge**, and Claude arrives as
+the categorisation helper. This release is the two **connection flows** - how
+a person links their bank and sets up their key, guided step by step in the
+setup wizard and on the bank and profile pages. Pulling transactions in,
+categorising them and the daily refresh come in the next release; until then
+a linked bank changes nothing in the budget itself.
+
+### Added
+- **Connect a bank with SimpleFIN.** SimpleFIN Bridge is a service each person
+  signs up for themselves ($1.50 a month or $15 a year, paid to SimpleFIN):
+  they link their banks there, create a Setup Token, and paste it into
+  Blankee. The wizard's new step 3 and the Bank Accounts page walk through
+  those three steps on one screen, validate the token as it is pasted, and
+  then show the accounts. Because SimpleFIN does not say what kind of account
+  each one is, the person tells Blankee - Checking, Savings, Credit card, or
+  Don't import - with a guess pre-selected from the name. A credit card
+  becomes a Blankee card automatically, or links to one that already exists.
+- **AI categorization with Claude, on your own key.** The wizard's new step 4
+  and a new section on the profile page explain how to get an Anthropic API
+  key, store it encrypted, test it with one tiny call, and switch the
+  feature on. It is off until switched on, and it cannot be switched on
+  without a tested key and a linked bank account; disconnecting the last bank
+  turns it off again while keeping the key. What is sent, when it is on, is
+  stated on the page: the description and amount of imported transactions,
+  nothing else.
+- Bank Accounts page: connection cards with each account's type, the card it
+  backs, a "Choose accounts again" step, Disconnect (with the reminder to also
+  remove the app on the Bridge), a "Replace the Setup Token" fold-out, and a
+  line showing how many of the day's SimpleFIN pulls are used. The reconnect
+  notification's link highlights the connection it means.
+
+### Changed
+- **The setup wizard has nine steps**: Welcome, MFA, Bank connection, AI
+  categorization, Categories, Name, Currency, Starting balance, Threshold.
+  Skipping the bank step skips the AI step. Anyone mid-wizard restarts at
+  Welcome, as with the last renumbering.
+- Linked accounts carry the person's own classification (`account_subtype`),
+  and the places that used to decide "checking or savings" from the account's
+  name read that first.
+- New installs get `BANK_PROVIDER=simplefin` and `ENRICHMENT_PROVIDER=claude`;
+  an existing install that still has `null` in both is switched on its next
+  update. Both providers do nothing for a person until that person connects.
+
+### Fixed
+- The provider profile row could never reach the database: the flush still
+  wrote the old vendor's columns.
+
+### Notes
+- Migrations: `simplefin_credentials`, `user_ai_settings`,
+  `users.ai_categorization`. Backward-compatible.
+- No transactions are imported yet. Sync now is shown but disabled.
+
 ## 1.40.0 — 2026-09-13
 
 ### Security

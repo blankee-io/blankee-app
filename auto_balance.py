@@ -1143,6 +1143,91 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
     return True, result
 
 
+def reconcile_to_feed(user_id, checking=None, savings=None, cards=None,
+                      on_date=None):
+    """
+    Bring the app's balances to what the bank feed reports, the moment
+    accounts are linked from the bank page.
+
+    The same corrections apply() writes when the user states a balance -
+    the feed is simply the one stating it. That is why this is deliberately
+    not gated by reconcilable(): that gate stops a *typed* figure from
+    overwriting a synced one, and here the synced figure is the one being
+    written. The wizard does not come through here; its starting-balance step
+    sets the opening figures instead.
+
+    checking and savings are balances; cards is {credit_account_id: balance
+    owed}, for cards linked to an existing Blankee card (a card created at link
+    time already starts at the bank's figure). Returns a dict saying what
+    happened to each, in the shape apply() uses, so the caller can report it.
+    """
+    from app import save_ca_daily_balance, save_totals_remainders_d
+    on_date = on_date or _user_now(user_id).date()
+    result = {'checking': None, 'savings': None, 'cards': []}
+
+    if checking is not None:
+        ok, r = apply(user_id, checking, on_date=on_date)
+        result['checking'] = {
+            'ok': ok,
+            'difference': r.get('difference'),
+            'entry_written': bool(r.get('entry_written')),
+            'error': r.get('error'),
+        }
+    elif savings is not None:
+        # apply() recalculates before it measures; without it, make sure
+        # today's rows exist before the savings figure is compared.
+        try:
+            save_totals_remainders_d()
+        except Exception as e:
+            log_exception(logger, 'AUTOBALANCE',
+                          f"Could not recalculate totals for user {user_id}: {e}")
+
+    if savings is not None:
+        try:
+            ok, diff = _correct_savings(user_id, Decimal(str(savings)), on_date)
+            written = bool(ok and diff and abs(diff) >= TOLERANCE)
+            result['savings'] = {
+                'ok': ok,
+                'difference': float(diff) if diff is not None else None,
+                'entry_written': written,
+            }
+            if written:
+                save_totals_remainders_d()
+        except Exception as e:
+            log_exception(logger, 'AUTOBALANCE',
+                          f"Could not correct savings for user {user_id}: {e}")
+            result['savings'] = {'ok': False, 'difference': None, 'entry_written': False}
+
+    touched = False
+    for account_id, actual in (cards or {}).items():
+        if actual is None:
+            continue
+        try:
+            ok, diff = _correct_card(user_id, account_id, Decimal(str(actual)), on_date)
+        except Exception as e:
+            log_exception(logger, 'AUTOBALANCE',
+                          f"Could not correct card {account_id} for user {user_id}: {e}")
+            ok, diff = False, None
+        written = bool(ok and diff and abs(diff) >= TOLERANCE)
+        touched = touched or written
+        result['cards'].append({
+            'account_id': int(account_id),
+            'ok': ok,
+            'difference': float(diff) if diff is not None else None,
+            'entry_written': written,
+        })
+    if touched:
+        try:
+            save_ca_daily_balance()
+        except Exception as e:
+            log_exception(logger, 'AUTOBALANCE',
+                          f"Could not recalculate card balances: {e}")
+
+    log_info(logger, 'AUTOBALANCE',
+             f"User {user_id} reconciled to the bank feed: {result}")
+    return result
+
+
 def _correct_the_rest(user_id, on_date, actual_savings, actual_cards, result):
     """
     Apply the savings and card corrections and record what they did.

@@ -162,6 +162,14 @@
                             {% endif %}
                         </div>
                     </div>
+                    {% if ai and has_bank_connections %}
+                    <div class="profile-section ai-profile-section">
+                        <div class="section-liner">
+                            <h3><i class="fa-solid fa-wand-magic-sparkles"></i> AI categorization</h3>
+                            {% include '_ai_settings_panel.html' %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -296,6 +304,8 @@
 
     <!-- Include the external JavaScript file for additional functionality -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ai_settings.js') }}"></script>
+    <script>document.addEventListener('DOMContentLoaded', function () { if (window.AISettings) AISettings.init({}); });</script>
 
     <script type="text/javascript">
     document.getElementById('loading-screen').style.display = 'none';

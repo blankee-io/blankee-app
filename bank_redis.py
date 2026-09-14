@@ -116,7 +116,7 @@ def update_provider_profile(profile_data: Dict[str, Any], user_id: Optional[int]
     Update or create provider profile (Redis-only, MySQL flush happens periodically).
     
     Args:
-        profile_data: Dict with profile fields (profile_id, session_token, session_expires_at, etc.)
+        profile_data: Dict with profile fields (provider, provider_ref, metadata)
         user_id: User ID (defaults to current_user.id)
         
     Returns:
@@ -273,6 +273,31 @@ def upsert_linked_connection(connection_data: Dict[str, Any], user_id: Optional[
         return None
 
 
+def linked_account_kind(account: Dict[str, Any]) -> Optional[str]:
+    """
+    'checking' / 'savings' / 'credit' / None for a linked account row.
+
+    account_subtype is the user's own classification (SimpleFIN gives no
+    type, so the user chooses at link time); it wins. The name-substring rule
+    is what the previous provider's data relied on and is kept as the
+    fallback so nothing already stored changes behaviour. None means the
+    account is of a kind Blankee has nowhere to put (loans, investments).
+    """
+    account_type = (account.get('account_type') or '').upper()
+    subtype = (account.get('account_subtype') or '').lower()
+    if account_type == 'CREDIT' or subtype == 'credit_card':
+        return 'credit'
+    if subtype in ('checking', 'savings'):
+        return subtype
+    if account_type == 'DEPOSITORY':
+        name = (account.get('account_name') or '').lower()
+        if 'checking' in name:
+            return 'checking'
+        if 'savings' in name:
+            return 'savings'
+    return None
+
+
 def get_linked_accounts(user_id: Optional[int] = None, connection_db_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get user's linked accounts from Redis or MySQL.
@@ -297,22 +322,9 @@ def get_linked_accounts(user_id: Optional[int] = None, connection_db_id: Optiona
             if connection_db_id is not None:
                 cached_data = [a for a in cached_data if a.get('connection_id') == connection_db_id]
             
-            # Filter to only include relevant account types (DEPOSITORY for checking/savings, CREDIT)
-            filtered_accounts = []
-            for account in cached_data:
-                account_type = account.get('account_type', '').upper()
-                account_name_lower = account.get('account_name', '').lower()
-                
-                # Include DEPOSITORY accounts with 'checking' or 'savings' in name
-                if account_type == 'DEPOSITORY':
-                    if 'checking' in account_name_lower or 'savings' in account_name_lower:
-                        filtered_accounts.append(account)
-                # Include all CREDIT accounts
-                elif account_type == 'CREDIT':
-                    filtered_accounts.append(account)
-            
-            return filtered_accounts
-    
+            # Only the kinds Blankee can model - see linked_account_kind.
+            return [account for account in cached_data if linked_account_kind(account)]
+
     # Fallback to MySQL
     try:
         with get_db_pool().get_cursor(dictionary=True) as cursor:
@@ -322,8 +334,9 @@ def get_linked_accounts(user_id: Optional[int] = None, connection_db_id: Optiona
                     WHERE user_id = %s AND connection_id = %s AND is_active = 1
                     AND (
                         (account_type = 'CREDIT')
+                        OR LOWER(COALESCE(account_subtype, '')) IN ('checking', 'savings', 'credit_card')
                         OR (account_type = 'DEPOSITORY' AND (
-                            LOWER(account_name) LIKE '%%checking%%' 
+                            LOWER(account_name) LIKE '%%checking%%'
                             OR LOWER(account_name) LIKE '%%savings%%'
                         ))
                     )
@@ -334,8 +347,9 @@ def get_linked_accounts(user_id: Optional[int] = None, connection_db_id: Optiona
                     WHERE user_id = %s AND is_active = 1
                     AND (
                         (account_type = 'CREDIT')
+                        OR LOWER(COALESCE(account_subtype, '')) IN ('checking', 'savings', 'credit_card')
                         OR (account_type = 'DEPOSITORY' AND (
-                            LOWER(account_name) LIKE '%%checking%%' 
+                            LOWER(account_name) LIKE '%%checking%%'
                             OR LOWER(account_name) LIKE '%%savings%%'
                         ))
                     )
@@ -1152,16 +1166,15 @@ def get_user_linked_account_flags(user_id: int) -> Dict[str, Any]:
         linked_accounts = get_linked_accounts(user_id)
         
         for account in linked_accounts:
-            account_type = account.get('account_type', '').upper()
-            account_name = account.get('account_name', '').lower()
-            
-            if account_type == 'DEPOSITORY':
-                if 'checking' in account_name:
-                    result['has_checking'] = True
-                if 'savings' in account_name:
-                    result['has_savings'] = True
-            # CREDIT accounts are handled separately via credit_accounts table
-        
+            if int(account.get('is_active', 1) or 0) != 1:
+                continue
+            kind = linked_account_kind(account)
+            if kind == 'checking':
+                result['has_checking'] = True
+            elif kind == 'savings':
+                result['has_savings'] = True
+            # credit: handled through the credit_accounts table below
+
         # Get bank-linked credit accounts from credit_accounts table
         result['linked_credit_ids'] = get_linked_credit_account_ids(user_id)
         

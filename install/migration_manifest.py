@@ -50,6 +50,9 @@ MIGRATIONS = [
     'add_loaf_period_hours.sql',
     'add_loaf_shelves.sql',
     'add_loaf_uncharged_weekdays.sql',
+    'add_simplefin_credentials.sql',
+    'add_user_ai_settings.sql',
+    'add_users_ai_categorization.sql',
 ]
 
 # install/sql/ holds only what a fresh install applies. The rollback scripts and

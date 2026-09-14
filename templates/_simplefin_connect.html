@@ -1,0 +1,84 @@
+{#
+  The SimpleFIN connect flow, used by the setup wizard (step 3) and the bank
+  page. Expects `bank` = get_bank_provider().connect_widget_config(user_id)
+  and `sf_mode` = 'setup' | 'page' | 'replace'. static/js/simplefin_connect.js
+  drives it; the page that includes this calls
+  SimpleFINConnect.init({ onLinked: fn }).
+
+  Three numbered cards because that is what the user actually has to do, in
+  that order, on a site that is not ours: SimpleFIN has no widget and no
+  redirect back - the token arrives in their clipboard and gets pasted here.
+#}
+<div class="sf-connect" id="sf-connect"
+     data-mode="{{ sf_mode|default('page') }}"
+     data-create-url="{{ bank.create_url }}"
+     data-signup-url="{{ bank.signup_url }}"
+     data-connected="{{ '1' if bank.connected else '0' }}"
+     data-autoload="{{ '1' if (bank.connected and not bank.accounts_chosen) else '0' }}">
+  <p class="sf-banner sf-banner-warn" id="sf-already-connected" hidden>
+    <i class="fa-solid fa-circle-check"></i>
+    You are already connected to SimpleFIN. Your accounts are below - say what each one is and press Save accounts.
+    Only paste a token if you want to replace the connection.
+  </p>
+
+  <div class="guide-cards">
+    <div class="guide-card">
+      <div class="guide-num">1</div>
+      <div class="guide-body">
+        <h4>Create your SimpleFIN account</h4>
+        <p>SimpleFIN Bridge is the service that talks to your bank. It is yours, not
+           Blankee's: you sign up with your email, subscribe (about $1.50 a month or
+           $15 a year), then add each bank under <strong>Financial Institutions &rarr;
+           New Connection</strong>.</p>
+        <a class="guide-button" href="{{ bank.create_url }}" target="_blank" rel="noopener noreferrer">
+          <i class="fa-solid fa-arrow-up-right-from-square"></i> Open SimpleFIN Bridge
+        </a>
+      </div>
+    </div>
+
+    <div class="guide-card">
+      <div class="guide-num">2</div>
+      <div class="guide-body">
+        <h4>Make a Setup Token</h4>
+        <p>On the Bridge, go to <strong>Apps &rarr; New Connection</strong>, name it
+           <strong>Blankee</strong>, and press <strong>Create Setup Token</strong>.
+           Copy the token it shows you. It works once, so make a new one if you
+           ever need to connect again.</p>
+      </div>
+    </div>
+
+    <div class="guide-card">
+      <div class="guide-num">3</div>
+      <div class="guide-body">
+        <h4>Paste it here</h4>
+        <p>Blankee turns the token into its own connection to SimpleFIN and shows
+           your accounts. The token itself is not kept.</p>
+        <textarea id="sf-token" class="sf-token-input" rows="3" spellcheck="false"
+                  autocomplete="off" autocapitalize="off"
+                  placeholder="Paste the Setup Token"></textarea>
+        <div class="sf-row">
+          <button type="button" class="guide-button" id="sf-claim-btn">
+            <i class="fa-solid fa-link"></i> Connect
+          </button>
+          <span class="sf-status" id="sf-claim-status" aria-live="polite"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sf-accounts" id="sf-accounts" hidden>
+    <h4 class="sf-accounts-title">Your accounts</h4>
+    <p class="account-selection-description">
+      SimpleFIN does not say what kind of account each one is, so tell Blankee.
+      One checking and one savings account can be imported, and any number of
+      credit cards. Choose <em>Don't import</em> for the rest.
+    </p>
+    <div id="sf-account-list" class="account-selection-list"></div>
+    <div class="sf-row sf-row-end">
+      <span class="sf-status" id="sf-link-status" aria-live="polite"></span>
+      <button type="button" class="guide-button" id="sf-link-btn">
+        <i class="fa-solid fa-check"></i> Save accounts
+      </button>
+    </div>
+  </div>
+</div>

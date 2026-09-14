@@ -20357,3 +20357,319 @@ label.loaf-holiday {
         height: 22px;
     }
 }
+
+/* =====================================================================
+   Guided connection flows: SimpleFIN (bank) and Claude (AI categorization).
+   Shared by the setup wizard, the bank page and the profile page through
+   templates/_simplefin_connect.html and templates/_ai_settings_panel.html.
+   ===================================================================== */
+.guide-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: 100%;
+    text-align: left;
+}
+.guide-card {
+    display: flex;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 12px;
+    background: var(--text-light);
+}
+.guide-num {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--primary);
+    color: var(--text-light);
+    font-weight: 700;
+}
+.guide-body {
+    flex: 1;
+    min-width: 0;
+}
+.guide-body h4 {
+    margin: 2px 0 6px;
+    font-size: 16px;
+}
+.guide-body p {
+    margin: 0 0 10px;
+    color: var(--secondary-dark);
+    font-size: 14px;
+    line-height: 1.45;
+}
+.guide-body p:last-child {
+    margin-bottom: 0;
+}
+.guide-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 10px;
+    background: var(--primary);
+    color: var(--text-light);
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.2s, transform 0.1s;
+}
+.guide-button:hover {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+}
+.guide-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+.guide-button-secondary {
+    background: var(--secondary-lighter);
+    color: var(--text-dark);
+}
+.guide-button-secondary:hover {
+    background: var(--secondary-hover);
+}
+.guide-button-danger {
+    background: var(--secondary-lighter);
+    color: var(--danger);
+}
+.guide-button-danger:hover {
+    background: var(--accent-lighter);
+}
+.sf-token-input {
+    width: 100%;
+    box-sizing: border-box;
+    margin: 6px 0 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    resize: vertical;
+}
+.sf-token-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-lighter);
+}
+.sf-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+.sf-row-end {
+    justify-content: flex-end;
+    margin-top: 14px;
+}
+.sf-status {
+    font-size: 13px;
+    color: var(--secondary-dark);
+}
+.sf-status.sf-error,
+.sf-error {
+    color: var(--danger);
+}
+.sf-accounts {
+    margin-top: 18px;
+    text-align: left;
+}
+.sf-accounts-title {
+    margin: 0 0 6px;
+}
+.sf-account-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+    min-width: 170px;
+}
+.sf-account-controls select.login-input {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 13px;
+}
+.sf-intro,
+.sf-meta {
+    color: var(--secondary-dark);
+    font-size: 14px;
+    margin: 0 0 14px;
+}
+.sf-banner {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border-radius: 10px;
+    margin-bottom: 14px;
+    font-size: 14px;
+}
+.sf-banner-error {
+    background: var(--accent-lighter);
+    color: var(--danger);
+}
+.sf-banner-warn {
+    background: var(--secondary-lighter);
+    color: var(--text-dark);
+}
+.sf-card-badge {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--primary-lighter);
+    color: var(--primary);
+    white-space: nowrap;
+}
+.sf-paused {
+    opacity: 0.6;
+}
+.sf-paused-label {
+    margin-left: 8px;
+    font-size: 12px;
+    color: var(--secondary-dark);
+}
+.sf-details {
+    margin-top: 18px;
+    padding: 12px 14px;
+    border: 1px dashed var(--secondary-hover);
+    border-radius: 12px;
+}
+.sf-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--secondary-dark);
+}
+.sf-details[open] summary {
+    margin-bottom: 10px;
+}
+.connection-card-attention {
+    box-shadow: 0 0 0 3px var(--accent-lighter);
+    border-radius: 8px;
+}
+
+/* The AI panel */
+.ai-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 8px 0;
+}
+.ai-field label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--secondary-dark);
+}
+.ai-field .login-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+.ai-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0;
+}
+/* Same look as .profile-form .toggle-switch, on its own class so the pages'
+   generic toggle handler does not also bind to it and flip it twice. */
+.ai-toggle {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 40px;
+    height: 32px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+}
+.ai-toggle .toggle-icon {
+    font-size: 30px;
+    line-height: 1;
+    color: var(--accent);
+    transition: color 0.3s ease;
+    transform-origin: center center;
+}
+.ai-toggle .toggle-icon.toggle-off {
+    color: var(--secondary);
+    transform: scaleX(-1);
+}
+.ai-toggle:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+.ai-toggle-label {
+    font-weight: 600;
+}
+.ai-verified-line {
+    color: var(--success);
+    font-size: 13px;
+    margin: 6px 0 0;
+}
+.ai-gate-note {
+    font-size: 13px;
+    color: var(--text-dark);
+    margin: 4px 0 8px;
+}
+.ai-privacy-note {
+    font-size: 12px;
+    color: var(--secondary-dark);
+    line-height: 1.45;
+}
+.ai-profile-section h3 {
+    margin: 0 0 12px;
+}
+
+/* The wizard modals that hold the guided flows need more room than the
+   one-field steps. */
+.modal-content-setup-profile.modal-content-wide {
+    width: min(720px, 100%);
+    max-width: 720px;
+}
+
+/* The guide buttons and selects set their own display, which would beat the
+   hidden attribute's user-agent rule; say it explicitly. */
+.sf-connect [hidden],
+.ai-settings [hidden] {
+    display: none !important;
+}
+/* A Continue the user cannot press yet should look it. */
+.setup-profile-next-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* A Continue that is locked looks disabled but still takes the click, so
+   it can say what is missing. */
+.setup-profile-next-button[data-locked="1"] {
+    opacity: 0.5;
+}
+.ai-cost-note {
+    background: var(--secondary-lighter);
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+.ai-key-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.ai-key-row .login-input {
+    flex: 1;
+    min-width: 0;
+}
+.ai-key-row .login-input[readonly] {
+    color: var(--secondary-dark);
+    letter-spacing: 1px;
+    background: var(--secondary-lighter);
+}

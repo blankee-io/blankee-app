@@ -8,7 +8,7 @@
 #}
     <div class="dropdown-menu-section">
         {# The same views the calendar bar switches between, for the pages that
-           do not carry that bar. Collapsed like Manage Recurring below it. #}
+           do not carry that bar. Collapsed like Recurring below it. #}
         <div class="dropdown-link">
             <a href="javascript:void(0);" id="toggle-dashboards-btn" data-menu-collapse="dashboards-sections">Dashboards</a>
             <i class="fa-light fa-gauge"></i>
@@ -39,9 +39,9 @@
                 <i class="fa-light fa-calendars"></i>
             </div>
         </div>
-        <div class="dropdown-link"><a href="{{ url_for('manage_categories') }}">Manage Categories</a><i class="fa-light fa-folder-tree"></i></div>
+        <div class="dropdown-link"><a href="{{ url_for('manage_categories') }}">Categories</a><i class="fa-light fa-folder-tree"></i></div>
         <div class="dropdown-link">
-            <a href="javascript:void(0);" id="toggle-recurring-btn" data-menu-collapse="recurring-sections">Manage Recurring</a>
+            <a href="javascript:void(0);" id="toggle-recurring-btn" data-menu-collapse="recurring-sections">Recurring</a>
             <i class="fa-light fa-arrows-repeat"></i>
         </div>
         <div id="recurring-sections" class="menu-collapse">
@@ -58,8 +58,15 @@
                 <i class="fa-kit fa-light-credit-card-circle-minus"></i>
             </div>
         </div>
-        <div class="dropdown-link"><a href="{{ url_for('credit_accounts') }}">Manage Credit Accounts</a><i class="fa-light fa-credit-card"></i></div>
-        <div class="dropdown-link"><a href="{{ url_for('bundles') }}">Manage Bundles</a><i class="fa-light fa-boxes-stacked"></i></div>
+        <div class="dropdown-link"><a href="{{ url_for('credit_accounts') }}">Credit Accounts</a><i class="fa-light fa-credit-card"></i></div>
+        {# Hidden until there is a provider behind it: BANK_PROVIDER defaults
+           to 'null', and on such an install the page could not connect
+           anything. Still shown to anyone who already has a connection or an
+           account, so nobody loses their way in. #}
+        {% if has_bank_connections or has_bank_accounts or bank_connect_available %}
+        <div class="dropdown-link"><a href="{{ url_for('bank_accounts') }}">Bank Accounts</a><i class="fa-light fa-building-columns"></i></div>
+        {% endif %}
+        <div class="dropdown-link"><a href="{{ url_for('bundles') }}">Bundles</a><i class="fa-light fa-boxes-stacked"></i></div>
         <div class="dropdown-link"><a href="{{ url_for('settings') }}">Settings</a><i class="fa-light fa-sliders"></i></div>
         {# Only means anything inside the iOS app, which injects window.nativeApp
            before this page runs. Rendered hidden and revealed by script.js
@@ -71,22 +78,3 @@
             <i class="fa-light fa-mobile-screen-button"></i>
         </div>
     </div>
-
-    {# Bank Accounts is hidden until there is a provider behind it.
-       BANK_PROVIDER defaults to 'null', so on a stock install this
-       section offered a page that could not connect anything.
-
-       Still shown to anyone who already has a connection or an account,
-       so an installation that does have a provider configured does not
-       lose its way in. Hidden rather than removed: the page, its routes
-       and the pending-transactions flow all still work. #}
-    {% if has_bank_connections or has_bank_accounts %}
-    <div class="dropdown-divider"></div>
-    <div class="dropdown-menu-section">
-        <div class="dropdown-profile-label"><span>Bank Accounts</span></div>
-        <div class="dropdown-link"><a href="{{ url_for('bank_accounts') }}">{% if has_bank_connections %}Manage Connections{% else %}Connect Accounts{% endif %}</a><i class="fa-light fa-building-columns"></i></div>
-        {% if has_bank_accounts %}
-        <div class="dropdown-link"><a href="{{ url_for('pending_transactions') }}">Pending Transactions{% if pending_transactions_count > 0 %}<span class="pending-txn-badge">{{ pending_transactions_count }}</span>{% endif %}</a><i class="fa-kit fa-light-money-bill-circle-question"></i></div>
-        {% endif %}
-    </div>
-    {% endif %}

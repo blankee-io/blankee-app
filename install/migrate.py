@@ -41,6 +41,8 @@ from migration_manifest import BASELINE, MIGRATIONS, MIGRATIONS_DIR, REPO_ROOT
 # What must be true when this finishes. Checked against the live schema, so a
 # migration that silently did nothing is caught here rather than by a 500 later.
 EXPECTED_TABLES = (
+    'simplefin_credentials',
+    'user_ai_settings',
     'users', 'income_categories', 'expense_categories', 'income_entries',
     'expense_entries', 'credit_accounts', 'totals_remainders',
     'totals_remainders_d', 'totals_remainders_m', 'savings_entries',
@@ -55,6 +57,9 @@ EXPECTED_TABLES = (
 )
 EXPECTED_COLUMNS = (
     ('users', 'is_admin'),
+    ('users', 'ai_categorization'),
+    ('simplefin_credentials', 'access_url_encrypted'),
+    ('user_ai_settings', 'verified_fingerprint'),
     ('users', 'member_since'),
     ('users', 'setup_step'),
     ('income_categories', 'is_savings'),

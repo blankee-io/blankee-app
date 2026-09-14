@@ -873,6 +873,9 @@ def inject_unread_notifications():
         nav_last_name=last_name,
         has_bank_accounts=has_bank_accounts,
         has_bank_connections=has_bank_connections,
+        # A provider is configured, so the menu offers "Connect Accounts"
+        # before any connection exists. False with the null provider.
+        bank_connect_available=(getattr(get_bank_provider(), 'name', 'null') != 'null'),
         pending_transactions_count=pending_transactions_count,
         data_version=data_version
     )
@@ -1732,28 +1735,14 @@ def setup_profile():
     if user_data is None:
         user_data = {}
 
-    # Clean up any connections left over from an abandoned setup attempt.
-    # The wizard no longer has a bank step, so this only ever runs against
-    # rows a previous provider left behind.
-    try:
-        from bank_redis import get_linked_connections, delete_linked_connection
-        user_id = current_user.id
-        connections = get_linked_connections(user_id)
-        if connections:
-            log_info(logger, 'SETUP_PROFILE', f"Cleaning up {len(connections)} abandoned connection(s) for user {user_id}")
-            for conn in connections:
-                conn_id = conn.get('connection_id')
-                if conn_id:
-                    delete_linked_connection(conn_id, user_id)
-            log_info(logger, 'SETUP_PROFILE', f"Cleanup complete for user {user_id}")
-    except Exception as e:
-        log_error(logger, 'SETUP_PROFILE', f"Cleanup error (non-fatal): {e}")
-
-    # Ask the provider how to open its connect flow. None means there is no
-    # provider, and the template must hide the connect step rather than render
-    # a button that cannot work.
-    _widget = get_bank_provider().connect_widget_config(user_id)
-    connector_id = (_widget or {}).get('connector_id', '')
+    # The wizard's bank step (SimpleFIN) links accounts that must survive a
+    # resume, so nothing is cleaned up here any more; a connection the user
+    # made is theirs until they disconnect it.
+    user_id = current_user.id
+    # What the bank step renders: with the null provider this is None and the
+    # template hides the step; with SimpleFIN it is the guided token flow.
+    _widget = get_bank_provider().connect_widget_config(user_id) or {}
+    _ai = _ai_display(user_id)
     
     # Extract saved form data for prefilling (permanent fields from users blob)
     saved_first_name = user_data.get('first_name', '') or ''
@@ -1800,7 +1789,9 @@ def setup_profile():
     
     # Render the setup profile page with connector ID and resume state
     return render_template('setup_profile.html',
-                           connector_id=connector_id,
+                           bank=_widget,
+                           ai=_ai,
+                           sf_mode='setup',
                            setup_step=setup_step,
                            mfa_enabled=mfa_enabled,
                            saved_first_name=saved_first_name,
@@ -1809,6 +1800,7 @@ def setup_profile():
                            saved_starting_savings=saved_starting_savings,
                            saved_balance_threshold=saved_balance_threshold,
                            saved_starting_balance=saved_starting_balance,
+                           linked_balances=_linked_starting_balances(user_id),
                            saved_selected_account_ids=saved_selected_account_ids,
                            saved_categories=saved_categories)
 
@@ -16357,6 +16349,7 @@ def profile():
     # Pass all retrieved data to the template
     return render_template(
         'profile.html',
+        ai=_ai_display(current_user.id),
         # Prefer the Redis blob: current_user comes from MySQL, which lags a
         # Redis-first email change until the flush worker catches up.
         current_username=(user_data.get('username') if user_data else None) or current_user.username or '',
@@ -16402,13 +16395,24 @@ def bank_accounts():
     # Get linked connections
     connections = []
     currency_symbol = '$'
-    _widget = get_bank_provider().connect_widget_config(current_user.id)
-    connector_id = (_widget or {}).get('connector_id', '')
-
+    _widget = get_bank_provider().connect_widget_config(current_user.id) or {}
+    existing_cards = []
+    try:
+        from credit_link import cards_for_linking
+        existing_cards = cards_for_linking(current_user.id)
+    except Exception as e:
+        log_error(app.logger, 'PROFILE', f"Error loading cards for bank_accounts: {e}")
     try:
         connections = get_linked_connections(current_user.id)
+        from bank_redis import _get_all_linked_accounts_raw
+        all_accounts = _get_all_linked_accounts_raw(current_user.id) or []
         for conn_row in connections:
-            accounts = get_linked_accounts(current_user.id, conn_row.get('id'))
+            accounts = [a for a in all_accounts if a.get('connection_id') == conn_row.get('id')]
+            for a in accounts:
+                for k in ('current_balance', 'available_balance'):
+                    if a.get(k) is not None:
+                        a[k] = float(a[k])
+                a['card'] = next((c for c in existing_cards if c.get('linked_account_id') == a.get('account_id')), None)
             conn_row['accounts'] = accounts
 
         currency_symbols = {'USD': '$', 'EUR': '\u20ac'}
@@ -16423,7 +16427,11 @@ def bank_accounts():
         landing_page=landing_page,
         connections=connections,
         currency_symbol=currency_symbol,
-        connector_id=connector_id,
+        bank=_widget,
+        sf_mode='replace' if _widget.get('needs_new_token') else 'page',
+        existing_cards=existing_cards,
+        reconnect_id=request.args.get('reconnect', ''),
+        ai=_ai_display(current_user.id),
         bank_last_txn_date=last_txn_date,
         bank_last_txn_date_formatted=(
             datetime.strptime(last_txn_date, '%Y-%m-%d').strftime('%m/%d/%Y')
@@ -17249,250 +17257,6 @@ def resend_smtp_code():
                     'smtp': get_smtp_config_for_display()}), 200
 
 
-@app.route('/pending-transactions', methods=['GET'])
-@login_required
-def pending_transactions():
-    """Show pending transactions that need category confirmation"""
-    # Try to get user settings from Redis first
-    redis_key = f"users:v1:{current_user.id}"
-    user_data = None
-    
-    if app.config.get('REDIS_OK'):
-        try:
-            cached = _redis_client.get(redis_key)
-            if cached:
-                user_data = json.loads(cached)
-        except Exception as e:
-            pass
-    
-    # If not in Redis, load from MySQL
-    if not user_data:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT profile_picture, landing_page, currency_type
-                FROM users 
-                WHERE id = %s
-            """, (current_user.id,))
-            result = cursor.fetchone()
-            cursor.close()
-            
-            if result:
-                user_data = result
-
-    profile_picture = user_data.get('profile_picture') if user_data else None
-    landing_page = user_data.get('landing_page', 'dashboard_3m') if user_data else 'dashboard_3m'
-    currency_type = user_data.get('currency_type', 'USD') if user_data else 'USD'
-    
-    # Currency symbol mapping
-    currency_symbols = {
-        'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CAD': 'C$', 
-        'AUD': 'A$', 'CHF': 'Fr', 'CNY': '¥', 'INR': '₹', 'MXN': 'Mex$'
-    }
-    currency_symbol = currency_symbols.get(currency_type, '$')
-    
-    # Get bank transactions that have been imported but are pending review
-    # A transaction is pending review when:
-    # 1. It has been imported (imported_to_entry_id is not NULL)
-    # 2. The corresponding budget entry has pending=1
-    pending_txns = []
-    
-    from bank_redis import get_linked_transactions, get_linked_accounts
-    linked_transactions = get_linked_transactions(current_user.id)
-    linked_accounts = get_linked_accounts(current_user.id)
-    
-    # Build account lookup
-    account_lookup = {acc.get('account_id'): acc for acc in (linked_accounts or [])}
-    
-    # Get all entries that are pending (pending=1) OR auto_confirmed (auto_confirmed=1) and imported from the bank provider
-    # Check income_entries, expense_entries, c_expense_entries
-    pending_entry_ids = {'income': set(), 'expense': set(), 'c_expense': set()}
-    
-    # Build entry lookup to get category_id and auto_confirmed status for each entry
-    entry_category_lookup = {'income': {}, 'expense': {}, 'c_expense': {}}
-    entry_auto_confirmed_lookup = {'income': {}, 'expense': {}, 'c_expense': {}}
-    
-    # Get income entries with category_id
-    redis_key = f"income_entries:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        income_entries = json.loads(cached)
-        for entry in income_entries:
-            # Include if pending=1 OR auto_confirmed=1
-            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
-                pending_entry_ids['income'].add(entry.get('id'))
-                entry_category_lookup['income'][entry.get('id')] = entry.get('category_id')
-                entry_auto_confirmed_lookup['income'][entry.get('id')] = entry.get('auto_confirmed', 0)
-    
-    # Get expense entries with category_id
-    redis_key = f"expense_entries:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        expense_entries = json.loads(cached)
-        for entry in expense_entries:
-            # Include if pending=1 OR auto_confirmed=1
-            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
-                pending_entry_ids['expense'].add(entry.get('id'))
-                entry_category_lookup['expense'][entry.get('id')] = entry.get('category_id')
-                entry_auto_confirmed_lookup['expense'][entry.get('id')] = entry.get('auto_confirmed', 0)
-    
-    # Get c_expense entries with category_id
-    redis_key = f"c_expense_entries:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        c_expense_entries = json.loads(cached)
-        for entry in c_expense_entries:
-            # Include if pending=1 OR auto_confirmed=1
-            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
-                pending_entry_ids['c_expense'].add(entry.get('id'))
-                entry_category_lookup['c_expense'][entry.get('id')] = entry.get('category_id')
-                entry_auto_confirmed_lookup['c_expense'][entry.get('id')] = entry.get('auto_confirmed', 0)
-    
-    # Load categories BEFORE processing transactions (needed for credit_account_id lookup)
-    expense_categories = []
-    income_categories = []
-    c_expense_categories = []
-    
-    redis_key = f"expense_categories:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        expense_categories = [c for c in json.loads(cached) if not c.get('hidden')]
-    
-    redis_key = f"income_categories:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        income_categories = [c for c in json.loads(cached) if not c.get('hidden')]
-    
-    redis_key = f"c_expense_categories:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        # Filter out hidden categories and "Starting Balance" category
-        c_expense_categories = [c for c in json.loads(cached) 
-                               if not c.get('hidden') and c.get('name', '').lower() != 'starting balance']
-    
-    # Find bank transactions that link to these pending entries
-    for txn in (linked_transactions or []):
-        imported_entry_id = txn.get('imported_to_entry_id')
-        entry_type = txn.get('imported_entry_type')
-        
-        if not imported_entry_id or not entry_type:
-            continue
-        
-        # Check if this entry is pending
-        if entry_type in pending_entry_ids and imported_entry_id in pending_entry_ids[entry_type]:
-            # Get account info
-            account_info = account_lookup.get(txn.get('account_id'), {})
-            
-            # Parse enrichment labels
-            enrichment_labels_raw = txn.get('enrichment_labels')
-            enrichment_labels = None
-            if enrichment_labels_raw:
-                try:
-                    labels = json.loads(enrichment_labels_raw) if isinstance(enrichment_labels_raw, str) else enrichment_labels_raw
-                    if isinstance(labels, list):
-                        enrichment_labels = ', '.join(labels)
-                except:
-                    enrichment_labels = str(enrichment_labels_raw)
-            
-            # Determine if expense based on entry type
-            is_expense = entry_type in ('expense', 'c_expense')
-            
-            # Get current category_id from entry
-            current_category_id = entry_category_lookup.get(entry_type, {}).get(imported_entry_id)
-            
-            # Get credit_account_id for c_expense entries (need to look up from category)
-            credit_account_id = None
-            current_canonical_category_id = None
-            if entry_type == 'c_expense' and current_category_id:
-                # Look up the credit account id and canonical name from the per-account category
-                _c_name = None
-                for cat in c_expense_categories if c_expense_categories else []:
-                    if cat.get('id') == current_category_id:
-                        credit_account_id = cat.get('account_id')
-                        _c_name = cat.get('name')
-                        break
-                # Translate per-account c_expense id -> canonical expense_categories.id by name match
-                if _c_name:
-                    _c_name_lower = _c_name.lower()
-                    for ec in expense_categories:
-                        if (ec.get('name') or '').lower() == _c_name_lower:
-                            current_canonical_category_id = ec.get('id')
-                            break
-            
-            # Get cached custom category suggestion (from the enrichment provider direct API)
-            custom_category_suggestion = txn.get('custom_category_suggestion')
-            custom_category_id = txn.get('custom_category_id')
-            custom_category_type = txn.get('custom_category_type')
-            custom_category_confidence = txn.get('custom_category_confidence')
-            
-            # Check if this entry was auto-confirmed
-            is_auto_confirmed = entry_auto_confirmed_lookup.get(entry_type, {}).get(imported_entry_id, 0) == 1
-            
-            pending_txns.append({
-                'transaction_id': txn.get('transaction_id'),
-                'merchant_name': txn.get('merchant_name'),
-                'description': txn.get('description'),
-                'amount': float(txn.get('amount', 0)),
-                'date': txn.get('date'),
-                'account_id': txn.get('account_id'),  # linked account_id
-                'account_name': account_info.get('alias') or account_info.get('account_name', 'Unknown'),
-                'enrichment_labels': enrichment_labels,
-                'imported_to_entry_id': imported_entry_id,
-                'imported_entry_type': entry_type,
-                'is_expense': is_expense,
-                'current_category_id': current_category_id,
-                'credit_account_id': credit_account_id,  # Blankee credit account id
-                'current_canonical_category_id': current_canonical_category_id,  # canonical expense_categories.id for c_expense
-                'current_category_name': None,  # Will be set after categories are loaded
-                'is_auto_confirmed': is_auto_confirmed,  # Track if auto-confirmed by system
-                # Cached AI category suggestion
-                'custom_category_suggestion': custom_category_suggestion,
-                'custom_category_id': custom_category_id,
-                'custom_category_type': custom_category_type,
-                'custom_category_confidence': custom_category_confidence
-            })
-    
-    # Build category name lookup
-    category_name_lookup = {}
-    for cat in income_categories:
-        category_name_lookup[('income', cat.get('id'))] = cat.get('name')
-        category_name_lookup[('incoming', cat.get('id'))] = cat.get('name')
-    for cat in expense_categories:
-        category_name_lookup[('expense', cat.get('id'))] = cat.get('name')
-        category_name_lookup[('outgoing', cat.get('id'))] = cat.get('name')
-    for cat in c_expense_categories:
-        category_name_lookup[('c_expense', cat.get('id'))] = cat.get('name')
-    
-    # Set current_category_name for each pending transaction
-    for txn in pending_txns:
-        cat_id = txn.get('current_category_id')
-        entry_type = txn.get('imported_entry_type')
-        if cat_id:
-            txn['current_category_name'] = category_name_lookup.get((entry_type, cat_id), '')
-        # Resolve memory suggestions: replace literal 'Memory' with actual category name
-        if txn.get('custom_category_suggestion') == 'Memory' and txn.get('custom_category_id'):
-            sug_type = txn.get('custom_category_type') or entry_type
-            sug_id = txn['custom_category_id']
-            try:
-                sug_name = category_name_lookup.get((sug_type, sug_id)) or category_name_lookup.get((sug_type, int(sug_id)))
-            except (ValueError, TypeError):
-                sug_name = None
-            if sug_name:
-                txn['custom_category_suggestion'] = sug_name
-    
-    # Sort by date (newest first)
-    pending_txns.sort(key=lambda x: x['date'], reverse=True)
-
-    return render_template(
-        'pending_transactions.html',
-        profile_picture=profile_picture,
-        landing_page=landing_page,
-        currency_symbol=currency_symbol,
-        pending_transactions=pending_txns,
-        expense_categories=expense_categories,
-        income_categories=income_categories,
-        c_expense_categories=c_expense_categories
-    )
 
 
 def _canonical_expense_category_id(user_id, c_expense_category_id):
@@ -28623,6 +28387,510 @@ def bank_toggle_auto_import():
     except Exception as e:
         log_error(app.logger, 'BANK', f"Error toggling auto-import: {e}")
         return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+
+
+
+##############################################################################
+################ SIMPLEFIN CONNECT FLOW + AI CATEGORIZATION ##################
+##############################################################################
+# The connection flows only. Pulling transactions, the daily poll and the
+# enrichment itself come in the next phase; these routes get a user from
+# "no bank" to "accounts linked and classified", and from "no key" to "key
+# tested and AI switched on" - guided, on the setup wizard and on the bank
+# and profile pages, through the shared partials templates/_simplefin_connect.html
+# and templates/_ai_settings_panel.html.
+
+
+def _ai_display(user_id):
+    """The AI panel's state for a page, or None when Claude is not the provider."""
+    provider = get_enrichment_provider()
+    if getattr(provider, 'name', '') != 'claude' or not hasattr(provider, 'get_display'):
+        return None
+    try:
+        return provider.get_display(user_id)
+    except Exception as e:
+        log_error(app.logger, 'AI', f'Could not read AI settings for user {user_id}: {e}')
+        return None
+
+
+def _simplefin_provider():
+    provider = get_bank_provider()
+    if getattr(provider, 'name', '') != 'simplefin':
+        abort(404)
+    return provider
+
+
+def _claude_provider():
+    provider = get_enrichment_provider()
+    if getattr(provider, 'name', '') != 'claude':
+        abort(404)
+    return provider
+
+
+def _linked_starting_balances(user_id):
+    """
+    The checking and savings balances the bank last reported, as floats, for
+    the wizard's starting-balance step. None for a kind nothing is linked to.
+    """
+    out = {'checking': None, 'savings': None}
+    try:
+        from bank_redis import get_linked_accounts, linked_account_kind
+        for acc in get_linked_accounts(user_id) or []:
+            if str(acc.get('is_active', 1)).lower() in ('0', 'false'):
+                continue
+            kind = linked_account_kind(acc)
+            if kind not in out or out[kind] is not None:
+                continue
+            bal = acc.get('current_balance')
+            if bal is None:
+                bal = acc.get('available_balance')
+            if bal is not None:
+                out[kind] = round(float(bal), 2)
+    except Exception as e:
+        log_exception(app.logger, 'BANK', f'user {user_id}: could not read linked balances: {e}')
+    return out
+
+
+def _simplefin_overview_payload(user_id, provider):
+    """
+    What the account-classification screen needs: the live accounts from
+    SimpleFIN (one balances-only request), what is already stored for them
+    (so a re-visit shows the user's own choices), and the user's Blankee cards
+    to link to.
+    """
+    from providers.simplefin import SimpleFINError
+    from bank_redis import _get_all_linked_accounts_raw
+    from credit_link import cards_for_linking
+    payload = {'connections': [], 'accounts': [], 'errors': [], 'stored_accounts': [], 'existing_cards': []}
+    try:
+        payload.update(provider.fetch_overview(user_id))
+    except SimpleFINError as e:
+        payload['errors'] = [{'code': e.code, 'msg': e.message}]
+        payload['message'] = e.message
+    try:
+        payload['stored_accounts'] = [
+            {'account_id': a.get('account_id'), 'account_subtype': a.get('account_subtype'),
+             'is_active': a.get('is_active', 1), 'alias': a.get('alias')}
+            for a in (_get_all_linked_accounts_raw(user_id) or [])
+        ]
+    except Exception as e:
+        log_warning(app.logger, 'BANK', f'Could not read stored accounts for user {user_id}: {e}')
+    try:
+        payload['existing_cards'] = cards_for_linking(user_id)
+    except Exception as e:
+        log_warning(app.logger, 'BANK', f'Could not read cards for user {user_id}: {e}')
+    payload['bank'] = provider.connect_widget_config(user_id)
+    return payload
+
+
+@app.route('/bank/simplefin/claim', methods=['POST'])
+@app.route('/bank/simplefin/replace-token', methods=['POST'])
+@login_required
+def bank_simplefin_claim():
+    """
+    Paste a Setup Token: claim it, store the access URL, show the accounts.
+    Replacing a token is the same operation - the new access URL simply
+    overwrites the old one and the accounts already linked stay linked.
+    """
+    provider = _simplefin_provider()
+    data = request.get_json(silent=True) or {}
+    try:
+        ok, message = provider.claim_setup_token(current_user.id, data.get('token', ''))
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    if not ok:
+        # A spent token from someone who is already connected is the common
+        # slip (a reload put the old token back, or it was pasted twice).
+        # Refusing would hide the fact that they are connected; show them
+        # their accounts instead.
+        if 'already been used' in message and provider.has_credentials(current_user.id):
+            payload = _simplefin_overview_payload(current_user.id, provider)
+            payload['status'] = 'success'
+            payload['message'] = ('That token was already used - and you are already connected. '
+                                  'Choose your accounts below.')
+            return jsonify(payload)
+        return jsonify({'status': 'error', 'message': message}), 400
+    payload = _simplefin_overview_payload(current_user.id, provider)
+    payload.setdefault('message', message)
+    payload['status'] = 'success'
+    return jsonify(payload)
+
+
+@app.route('/bank/simplefin/accounts', methods=['GET'])
+@login_required
+def bank_simplefin_accounts():
+    """The classification screen for an already-connected user (bank page)."""
+    provider = _simplefin_provider()
+    if not provider.has_credentials(current_user.id):
+        return jsonify({'status': 'error', 'message': 'No SimpleFIN connection yet.'}), 404
+    payload = _simplefin_overview_payload(current_user.id, provider)
+    payload['status'] = 'error' if payload.get('errors') and not payload.get('accounts') else 'success'
+    return jsonify(payload), (400 if payload['status'] == 'error' else 200)
+
+
+_SUBTYPES = ('checking', 'savings', 'credit_card', 'skip')
+
+
+@app.route('/bank/simplefin/link-accounts', methods=['POST'])
+@login_required
+def bank_simplefin_link_accounts():
+    """
+    Save the user's classification of their SimpleFIN accounts.
+
+    SimpleFIN has no account types, so this is where checking / savings /
+    credit card is decided, and it is the only place: everything downstream
+    reads linked_accounts.account_type / account_subtype. Connections are
+    written to MySQL directly so the accounts get real connection ids at
+    once, rather than temporary ones the flush has to remap. No transaction
+    pull happens here yet - that is the next phase.
+    """
+    from providers.simplefin import SimpleFINError, account_type_for
+    from bank_redis import (upsert_linked_connection, upsert_linked_account,
+                            _get_all_linked_accounts_raw)
+    from credit_link import link_credit_account, unlink_credit_account, create_linked_credit_account
+    import redis_manager as _rm
+
+    provider = _simplefin_provider()
+    user_id = current_user.id
+    data = request.get_json(silent=True) or {}
+    rows = data.get('accounts') or []
+    # 'setup' is the wizard, whose starting-balance step sets the opening
+    # figures; anywhere else the bank's balances are applied at once.
+    from_wizard = (data.get('mode') == 'setup')
+    if not isinstance(rows, list) or not rows:
+        return jsonify({'status': 'error', 'message': 'Choose what each account is first.'}), 400
+    for row in rows:
+        if row.get('subtype') not in _SUBTYPES:
+            return jsonify({'status': 'error', 'message': 'Unknown account type.'}), 400
+    chosen = [r for r in rows if r['subtype'] != 'skip']
+    if not chosen:
+        return jsonify({'status': 'error', 'message': 'Choose at least one account to import, or skip this step.'}), 400
+    if sum(1 for r in chosen if r['subtype'] == 'checking') > 1:
+        return jsonify({'status': 'error', 'message': 'Only one checking account can be imported.'}), 400
+    if sum(1 for r in chosen if r['subtype'] == 'savings') > 1:
+        return jsonify({'status': 'error', 'message': 'Only one savings account can be imported.'}), 400
+
+    try:
+        overview = provider.fetch_overview(user_id)
+    except SimpleFINError as e:
+        return jsonify({'status': 'error', 'message': e.message}), 400
+    live_accounts = {a['account_id']: a for a in overview['accounts']}
+    live_connections = {c['connection_id']: c for c in overview['connections']}
+    stored = {a.get('account_id'): a for a in (_get_all_linked_accounts_raw(user_id) or [])}
+
+    try:
+        # Connections first, MySQL-direct, so their real ids exist.
+        needed = {}
+        for row in chosen:
+            acc = live_accounts.get(row.get('account_id'))
+            if not acc:
+                return jsonify({'status': 'error', 'message': 'One of those accounts is no longer reported by SimpleFIN. Reload and try again.'}), 400
+            conn = live_connections.get(acc['connection_id'])
+            if conn:
+                needed[conn['connection_id']] = conn
+        real_ids = {}
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            for cid, conn in needed.items():
+                cursor.execute(
+                    "INSERT INTO linked_connections (user_id, connection_id, institution_name, institution_id, status, last_synced_at) "
+                    "VALUES (%s, %s, %s, %s, %s, NOW()) "
+                    "ON DUPLICATE KEY UPDATE institution_name = VALUES(institution_name), "
+                    " institution_id = VALUES(institution_id), status = VALUES(status)",
+                    (user_id, cid, conn.get('institution_name'), conn.get('institution_id'), conn.get('status') or 'ACTIVE'))
+            if needed:
+                cursor.execute("SELECT id, connection_id FROM linked_connections WHERE user_id = %s", (user_id,))
+                for db_id, cid in cursor.fetchall():
+                    real_ids[cid] = db_id
+        # Drop the cached list so the Redis-first helpers reload it with the
+        # real ids, then let them own the rows from here.
+        if app.config.get('REDIS_OK') and _redis_client is not None:
+            _redis_client.delete(f"linked_connections:v1:{user_id}")
+        for cid, conn in needed.items():
+            upsert_linked_connection({
+                'connection_id': cid,
+                'institution_name': conn.get('institution_name'),
+                'institution_id': conn.get('institution_id'),
+                'status': conn.get('status') or 'ACTIVE',
+            }, user_id)
+
+        linked = 0
+        cards_made = 0
+        # What the bank says each linked balance is, for the reconciliation
+        # below. Cards created here already start at the bank's figure.
+        feed = {'checking': None, 'savings': None, 'cards': {}}
+        for row in rows:
+            aid = row.get('account_id')
+            acc = live_accounts.get(aid)
+            was = stored.get(aid) or {}
+            subtype = row['subtype']
+            if subtype == 'skip':
+                if was:
+                    upsert_linked_account({'account_id': aid, 'connection_id': was.get('connection_id'),
+                                           'is_active': 0, 'sync_transactions': 0}, user_id)
+                    if (was.get('account_subtype') or '') == 'credit_card':
+                        unlink_credit_account(user_id, aid)
+                continue
+            conn_db_id = real_ids.get(acc['connection_id']) or was.get('connection_id')
+            name = acc['account_name']
+            upsert_linked_account({
+                'account_id': aid,
+                'connection_id': conn_db_id,
+                'account_name': name,
+                'account_type': account_type_for(subtype),
+                'account_subtype': subtype,
+                'mask': acc.get('mask') or was.get('mask') or '',
+                'currency': acc.get('currency') or 'USD',
+                'current_balance': acc.get('current_balance'),
+                'available_balance': acc.get('available_balance'),
+                'is_active': 1,
+                'sync_transactions': 1,
+            }, user_id)
+            linked += 1
+            if subtype in ('checking', 'savings') and acc.get('current_balance') is not None:
+                feed[subtype] = float(acc['current_balance'])
+            if subtype == 'credit_card':
+                card = row.get('card') or {}
+                if card.get('mode') == 'existing' and card.get('credit_account_id'):
+                    link_credit_account(user_id, aid, int(card['credit_account_id']), mask=acc.get('mask'))
+                    if acc.get('current_balance') is not None:
+                        feed['cards'][int(card['credit_account_id'])] = abs(float(acc['current_balance']))
+                elif (was.get('account_subtype') or '') != 'credit_card' or card.get('mode') == 'new':
+                    display = (was.get('alias') or name)
+                    if create_linked_credit_account(user_id, display, aid, mask=acc.get('mask'),
+                                                    starting_balance=acc.get('current_balance')) is not None:
+                        cards_made += 1
+            elif (was.get('account_subtype') or '') == 'credit_card':
+                unlink_credit_account(user_id, aid)
+
+        # credit_accounts is in the forced-flush list; the linked_* tables are
+        # picked up by the periodic worker within seconds.
+        try:
+            _rm.flush_dirty_tables_for_user(user_id)
+        except Exception as e:
+            log_warning(app.logger, 'BANK', f'Post-link flush for user {user_id}: {e}')
+        # The nav reads these keys directly; make the next request see them.
+        try:
+            _bump_data_version(user_id)
+        except Exception:
+            pass
+        log_info(app.logger, 'BANK', f'user {user_id}: {linked} SimpleFIN account(s) linked, {cards_made} card(s) created')
+        msg = f'{linked} account{"s" if linked != 1 else ""} saved.'
+        if cards_made:
+            msg += f' {cards_made} credit card{"s" if cards_made != 1 else ""} created in Blankee.'
+        # Outside the wizard the bank's figures become the app's figures now,
+        # so the remainders match from the first day rather than drifting
+        # until the next scheduled balance.
+        reconciled = None
+        if not from_wizard and (feed['checking'] is not None or feed['savings'] is not None or feed['cards']):
+            try:
+                import auto_balance
+                reconciled = auto_balance.reconcile_to_feed(
+                    user_id, checking=feed['checking'], savings=feed['savings'], cards=feed['cards'])
+                chk = reconciled.get('checking') or {}
+                if chk and not chk.get('ok'):
+                    msg += f" Your checking balance could not be matched: {chk.get('error') or 'unknown error'}"
+                else:
+                    msg += ' Balances matched to the bank.'
+            except Exception as e:
+                log_exception(app.logger, 'BANK', f'user {user_id}: reconcile after link failed: {e}')
+                msg += ' The accounts are linked, but the balances could not be matched yet.'
+        return jsonify({'status': 'success', 'message': msg, 'linked': linked,
+                        'reconciled': reconciled,
+                        'balances': _linked_starting_balances(user_id),
+                        'bank': provider.connect_widget_config(user_id)})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+
+
+@app.route('/bank/disconnect', methods=['POST'])
+@login_required
+def bank_disconnect():
+    """
+    Forget a connection. SimpleFIN has no API for this; the user removes the
+    app on the Bridge, and the page tells them so. When it was the last
+    connection the stored access URL goes too (bank_redis does that), so a
+    later reconnect needs a fresh Setup Token.
+    """
+    from bank_redis import get_linked_connections, _get_all_linked_accounts_raw
+    from credit_link import unlink_credit_account
+    provider = get_bank_provider()
+    data = request.get_json(silent=True) or {}
+    connection_id = str(data.get('connection_id') or '').strip()
+    if not connection_id:
+        return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
+    try:
+        user_id = current_user.id
+        conn = next((c for c in get_linked_connections(user_id) if c.get('connection_id') == connection_id), None)
+        if not conn:
+            return jsonify({'status': 'error', 'message': 'Connection not found'}), 404
+        for acc in _get_all_linked_accounts_raw(user_id) or []:
+            if acc.get('connection_id') == conn.get('id'):
+                unlink_credit_account(user_id, acc.get('account_id'))
+        try:
+            import redis_manager as _rm
+            _rm.flush_dirty_tables_for_user(user_id)   # credit_accounts is in the forced list
+        except Exception as e:
+            log_warning(app.logger, 'BANK', f'user {user_id}: flush after unlink: {e}')
+        ok = provider.disconnect(user_id, connection_id)
+        if not ok:
+            return jsonify({'status': 'error', 'message': 'Could not remove the connection.'}), 500
+        # The deletion markers are only picked up by the periodic worker for a
+        # user hydrated in *this* process, and they expire in five minutes.
+        # Flush them here, so the MySQL rows go now rather than maybe never.
+        try:
+            _rm.flush_dirty_tables_for_user(user_id)
+        except Exception as e:
+            log_warning(app.logger, 'BANK', f'user {user_id}: flush after disconnect: {e}')
+        # Last one gone: forget the access URL too, here and now, rather than
+        # relying on bank_redis's cleanup (which reads the profile row from
+        # MySQL and can miss one that has not flushed yet). Reconnecting then
+        # means a fresh Setup Token, which is the honest state.
+        remaining = [c for c in get_linked_connections(user_id) if c.get('connection_id') != connection_id]
+        if not remaining:
+            try:
+                provider.delete_user(user_id)
+                with get_db_pool().get_cursor(commit=True) as cursor:
+                    cursor.execute("DELETE FROM linked_provider_profiles WHERE user_id = %s", (user_id,))
+                if app.config.get('REDIS_OK') and _redis_client is not None:
+                    _redis_client.delete(f"linked_provider_profiles:v1:{user_id}")
+                log_info(app.logger, 'BANK', f'user {user_id}: last connection removed, credentials forgotten')
+            except Exception as e:
+                log_warning(app.logger, 'BANK', f'user {user_id}: could not forget credentials: {e}')
+        try:
+            _bump_data_version(user_id)
+        except Exception:
+            pass
+        log_info(app.logger, 'BANK', f'user {user_id}: connection {connection_id} disconnected')
+        widget = provider.connect_widget_config(user_id) or {}
+        return jsonify({'status': 'success',
+                        'message': 'Disconnected. To stop SimpleFIN sharing this bank with Blankee, '
+                                   'remove the Blankee app under Apps on the Bridge as well.',
+                        'bank': widget, 'ai': _ai_display(user_id)})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+
+
+@app.route('/bank/update-account', methods=['POST'])
+@login_required
+def bank_update_account():
+    """Change one linked account's type, or pause/resume it, from the bank page."""
+    from providers.simplefin import account_type_for
+    from bank_redis import _get_all_linked_accounts_raw, _set_to_redis
+    from credit_link import link_credit_account, unlink_credit_account, create_linked_credit_account
+    import redis_manager as _rm
+    data = request.get_json(silent=True) or {}
+    account_id = data.get('account_id')
+    if not account_id:
+        return jsonify({'status': 'error', 'message': 'Missing account_id'}), 400
+    subtype = data.get('subtype')
+    if subtype is not None and subtype not in _SUBTYPES:
+        return jsonify({'status': 'error', 'message': 'Unknown account type.'}), 400
+    try:
+        user_id = current_user.id
+        accounts = _get_all_linked_accounts_raw(user_id) or []
+        acc = next((a for a in accounts if a.get('account_id') == account_id), None)
+        if not acc:
+            return jsonify({'status': 'error', 'message': 'Account not found'}), 404
+        was_subtype = acc.get('account_subtype') or ''
+        if subtype == 'skip':
+            acc['is_active'] = 0
+            acc['sync_transactions'] = 0
+        elif subtype:
+            others = [a for a in accounts if a.get('account_id') != account_id and int(a.get('is_active', 1) or 0) == 1]
+            if subtype in ('checking', 'savings') and any((a.get('account_subtype') or '') == subtype for a in others):
+                return jsonify({'status': 'error', 'message': f'Only one {subtype} account can be imported.'}), 400
+            acc['account_subtype'] = subtype
+            acc['account_type'] = account_type_for(subtype)
+            acc['is_active'] = 1
+            acc['sync_transactions'] = 1
+        if 'sync_transactions' in data and subtype is None:
+            acc['sync_transactions'] = 1 if data.get('sync_transactions') else 0
+        _set_to_redis('linked_accounts', user_id, accounts)
+        if subtype == 'credit_card' and was_subtype != 'credit_card':
+            card = data.get('card') or {}
+            if card.get('mode') == 'existing' and card.get('credit_account_id'):
+                link_credit_account(user_id, account_id, int(card['credit_account_id']), mask=acc.get('mask'))
+            else:
+                create_linked_credit_account(user_id, acc.get('alias') or acc.get('account_name') or 'Card',
+                                             account_id, mask=acc.get('mask'),
+                                             starting_balance=acc.get('current_balance'))
+        elif was_subtype == 'credit_card' and subtype and subtype != 'credit_card':
+            unlink_credit_account(user_id, account_id)
+        try:
+            _rm.flush_dirty_tables_for_user(user_id)
+        except Exception:
+            pass
+        return jsonify({'status': 'success', 'message': 'Saved.', 'ai': _ai_display(user_id)})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+
+
+# ------------------------------------------------------------- AI (Claude)
+
+@app.route('/ai/settings', methods=['POST'])
+@login_required
+def ai_settings_save():
+    provider = _claude_provider()
+    data = request.get_json(silent=True) or {}
+    try:
+        ok, message = provider.save_config(current_user.id, data.get('api_key'), data.get('model'))
+        ai = provider.get_display(current_user.id)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    return jsonify({'status': 'success' if ok else 'error', 'message': message, 'ai': ai}), (200 if ok else 400)
+
+
+@app.route('/ai/test', methods=['POST'])
+@login_required
+def ai_settings_test():
+    provider = _claude_provider()
+    try:
+        ok, message = provider.test_config(current_user.id)
+        ai = provider.get_display(current_user.id)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    return jsonify({'status': 'success' if ok else 'error', 'message': message, 'ai': ai}), (200 if ok else 400)
+
+
+@app.route('/ai/toggle', methods=['POST'])
+@login_required
+def ai_settings_toggle():
+    """
+    The user's choice. Turning it ON is refused unless the key has passed a
+    test and a bank account is linked - the same rule the provider applies on
+    every call, so the switch can never lie about what will happen.
+    """
+    provider = _claude_provider()
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get('enabled'))
+    try:
+        ai = provider.get_display(current_user.id)
+        # Bank first: without one the key is beside the point, and the panel's
+        # own note says the same thing in the same order.
+        if enabled and not ai['bank_linked']:
+            return jsonify({'status': 'error', 'message': 'Connect a bank first - there is nothing to categorize without one.', 'ai': ai}), 400
+        if enabled and not ai['verified']:
+            return jsonify({'status': 'error', 'message': 'Test your key first.', 'ai': ai}), 400
+        _update_user_setting_in_redis(current_user.id, 'ai_categorization', 1 if enabled else 0)
+        ai = provider.get_display(current_user.id)
+        log_info(app.logger, 'AI', f'user {current_user.id}: AI categorization {"on" if enabled else "off"}')
+        return jsonify({'status': 'success', 'message': 'AI categorization is on.' if enabled else 'AI categorization is off.', 'ai': ai})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+
+
+@app.route('/ai/clear-key', methods=['POST'])
+@login_required
+def ai_settings_clear():
+    provider = _claude_provider()
+    try:
+        ok, message = provider.clear_key(current_user.id)
+        if ok:
+            _update_user_setting_in_redis(current_user.id, 'ai_categorization', 0)
+        ai = provider.get_display(current_user.id)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    return jsonify({'status': 'success' if ok else 'error', 'message': message, 'ai': ai}), (200 if ok else 500)
 
 
 ############################################################################################

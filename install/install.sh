@@ -541,6 +541,26 @@ migrate_old_logs() {
   info "previous logs moved into $dest"
 }
 
+# Provider defaults for an installation that predates them. Only a value that
+# is still the old placeholder 'null' is changed; anything an operator chose
+# stays. Called from --permissions-only because that is the one sub-mode every
+# update runs and the file is writable there; the app reads .env at start, so
+# the reload that ends the update picks it up.
+upgrade_env_defaults() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  local pair key
+  for pair in "BANK_PROVIDER=simplefin" "ENRICHMENT_PROVIDER=claude"; do
+    key="${pair%%=*}"
+    if grep -qE "^${key}=null[[:space:]]*$" "$ENV_FILE"; then
+      sed -i "s|^${key}=null[[:space:]]*$|${pair}|" "$ENV_FILE"
+      info "${key} set to ${pair#*=} (was null)"
+    elif ! grep -qE "^${key}=" "$ENV_FILE"; then
+      printf '%s\n' "$pair" >> "$ENV_FILE"
+      info "${key} added as ${pair#*=}"
+    fi
+  done
+}
+
 apply_permissions() {
   # The code, the virtualenv and the WSGI file belong to the service user the
   # updater runs as, and are merely readable by everyone else. What must NOT
@@ -617,6 +637,7 @@ if [[ $PERMISSIONS_ONLY -eq 1 ]]; then
   say "Setting permissions"
   apply_permissions
   install_root_conf
+  upgrade_env_defaults
   info "code owned by $SERVICE_USER and readable; static/uploads writable by www-data"
   exit 0
 fi
@@ -944,10 +965,11 @@ APP_URL=http://$SERVER_NAME:$HTTP_PORT
 SECRET_KEY=$SECRET_KEY
 SETTINGS_ENCRYPTION_KEY=$ENCRYPTION_KEY
 
-# Bank and enrichment providers. 'null' means the features are present but
-# inert; no vendor is wired up in this build.
-BANK_PROVIDER=null
-ENRICHMENT_PROVIDER=null
+# Bank and enrichment providers. Both are inert for a user until that user
+# connects them (a SimpleFIN Setup Token, an Anthropic API key), so these
+# defaults change nothing by themselves. 'null' turns the features off.
+BANK_PROVIDER=simplefin
+ENRICHMENT_PROVIDER=claude
 EOF
   info "created $ENV_FILE with generated secrets"
 fi
