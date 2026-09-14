@@ -59,6 +59,7 @@ this module's neighbours, and auto_balance.py:1031 is the precedent for
 breaking that cycle at call time.
 """
 
+import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
@@ -601,6 +602,7 @@ def apply_guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
             return None
         update_entry(table, forecast['entry_id'], {'date': when, 'original_date': None, 'pending': 1,
                                                    'auto_confirmed': 0}, user_id)
+        _add_mirror_payment(user_id, entry_type, cid, when, amount)
         return dict(mark, imported_to_entry_id=int(forecast['entry_id']), depleted_bucket=snapshot, **suggestion)
 
     # A category, not a particular forecast: a new entry, depleting the
@@ -626,7 +628,36 @@ def apply_guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
         process_manual_entry_with_bucket(table, cid, when, Decimal(str(amount)), user_id)
     except Exception as e:
         log_exception(logger, TAG, f'user {user_id}: depleting the forecast for {table}/{cid} failed: {e}')
+    _add_mirror_payment(user_id, entry_type, cid, when, amount)
     return dict(mark, imported_to_entry_id=int(eid), depleted_bucket=snapshot, **suggestion)
+
+
+def _add_mirror_payment(user_id: int, entry_type: str, category_id: int, when: str, amount: float) -> None:
+    """
+    An expense in a card's mirror category ("Payment to Visa") is a payment
+    towards that card, and the app records the c_payment when one is typed.
+    The same here - unless the card is bank-linked, in which case its own
+    feed brings the payment in and a second one would double it.
+    """
+    if entry_type != 'expense':
+        return
+    import redis_manager
+    cat = next((c for c in (redis_manager.get_table_cache('expense_categories', user_id) or [])
+                if c.get('id') is not None and int(c['id']) == int(category_id)), None)
+    if not cat or not _flag(cat.get('is_credit_account')) or not cat.get('credit_account_id'):
+        return
+    account_id = int(cat['credit_account_id'])
+    from bank_redis import get_linked_credit_account_ids
+    if account_id in {int(i) for i in (get_linked_credit_account_ids(user_id) or [])}:
+        return
+    try:
+        from app import _update_payment_entry_in_redis, _get_entries_from_redis
+        existing = next((p for p in (_get_entries_from_redis('c_payment_entries', user_id) or [])
+                         if str(p.get('account_id')) == str(account_id) and str(p.get('date'))[:10] == when), None)
+        total = float(amount) + (float(existing.get('amount') or 0) if existing else 0.0)
+        _update_payment_entry_in_redis(user_id, account_id, when, total)
+    except Exception as e:
+        log_warning(logger, TAG, f'user {user_id}: could not record the card payment for category {category_id}: {e}')
 
 
 def create_entries(user_id: int) -> Dict[str, Any]:
@@ -733,6 +764,261 @@ def recalc(user_id: int, since: Optional[str], cards: bool) -> None:
         _recalc_totals_remainders(user_id, start)
         if cards:
             _recalc_ca_daily_balance(user_id, start)
+
+
+# ---------------------------------------------------------------- the modal
+
+def _source(confidence: Optional[str]) -> Optional[str]:
+    """Where a guess came from, for the row's small tag."""
+    return {'memory': 'memory', 'amount': 'amount',
+            'high': 'claude', 'medium': 'claude', 'low': 'claude'}.get(confidence or '')
+
+
+def _choices(user_id: int, table: str, txn_date: str, credit_account_id: Optional[int]) -> List[Dict[str, Any]]:
+    """
+    What the modal offers for one bank row: the direction's categories (a
+    card's own, for a card), each carrying the forecast it would consume
+    when one sits within CANDIDATE_DAYS - so the list reads as "this might
+    be that" rather than as bare names.
+    """
+    import redis_manager
+    from bucket_confirmation import ENTRY_TABLES as CATEGORY_TABLES
+    cats = redis_manager.get_table_cache(CATEGORY_TABLES[table], user_id) or []
+    allowed = _card_category_ids(user_id, credit_account_id) if table == 'c_expense_entries' else None
+    nearby: Dict[int, Dict[str, Any]] = {}
+    for c in candidates(user_id, table, txn_date, credit_account_id):
+        nearby.setdefault(c['category_id'], {'amount': c['forecast_amount'], 'date': c['forecast_date']})
+    out = []
+    for c in cats:
+        try:
+            cid = int(c['id'])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if _flag(c.get('hidden')) or _flag(c.get('is_interest')):
+            continue
+        if allowed is not None and cid not in allowed:
+            continue
+        out.append({'category_id': cid, 'name': c.get('name') or '', 'forecast': nearby.get(cid)})
+    out.sort(key=lambda o: o['name'].lower())
+    return out
+
+
+def pending_bank_items(user_id: int) -> List[Dict[str, Any]]:
+    """
+    The imported entries still waiting for the person, as the modal shows
+    them, newest first. Each carries the guess and where it came from, the
+    forecast it consumed when it consumed one, and the choices on offer.
+    """
+    import redis_manager
+    from bank_redis import get_linked_transactions, _get_all_linked_accounts_raw
+    linked: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for t in get_linked_transactions(user_id) or []:
+        if t.get('imported_to_entry_id') and t.get('imported_entry_type'):
+            linked[(str(t['imported_entry_type']), str(t['imported_to_entry_id']))] = t
+    accounts = {str(a.get('account_id')): a for a in (_get_all_linked_accounts_raw(user_id) or [])}
+    cards = {int(a['id']): a.get('name') or '' for a in (redis_manager.get_table_cache('credit_accounts', user_id) or [])
+             if a.get('id') is not None}
+    card_of = {}
+    for c in redis_manager.get_table_cache('c_expense_categories', user_id) or []:
+        if c.get('id') is not None:
+            card_of[int(c['id'])] = int(c.get('account_id') or 0)
+    items = []
+    for entry_type, table in ENTRY_TABLES.items():
+        if table not in PENDING_TABLES:
+            continue
+        names = _category_names(user_id, table)
+        for e in redis_manager.get_table_cache(table, user_id) or []:
+            if not _flag(e.get('pending')):
+                continue
+            t = linked.get((entry_type, str(e.get('id'))))
+            if not t:
+                continue
+            acc = accounts.get(str(t.get('account_id'))) or {}
+            cid = int(e['category_id']) if e.get('category_id') is not None else None
+            card_id = card_of.get(cid) if table == 'c_expense_entries' else None
+            snap = t.get('depleted_bucket')
+            if isinstance(snap, str):
+                try:
+                    snap = json.loads(snap)
+                except ValueError:
+                    snap = None
+            when = _iso(e.get('date'))
+            items.append({
+                'kind': 'bank',
+                'entry_id': e.get('id'),
+                'table': table,
+                'entry_type': entry_type,
+                'transaction_id': str(t.get('transaction_id')),
+                'description': t.get('description') or '',
+                'merchant_name': t.get('merchant_name') or '',
+                'account_name': acc.get('alias') or acc.get('account_name') or '',
+                'card_name': cards.get(card_id, '') if card_id else '',
+                'date': when,
+                'amount': float(e.get('amount') or 0),
+                'category_id': cid,
+                'category_name': names.get(cid, ''),
+                'source': _source(t.get('custom_category_confidence')),
+                'forecast': ({'amount': snap.get('amount'), 'date': snap.get('date')} if snap else None),
+                'choices': _choices(user_id, table, when, card_id),
+            })
+    items.sort(key=lambda i: (i['date'] or '', i['description']), reverse=True)
+    return items
+
+
+def _restore_forecast(user_id: int, table: str, entry_type: str, snap: Dict[str, Any],
+                      txn_amount: float, this_entry_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Put back the forecast a guess consumed, because the person said the
+    transaction was something else.
+
+    Still there (an allowance partly spent): the amount goes back into it.
+    Gone (a bill settled in full, or the forecast that became this very
+    entry): re-created, dated tomorrow, as "No, ask me tomorrow" would have
+    left it. Its record gets the amount back either way. Returns the row as
+    the page needs to draw it, 'added' saying whether it is new.
+    """
+    import redis_manager
+    from redis_crud import add_entry
+    from bucket_utils import restore_bucket_for_category_change
+    from recurring_bucket_manager import get_bucket_table_for_entry_table
+    cid = snap.get('category_id')
+    if cid is None:
+        return None
+    bucket_table = get_bucket_table_for_entry_table(table)
+    forecast_amount = float(snap.get('amount') or 0)
+    origin = snap.get('original_date') or snap.get('date')
+
+    entries = redis_manager.get_table_cache(table, user_id) or []
+    live = None
+    if snap.get('entry_id') is not None and str(snap['entry_id']) != str(this_entry_id):
+        live = next((e for e in entries if str(e.get('id')) == str(snap['entry_id']) and _flag(e.get('is_bucket'))), None)
+    if live is not None:
+        back = float(live.get('amount') or 0) + txn_amount
+        if forecast_amount:
+            back = min(back, forecast_amount)
+        live['amount'] = back
+        redis_manager.set_table_cache(table, user_id, entries, mark_dirty=True)
+        try:
+            restore_bucket_for_category_change(bucket_table, cid, origin, txn_amount, user_id, entry_type)
+        except Exception as e:
+            log_warning(logger, TAG, f'user {user_id}: could not restore the record for {table}/{cid}: {e}')
+        return {'table': table, 'entry_id': live.get('id'), 'category_id': int(cid), 'date': _iso(live.get('date')),
+                'amount': back, 'is_bucket': 1, 'processed': 0, 'removed': False,
+                'original_date': _iso(live.get('original_date')), 'added': False}
+
+    tomorrow = (_user_today(user_id) + timedelta(days=1)).isoformat()
+    data = {'category_id': int(cid), 'date': tomorrow, 'original_date': origin, 'amount': forecast_amount,
+            'recurring_id': snap.get('recurring_id'), 'is_bucket': 1,
+            'original_amount': snap.get('original_amount') or forecast_amount,
+            'processed': 0, 'auto_confirmed': 0, 'is_auto_adjustment': 0, 'pending': 0}
+    if table != 'income_entries':
+        data['bundle_item_id'] = None
+    eid = add_entry(table, data, user_id)
+    if not eid:
+        return None
+    try:
+        restore_bucket_for_category_change(bucket_table, cid, origin, forecast_amount, user_id, entry_type)
+    except Exception as e:
+        log_warning(logger, TAG, f'user {user_id}: could not restore the record for {table}/{cid}: {e}')
+    return {'table': table, 'entry_id': int(eid), 'category_id': int(cid), 'date': tomorrow,
+            'amount': forecast_amount, 'is_bucket': 1, 'processed': 0, 'removed': False,
+            'original_date': origin, 'original_amount': data['original_amount'], 'added': True}
+
+
+def confirm(user_id: int, transaction_id: str, entry_id: int, entry_type: str,
+            category_id: int) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """
+    The person's answer for one bank row: the guessed category kept, or the
+    entry moved to another.
+
+    Moving it undoes the guess first - the forecast it consumed comes back
+    (see _restore_forecast) - then the entry goes into the new category and
+    consumes that one's forecast, exactly as the guess did. Either way the
+    choice is remembered for the merchant. Returns (ok, message, change);
+    change carries 'restored' when a forecast came back, so the page can
+    draw it.
+    """
+    import redis_manager
+    from redis_crud import upsert_category_memory
+    from bank_redis import get_linked_transactions, bulk_upsert_linked_transactions
+    from bucket_utils import find_next_bucket_for_category, process_manual_entry_with_bucket
+
+    table = ENTRY_TABLES.get(entry_type)
+    if table not in PENDING_TABLES:
+        return False, 'Unknown entry type.', None
+    entries = redis_manager.get_table_cache(table, user_id)
+    if entries is None:
+        return False, 'Your data is not loaded yet. Try again in a moment.', None
+    target = next((e for e in entries if str(e.get('id')) == str(entry_id)), None)
+    if target is None:
+        return False, 'That entry is no longer there.', None
+    names = _category_names(user_id, table)
+    new_cid = int(category_id)
+    if new_cid not in names:
+        return False, 'That category does not exist.', None
+    row = next((t for t in (get_linked_transactions(user_id) or [])
+                if str(t.get('transaction_id')) == str(transaction_id)), None)
+    old_cid = int(target['category_id']) if target.get('category_id') is not None else None
+    when = _iso(target.get('date'))
+    amount = float(target.get('amount') or 0)
+    moved = new_cid != old_cid
+
+    target['pending'] = 0
+    target['auto_confirmed'] = 0
+    target['processed'] = 1
+    if moved:
+        target['category_id'] = new_cid
+    redis_manager.set_table_cache(table, user_id, entries, mark_dirty=True)
+
+    restored = None
+    row_update: Dict[str, Any] = {}
+    if moved:
+        snap = (row or {}).get('depleted_bucket')
+        if isinstance(snap, str):
+            try:
+                snap = json.loads(snap)
+            except ValueError:
+                snap = None
+        if snap:
+            restored = _restore_forecast(user_id, table, entry_type, snap, amount, str(entry_id))
+        new_snap = None
+        try:
+            bucket = find_next_bucket_for_category(table, new_cid, user_id)
+            if bucket:
+                new_snap = _snapshot(table, bucket)
+        except Exception as e:
+            log_warning(logger, TAG, f'user {user_id}: could not look ahead at the forecast for {table}/{new_cid}: {e}')
+        try:
+            process_manual_entry_with_bucket(table, new_cid, when, Decimal(str(amount)), user_id)
+        except Exception as e:
+            log_exception(logger, TAG, f'user {user_id}: depleting the forecast for {table}/{new_cid} failed: {e}')
+        _add_mirror_payment(user_id, entry_type, new_cid, when, amount)
+        row_update['depleted_bucket'] = new_snap
+
+    direction = 'incoming' if entry_type == 'income' else 'outgoing'
+    canonical = _canonical(user_id, entry_type, new_cid)
+    # Uncategorized is the absence of an answer, not one to remember.
+    if row and canonical and (names.get(new_cid) or '').lower() != 'uncategorized':
+        for key in {row.get('description'), row.get('merchant_name')} - {None, ''}:
+            try:
+                upsert_category_memory(user_id, merchant_id=None, description=key,
+                                       category_id=canonical, category_type=direction)
+            except Exception as e:
+                log_warning(logger, TAG, f'user {user_id}: could not remember the category for {key!r}: {e}')
+    if row:
+        row_update.update({'transaction_id': str(transaction_id), 'custom_category_suggestion': names.get(new_cid),
+                           'custom_category_id': canonical, 'custom_category_type': direction})
+        bulk_upsert_linked_transactions([row_update], user_id)
+
+    try:
+        recalc(user_id, when, cards=(table == 'c_expense_entries'))
+    except Exception as e:
+        log_exception(logger, TAG, f'user {user_id}: recalculation after confirming failed: {e}')
+
+    change = {'table': table, 'entry_id': target.get('id'), 'category_id': new_cid, 'action': 'categorise',
+              'removed': False, 'date': when, 'amount': amount, 'is_bucket': 0, 'processed': 1,
+              'original_date': None, 'restored': restored}
+    return True, 'Recorded.', change
 
 
 # ---------------------------------------------------------------- balances

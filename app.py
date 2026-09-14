@@ -15918,7 +15918,7 @@ def widget_pending_transactions():
         'pending_transactions': pending_txns,
         'currency_symbol': currency_symbol,
         'currency_type': currency_type,
-        'categorization_url': 'https://app.blankee.io/pending-transactions'
+        'categorization_url': 'https://app.blankee.io/dashboard'
     })
 
 
@@ -17317,458 +17317,58 @@ def _canonical_expense_category_id(user_id, c_expense_category_id):
 @app.route('/bank/confirm-transaction', methods=['POST'])
 @login_required
 def confirm_transaction():
-    """Confirm a pending transaction's category"""
-    data = request.get_json()
+    """
+    The person's answer for one bank row in the confirm modal: the guessed
+    category kept, or the entry moved to another. The work is in
+    bank_import.confirm; this is its HTTP face plus the two things that are
+    the app's: the recurring-mismatch check, and the balances matched to the
+    bank once the last row is answered - the second of the day's two
+    reconciles, so the remainders are right the moment the modal closes.
+    """
+    import bank_import
+    data = request.get_json(silent=True) or {}
     transaction_id = data.get('transaction_id')
     entry_id = data.get('entry_id')
     entry_type = data.get('entry_type')
     category_id = data.get('category_id')
-    
-    log_info(app.logger, 'CONFIRM_TXN', f"=== START === txn_id={transaction_id}, entry_id={entry_id}, entry_type={entry_type}, category_id={category_id}, user_id={current_user.id}")
-    
     if not all([transaction_id, entry_id, entry_type, category_id]):
-        log_warning(app.logger, 'CONFIRM_TXN', f"Missing required fields: txn_id={transaction_id}, entry_id={entry_id}, entry_type={entry_type}, category_id={category_id}")
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
-    
     try:
         entry_id = int(entry_id)
         category_id = int(category_id)
-    except ValueError:
-        log_warning(app.logger, 'CONFIRM_TXN', f"Invalid ID format: entry_id={entry_id}, category_id={category_id}")
+    except (TypeError, ValueError):
         return jsonify({'status': 'error', 'message': 'Invalid ID format'}), 400
-    
-    # Determine the Redis key based on entry type
-    table_map = {
-        'income': 'income_entries',
-        'expense': 'expense_entries',
-        'c_expense': 'c_expense_entries'
-    }
-    
-    recurring_table_map = {
-        'income': 'recurring_income',
-        'expense': 'recurring_expense',
-        'c_expense': 'recurring_c_expense'
-    }
-    
-    bucket_table_map = {
-        'income': 'recurring_income_buckets',
-        'expense': 'recurring_expense_buckets',
-        'c_expense': 'recurring_c_expense_buckets'
-    }
-    
-    if entry_type not in table_map:
-        return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
-    
-    table_name = table_map[entry_type]
-    redis_key = f"{table_name}:v1:{current_user.id}"
-    
     try:
-        # Get entries from Redis
-        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-        if not cached:
-            log_warning(app.logger, 'CONFIRM_TXN', f"No cached data for key {redis_key}")
-            return jsonify({'status': 'error', 'message': 'No entries found'}), 404
-        
-        entries = json.loads(cached)
-        
-        # Log all pending entries before we modify anything
-        pending_entries = [e for e in entries if e.get('pending') == 1]
-        log_info(app.logger, 'CONFIRM_TXN', f"Total entries in Redis: {len(entries)}, pending entries: {len(pending_entries)}")
-        for pe in pending_entries:
-            log_info(app.logger, 'CONFIRM_TXN', f"Pending entry: id={pe.get('id')} (type={type(pe.get('id')).__name__}), cat={pe.get('category_id')}, amount={pe.get('amount')}, date={pe.get('date')}, auto_confirmed={pe.get('auto_confirmed')}")
-        
-        log_info(app.logger, 'CONFIRM_TXN', f"Looking for entry_id={entry_id} (type={type(entry_id).__name__})")
-        
-        # For c_expense, the incoming category_id is canonical (expense_categories.id).
-        # Translate it to the per-account c_expense_categories.id for THIS entry's
-        # credit account before writing. We derive the account from the entry's
-        # current category_id.
-        if entry_type == 'c_expense':
-            _entry_account_id = None
-            try:
-                _cec_cached = _redis_client.get(f"c_expense_categories:v1:{current_user.id}") if app.config.get('REDIS_OK') else None
-                if _cec_cached:
-                    _cec = json.loads(_cec_cached)
-                    for _entry_row in entries:
-                        if _entry_row.get('id') == entry_id:
-                            _old_cat_id = _entry_row.get('category_id')
-                            for _c in _cec:
-                                if int(_c.get('id', 0)) == int(_old_cat_id or 0):
-                                    _entry_account_id = _c.get('account_id')
-                                    break
-                            break
-            except Exception as _e:
-                log_warning(app.logger, 'CONFIRM_TXN', f"Could not derive entry account_id: {_e}")
-            if _entry_account_id:
-                from redis_crud import resolve_suggestion_for_entry
-                _resolved = resolve_suggestion_for_entry(current_user.id, 'c_expense', _entry_account_id, category_id)
-                if _resolved:
-                    log_info(app.logger, 'CONFIRM_TXN', f"Translated canonical category {category_id} -> c_expense {_resolved} for account {_entry_account_id}")
-                    category_id = _resolved
-                else:
-                    log_warning(app.logger, 'CONFIRM_TXN', f"Could not resolve canonical {category_id} for account {_entry_account_id}; writing as-is (may FK-fail)")
-        
-        # Find and update the entry
-        found = False
-        entry_date = None
-        entry_amount = None
-        old_category_id = None
-        was_auto_confirmed = False
-        
-        match_count = 0
-        for entry in entries:
-            if entry.get('id') == entry_id:
-                match_count += 1
-                log_info(app.logger, 'CONFIRM_TXN', f"MATCH #{match_count}: entry id={entry.get('id')}, cat={entry.get('category_id')}, amount={entry.get('amount')}, pending={entry.get('pending')}")
-                old_category_id = entry.get('category_id')
-                was_auto_confirmed = entry.get('auto_confirmed', 0) == 1
-                entry['category_id'] = category_id
-                entry['pending'] = 0  # Mark as confirmed
-                entry['auto_confirmed'] = 0  # Clear auto-confirmed flag
-                entry['processed'] = 1  # Mark as processed (user reviewed and categorized)
-                entry_date = entry.get('date')
-                entry_amount = float(entry.get('amount', 0))
-                found = True
-                break
-        
-        log_info(app.logger, 'CONFIRM_TXN', f"Match result: found={found}, match_count={match_count}, old_cat={old_category_id}, new_cat={category_id}")
-        
-        if not found:
-            log_warning(app.logger, 'CONFIRM_TXN', f"Entry {entry_id} NOT FOUND in {len(entries)} entries")
-            return jsonify({'status': 'error', 'message': 'Entry not found'}), 404
-        
-        # Log pending entries AFTER the update
-        pending_after = [e for e in entries if e.get('pending') == 1]
-        log_info(app.logger, 'CONFIRM_TXN', f"After update: pending entries remaining: {len(pending_after)}")
-        for pe in pending_after:
-            log_info(app.logger, 'CONFIRM_TXN', f"Still pending: id={pe.get('id')}, cat={pe.get('category_id')}, amount={pe.get('amount')}")
-        
-        # Save back to Redis
-        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
-        log_info(app.logger, 'CONFIRM_TXN', f"Saved {len(entries)} entries back to Redis key {redis_key}")
-        
-        # Mark as dirty
-        dirty_key = f"dirty_tables:{current_user.id}"
-        _redis_client.sadd(dirty_key, table_name)
-        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-        
-        # Handle bucket reduction for recurring categories
-        try:
-            recurring_table = recurring_table_map.get(entry_type)
-            bucket_table = bucket_table_map.get(entry_type)
-            
-            if recurring_table and entry_date and entry_amount:
-                # If category changed and was auto-confirmed, we need to undo the old bucket reduction
-                if was_auto_confirmed and old_category_id and old_category_id != category_id:
-                    old_recurring_info = _get_recurring_info_from_redis(recurring_table, current_user.id, old_category_id)
-                    if old_recurring_info:
-                        log_info(app.logger, 'CONFIRM_TXN', f"Restoring bucket for old category {old_category_id}")
-                        # Restore bucket (add back the amount)
-                        restore_bucket_for_category_change(
-                            bucket_table, old_category_id, entry_date,
-                            entry_amount, current_user.id, entry_type
-                        )
-                
-                # Reduce bucket for the new category (only if not already reduced by auto-confirm to same category)
-                if not was_auto_confirmed or old_category_id != category_id:
-                    new_recurring_info = _get_recurring_info_from_redis(recurring_table, current_user.id, category_id)
-                    # A bundle category has no recurring record, so gating on one
-                    # skipped bundles entirely - the bucket was never depleted and
-                    # the plan and the purchase both counted. Passing None lets
-                    # process_manual_entry_with_bucket look the wage_bill up,
-                    # which answers 1 for a bundle.
-                    if new_recurring_info or _is_bundle_category_id(current_user.id, table_name, category_id):
-                        log_info(app.logger, 'CONFIRM_TXN', f"Category {category_id} has buckets, processing reduction")
-                        process_manual_entry_with_bucket(
-                            table_name, category_id, entry_date,
-                            entry_amount, current_user.id, new_recurring_info
-                        )
-        except Exception as e:
-            log_error(app.logger, 'CONFIRM_TXN', f"Error processing bucket reduction: {e}")
-            # Continue even if bucket processing fails
-        
-        # Check if all pending transactions are now confirmed and clear notification
-        _clear_pending_transactions_notification_if_none(current_user.id)
-        
-        # --- SAVE CATEGORY MEMORY ---
-        # Remember this user's category choice for this merchant/description.
-        try:
-            from bank_redis import get_linked_transactions
-            from redis_crud import upsert_category_memory
-            linked_txns = get_linked_transactions(user_id=current_user.id)
-            txn_record = next((t for t in linked_txns if t.get('transaction_id') == transaction_id), None)
-            if txn_record:
-                # Memory uses canonical IDs (expense_categories.id / income_categories.id)
-                # and unified types ('outgoing' / 'incoming').
-                if entry_type == 'c_payment':
-                    # Payments to credit cards aren't categorized -- skip memory.
-                    pass
-                else:
-                    if entry_type == 'income':
-                        memory_category_id = category_id
-                        memory_category_type = 'incoming'
-                    elif entry_type == 'expense':
-                        memory_category_id = category_id
-                        memory_category_type = 'outgoing'
-                    elif entry_type == 'c_expense':
-                        # Translate per-account c_expense_categories.id -> canonical
-                        # expense_categories.id by name match.
-                        memory_category_id = _canonical_expense_category_id(current_user.id, category_id)
-                        memory_category_type = 'outgoing'
-                    else:
-                        memory_category_id = None
-                        memory_category_type = None
-
-                    if memory_category_id and memory_category_type:
-                        upsert_category_memory(
-                            user_id=current_user.id,
-                            merchant_id=txn_record.get('enrichment_merchant_id'),
-                            description=txn_record.get('description'),
-                            category_id=memory_category_id,
-                            category_type=memory_category_type,
-                        )
-                        log_info(app.logger, 'CONFIRM_TXN', f"Saved category memory: merchant_id={txn_record.get('enrichment_merchant_id')}, desc={txn_record.get('description', '')[:50]}, cat={memory_category_id}, type={memory_category_type}")
-        except Exception as mem_err:
-            log_warning(app.logger, 'CONFIRM_TXN', f"Failed to save category memory: {mem_err}")
-        # --- END SAVE CATEGORY MEMORY ---
-        
-        # --- RECURRING MISMATCH DETECTION ---
-        try:
-            if txn_record:
-                _detect_recurring_mismatch(txn_record, entry_type, category_id, current_user.id)
-        except Exception as mismatch_err:
-            log_warning(app.logger, 'MISMATCH', f"Mismatch detection failed (non-blocking): {mismatch_err}")
-        # --- END RECURRING MISMATCH DETECTION ---
-        
-        # Recalculate totals, remainders, savings, and credit balances
-        try:
-            if entry_type in ('income', 'expense'):
-                save_totals_remainders_d()
-            if entry_type == 'c_expense':
-                save_ca_daily_balance()
-        except Exception as e:
-            log_error(app.logger, 'CONFIRM_TXN', f"Error recalculating totals/balances: {e}")
-            # Continue even if recalc fails - the entry is already confirmed
-        
-        log_info(app.logger, 'CONFIRM_TXN', f"=== DONE === txn_id={transaction_id}, entry_id={entry_id}, category_id={category_id}")
-        return jsonify({'status': 'success'})
-        
+        ok, message, change = bank_import.confirm(current_user.id, str(transaction_id), entry_id,
+                                                  entry_type, category_id)
     except Exception as e:
-        log_exception(app.logger, 'CONFIRM_TXN', f"Error confirming transaction: {e}")
-        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+        log_exception(app.logger, 'CONFIRM_TXN', f"user {current_user.id}: {e}")
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    if not ok:
+        return jsonify({'status': 'error', 'message': message}), 400
 
-
-@app.route('/bank/confirm-all-transactions', methods=['POST'])
-@login_required
-def confirm_all_transactions():
-    """Confirm multiple pending transactions at once"""
-    data = request.get_json()
-    transactions = data.get('transactions', [])
-    
-    if not transactions:
-        return jsonify({'status': 'error', 'message': 'No transactions provided'}), 400
-    
     try:
-        # Group by entry type
-        by_type = {'income': [], 'expense': [], 'c_expense': []}
-        all_txn_mappings = []  # For category memory
-        for txn in transactions:
-            entry_type = txn.get('entry_type')
-            if entry_type in by_type:
-                by_type[entry_type].append({
-                    'entry_id': int(txn.get('entry_id')),
-                    'category_id': int(txn.get('category_id'))
-                })
-                all_txn_mappings.append({
-                    'transaction_id': txn.get('transaction_id'),
-                    'entry_id': int(txn.get('entry_id')),
-                    'category_id': int(txn.get('category_id')),
-                    'entry_type': entry_type
-                })
-        
-        table_map = {
-            'income': 'income_entries',
-            'expense': 'expense_entries',
-            'c_expense': 'c_expense_entries'
-        }
-        
-        recurring_table_map = {
-            'income': 'recurring_income',
-            'expense': 'recurring_expense',
-            'c_expense': 'recurring_c_expense'
-        }
-        
-        # Process each entry type
-        for entry_type, items in by_type.items():
-            if not items:
-                continue
-            
-            table_name = table_map[entry_type]
-            recurring_table = recurring_table_map[entry_type]
-            redis_key = f"{table_name}:v1:{current_user.id}"
-            
-            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-            if not cached:
-                continue
-            
-            entries = json.loads(cached)
-            
-            # Build lookup of updates
-            updates = {item['entry_id']: item['category_id'] for item in items}
-            
-            # For c_expense, translate canonical expense_categories.id ->
-            # per-account c_expense_categories.id using each entry's existing
-            # category to find the account.
-            if entry_type == 'c_expense':
-                from redis_crud import resolve_suggestion_for_entry
-                _cec_cached = _redis_client.get(f"c_expense_categories:v1:{current_user.id}") if app.config.get('REDIS_OK') else None
-                _cec_by_id = {}
-                if _cec_cached:
-                    for _c in json.loads(_cec_cached):
-                        try:
-                            _cec_by_id[int(_c.get('id', 0))] = _c
-                        except (TypeError, ValueError):
-                            continue
-                _translated = {}
-                for _entry_row in entries:
-                    _eid = _entry_row.get('id')
-                    if _eid not in updates:
-                        continue
-                    _old_cat = _entry_row.get('category_id')
-                    _acct = (_cec_by_id.get(int(_old_cat)) or {}).get('account_id') if _old_cat else None
-                    if _acct:
-                        _resolved = resolve_suggestion_for_entry(current_user.id, 'c_expense', _acct, updates[_eid])
-                        if _resolved:
-                            _translated[_eid] = _resolved
-                # Apply translations to the updates dict and to all_txn_mappings
-                # (so memory storage gets the per-account id, then translates back to canonical).
-                for _eid, _new_cat in _translated.items():
-                    updates[_eid] = _new_cat
-                    for _m in all_txn_mappings:
-                        if _m['entry_type'] == 'c_expense' and _m.get('entry_id') == _eid:
-                            _m['category_id'] = _new_cat
-            
-            # Track entries that need bucket reduction
-            bucket_reductions = []
-            
-            # Apply updates
-            for entry in entries:
-                entry_id = entry.get('id')
-                if entry_id in updates:
-                    new_category_id = updates[entry_id]
-                    entry['category_id'] = new_category_id
-                    entry['pending'] = 0
-                    entry['auto_confirmed'] = 0  # Clear auto-confirmed flag
-                    entry['processed'] = 1  # Mark as processed (user reviewed and categorized)
-                    # Track for bucket reduction
-                    bucket_reductions.append({
-                        'category_id': new_category_id,
-                        'date': entry.get('date'),
-                        'amount': float(entry.get('amount', 0))
-                    })
-            
-            # Save back to Redis
-            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
-            
-            # Mark as dirty
-            dirty_key = f"dirty_tables:{current_user.id}"
-            _redis_client.sadd(dirty_key, table_name)
-            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-            
-            # Process bucket reductions for recurring categories
-            for reduction in bucket_reductions:
-                try:
-                    recurring_info = _get_recurring_info_from_redis(
-                        recurring_table, current_user.id, reduction['category_id']
-                    )
-                    # As above: a bundle has buckets without having a recurring
-                    # record, and gating on one skipped it.
-                    has_buckets = recurring_info or _is_bundle_category_id(
-                        current_user.id, table_name, reduction['category_id'])
-                    if has_buckets and reduction['date'] and reduction['amount']:
-                        log_info(app.logger, 'CONFIRM_ALL', f"Category {reduction['category_id']} has buckets, processing")
-                        process_manual_entry_with_bucket(
-                            table_name, reduction['category_id'], reduction['date'],
-                            reduction['amount'], current_user.id, recurring_info
-                        )
-                except Exception as e:
-                    log_error(app.logger, 'CONFIRM_ALL', f"Error processing bucket reduction: {e}")
-                    # Continue even if bucket processing fails
-        
-        # --- SAVE CATEGORY MEMORY FOR ALL CONFIRMED TRANSACTIONS ---
+        from bank_redis import get_linked_transactions
+        txn_record = next((t for t in get_linked_transactions(user_id=current_user.id)
+                           if str(t.get('transaction_id')) == str(transaction_id)), None)
+        if txn_record:
+            _detect_recurring_mismatch(txn_record, entry_type, category_id, current_user.id)
+    except Exception as mismatch_err:
+        log_warning(app.logger, 'MISMATCH', f"Mismatch detection failed (non-blocking): {mismatch_err}")
+
+    remaining = bank_import.count_pending(current_user.id)
+    note = ''
+    if remaining == 0:
+        bank_import.clear_notification_if_none(current_user.id)
         try:
-            from bank_redis import get_linked_transactions
-            from redis_crud import upsert_category_memory
-            linked_txns = get_linked_transactions(user_id=current_user.id)
-            txn_lookup = {t.get('transaction_id'): t for t in linked_txns}
-            for mapping in all_txn_mappings:
-                txn_record = txn_lookup.get(mapping['transaction_id'])
-                if not txn_record:
-                    continue
-                _entry_type = mapping['entry_type']
-                _cat_id = mapping['category_id']
-                if _entry_type == 'c_payment':
-                    continue
-                if _entry_type == 'income':
-                    mem_cat_id, mem_cat_type = _cat_id, 'incoming'
-                elif _entry_type == 'expense':
-                    mem_cat_id, mem_cat_type = _cat_id, 'outgoing'
-                elif _entry_type == 'c_expense':
-                    mem_cat_id = _canonical_expense_category_id(current_user.id, _cat_id)
-                    mem_cat_type = 'outgoing'
-                else:
-                    mem_cat_id, mem_cat_type = None, None
-                if mem_cat_id and mem_cat_type:
-                    upsert_category_memory(
-                        user_id=current_user.id,
-                        merchant_id=txn_record.get('enrichment_merchant_id'),
-                        description=txn_record.get('description'),
-                        category_id=mem_cat_id,
-                        category_type=mem_cat_type,
-                    )
-        except Exception as mem_err:
-            log_warning(app.logger, 'CONFIRM_ALL', f"Failed to save category memory: {mem_err}")
-        # --- END SAVE CATEGORY MEMORY ---
-        
-        # --- RECURRING MISMATCH DETECTION (BATCH) ---
-        try:
-            if not txn_lookup:
-                from bank_redis import get_linked_transactions
-                linked_txns = get_linked_transactions(user_id=current_user.id)
-                txn_lookup = {t.get('transaction_id'): t for t in linked_txns}
-            for mapping in all_txn_mappings:
-                txn_record = txn_lookup.get(mapping['transaction_id'])
-                if txn_record:
-                    _detect_recurring_mismatch(txn_record, mapping['entry_type'], mapping['category_id'], current_user.id)
-        except Exception as mismatch_err:
-            log_warning(app.logger, 'MISMATCH', f"Batch mismatch detection failed (non-blocking): {mismatch_err}")
-        # --- END RECURRING MISMATCH DETECTION ---
-        
-        # Check if all pending transactions are now confirmed and clear notification
-        _clear_pending_transactions_notification_if_none(current_user.id)
-        
-        # Recalculate totals, remainders, savings, and credit balances
-        try:
-            has_income_expense = bool(by_type.get('income') or by_type.get('expense'))
-            has_c_expense = bool(by_type.get('c_expense'))
-            if has_income_expense:
-                save_totals_remainders_d()
-            if has_c_expense:
-                save_ca_daily_balance()
+            note = bank_import.reconcile_summary(bank_import.reconcile_from_stored(current_user.id))
         except Exception as e:
-            log_error(app.logger, 'CONFIRM_ALL', f"Error recalculating totals/balances: {e}")
-            # Continue even if recalc fails - entries are already confirmed
-        
-        return jsonify({'status': 'success'})
-        
-    except Exception as e:
-        log_exception(app.logger, 'CONFIRM_TXN', f"Error confirming all transactions: {e}")
-        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+            log_exception(app.logger, 'CONFIRM_TXN',
+                          f"reconcile after the last answer failed for user {current_user.id}: {e}")
+    return jsonify({'status': 'success', 'message': message, 'change': change,
+                    'remaining': remaining, 'note': note})
 
 
-# ============================================================
-# Recurring Mismatch API Endpoints
-# ============================================================
 
 @app.route('/api/recurring-mismatches', methods=['GET'])
 @login_required
@@ -18206,6 +17806,11 @@ def api_buckets_pending():
         # the user says so and at no other time, so simply opening the prompt
         # cannot cost them data.
         items, total = bucket_confirmation.pending_buckets(current_user.id)
+        # The bank's rows share the modal: what the feed brought in, with the
+        # guessed category ready to confirm or change.
+        import bank_import
+        bank_items = bank_import.pending_bank_items(current_user.id)
+        total += len(bank_items)
         prompted = bucket_confirmation.prompt_raised_today(current_user.id)
         overdue = bucket_confirmation.pending_overdue_count(current_user.id)
     except Exception as e:
@@ -18220,6 +17825,7 @@ def api_buckets_pending():
         # has not happened yet.
         'prompted': prompted,
         'items': items,
+        'bank_items': bank_items,
         'total': total,
         # Of that total, how many are already late. The nav count falls back to
         # this before the day's notification has gone out, so entries that went
@@ -18227,7 +17833,7 @@ def api_buckets_pending():
         'overdue': overdue,
         # When the backlog is longer than one prompt should show, say so rather
         # than truncating silently.
-        'shown': len(items),
+        'shown': len(items) + len(bank_items),
         'currency_type': getattr(current_user, 'currency_type', 'USD'),
     })
 

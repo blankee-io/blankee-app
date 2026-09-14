@@ -18497,6 +18497,50 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     border-top: 1px solid var(--secondary-lighter);
 }
 
+/* Bank rows share the prompt with the forecasts. The money has moved, so
+   there is no Yes, No or Skip - only which category it was, offered as a
+   list with the guess already chosen, and one button to say so. A small
+   heading separates the two kinds so a row is never mistaken for the other. */
+.bucket-prompt-section {
+    margin: 0 0 8px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.bucket-prompt-item + .bucket-prompt-section {
+    margin-top: 16px;
+}
+
+.bucket-prompt-source {
+    font-weight: 600;
+}
+
+.bucket-prompt-choose {
+    align-items: center;
+}
+
+.bucket-prompt-select {
+    flex: 1 1 160px;
+    min-width: 0;
+    height: 32px;
+    box-sizing: border-box;
+    padding: 0 8px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 8px;
+    background-color: var(--white);
+    color: var(--text-dark);
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.bucket-prompt-select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
 
 
 /* A caller with nothing to say leaves the paragraph empty; collapse it so
