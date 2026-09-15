@@ -58,29 +58,26 @@
                             <!-- Inside a .profile-form on purpose: every label, input
                                  and toggle rule on this page is scoped to that class, so
                                  a panel outside one inherits none of it and the rows
-                                 render as bare checkboxes. -->
-                            <form id="email-types-form" class="profile-form">
+                                 render as bare checkboxes. A div rather than a form: the
+                                 reminder's own form is moved in under its row by script,
+                                 and a form inside a form is not allowed. -->
+                            <div id="email-types-form" class="profile-form">
                                 <div id="email-types-panel" class="email-types-panel" style="display:none;">
                                     <p class="email-types-heading">Send an email for<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which kinds of notification are emailed. All of them are on unless you turn one off, and the switch above still controls whether any email is sent at all.</span></span></p>
                                     <div id="email-types-list"></div>
                                 </div>
-                            </form>
+                            </div>
 
-                            <!-- Balance Reminder: asks, on a cadence, whether the
-                                 user wants to reconcile against their real balance. The
-                                 cadence controls are the same widget as the recurring
-                                 income page, so the ids and classes match it. -->
+                            <!-- The Entries to confirm reminder's cadence. Rendered here
+                                 and moved by script to sit under that row in the list
+                                 above; the row's switch is its switch, and the hidden
+                                 checkbox is what the script drives. The cadence controls
+                                 are the same widget as the recurring income page, so the
+                                 ids and classes match it. -->
                             <form id="balance-notification-form" class="profile-form" hidden>
-                                <div class="input-group">
-                                    <label for="balance_reminder_enabled">Balance Reminder:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Asks, on the cadence below, whether you want to reconcile against your real bank balance. Nothing is changed unless you say yes.</span></span></label>
-                                    <input type="text" disabled class="hidden-spacer">
-                                    <input type="checkbox" id="balance_reminder_enabled" class="hidden-checkbox">
-                                    <button type="button" class="toggle-switch" data-checkbox="balance_reminder_enabled">
-                                        <i class="fa-solid fa-toggle-large-on toggle-icon toggle-off"></i>
-                                    </button>
-                                </div>
+                                <input type="checkbox" id="balance_reminder_enabled" class="hidden-checkbox">
 
-                                <!-- One grey panel around everything the toggle controls, so
+                                <!-- One grey panel around everything the switch controls, so
                                      it reads as belonging to it rather than as three loose rows. -->
                                 <div id="balance-notification-panel" class="balance-notification-panel" style="display:none;">
                                 <div id="balance-cadence-options" class="balance-cadence-options">
@@ -127,27 +124,6 @@
                                 <p class="balance-next-check" id="balance-next-check"></p>
                                 </div>
                             </form>
-                            <div class="settings-group" id="balance-corrections-group" hidden>
-                                <p class="settings-group-heading">Balance corrections<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Where the difference goes when a balance - one you type, or one read from your bank - does not match what Blankee expected.</span></span></p>
-                            <!-- Where a correction lands. Its own form because it is
-                                 its own decision: Balance now works whether or not the
-                                 reminder above is switched on, so this saves without
-                                 touching the cadence. -->
-                            <form id="balance-categories-form" class="profile-form">
-                                <div class="input-group">
-                                    <label for="balance-expense-category">Shortfall goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds less than Blankee expected, the difference is written here as an expense.</span></span></label>
-                                    <select id="balance-expense-category" class="login-input"></select>
-                                </div>
-                                <div class="input-group">
-                                    <label for="balance-income-category">Extra goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds more than Blankee expected, the difference is written here as income.</span></span></label>
-                                    <select id="balance-income-category" class="login-input"></select>
-                                    <button type="submit" class="submit-button">
-                                        <i id="balance-categories-submit-icon" class="fas fa-check"></i>
-                                    </button>
-                                </div>
-                            </form>
-                            </div>
-
                         </div>
                     </div>
                     <div class="data-section">
@@ -200,6 +176,25 @@
                                     </button>
                                 </div>
                             </form>
+                            <!-- Where a balance correction lands - whether the balance
+                                 was typed, or read from the bank. Its own form: this
+                                 saves without touching the reminder's cadence. -->
+                            <div class="settings-group" id="balance-corrections-group">
+                                <p class="settings-group-heading">Balance corrections<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Where the difference goes when a balance - one you type, or one read from your bank - does not match what Blankee expected.</span></span></p>
+                            <form id="balance-categories-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="balance-expense-category">Shortfall goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds less than Blankee expected, the difference is written here as an expense.</span></span></label>
+                                    <select id="balance-expense-category" class="login-input"></select>
+                                </div>
+                                <div class="input-group">
+                                    <label for="balance-income-category">Extra goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds more than Blankee expected, the difference is written here as income.</span></span></label>
+                                    <select id="balance-income-category" class="login-input"></select>
+                                    <button type="submit" class="submit-button">
+                                        <i id="balance-categories-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            </div>
                         </div>
                     </div>
                     {# The bank connection. Shown when there is a provider to
@@ -730,6 +725,8 @@
                         showForEnabled();
                         showForUnit();
                         showNextCheck(d);
+                        // The Entries to confirm row above shows this flag.
+                        if (window.syncEntriesToConfirmRow) { window.syncEntriesToConfirmRow(); }
                     })
                     .catch(function () { /* leave the defaults showing */ });
             }
@@ -888,7 +885,12 @@
                     box.checked = !box.checked;
                     icon.classList.toggle('toggle-off', !box.checked);
                     save();
-                    syncReminder();
+                    // The Entries to confirm row is also the reminder's switch:
+                    // off here is off altogether, not merely unemailed.
+                    if (t.key === REMINDER_KIND) {
+                        var enabled = document.getElementById('balance_reminder_enabled');
+                        if (enabled) { enabled.checked = box.checked; $(enabled).trigger('change'); }
+                    }
                 });
 
                 wrap.appendChild(label);
@@ -933,18 +935,33 @@
                     .catch(function () { showToast('Could not reach the server.', 'error'); });
             }
 
-            // The balance reminder rides the same evening walk as Entries to
-            // confirm and is the same family of notification, so it and the
-            // corrections it writes are offered only while that kind is on.
-            // Both start hidden in the markup; this is what reveals them.
-            function syncReminder() {
-                var box = document.getElementById('email-type-entries_to_confirm');
-                var on = !!(box && box.checked);
-                ['balance-notification-form', 'balance-corrections-group'].forEach(function (id) {
-                    var el = document.getElementById(id);
-                    if (el) { el.hidden = !on; }
-                });
+            // Entries to confirm is the one kind with settings of its own: the
+            // cadence the reminder runs on. Its form is rendered further down
+            // the page and moved in under the row here, and the row's switch
+            // mirrors the reminder's own enabled flag rather than only the
+            // email opt-out. The reminder's script loads that flag by itself;
+            // syncEntriesToConfirmRow is what keeps the row in step with it,
+            // whichever of the two fetches lands last.
+            var REMINDER_KIND = 'entries_to_confirm';
+            function placeReminder() {
+                var box = document.getElementById('email-type-' + REMINDER_KIND);
+                var form = document.getElementById('balance-notification-form');
+                if (!box || !form) { return; }
+                var rowEl = box.closest('.input-group');
+                if (rowEl && form.previousElementSibling !== rowEl) {
+                    rowEl.parentNode.insertBefore(form, rowEl.nextSibling);
+                }
+                form.hidden = false;
+                window.syncEntriesToConfirmRow();
             }
+            window.syncEntriesToConfirmRow = function () {
+                var box = document.getElementById('email-type-' + REMINDER_KIND);
+                var enabled = document.getElementById('balance_reminder_enabled');
+                if (!box || !enabled) { return; }
+                box.checked = enabled.checked;
+                var icon = box.parentNode.querySelector('.toggle-switch[data-checkbox="' + box.id + '"] .toggle-icon');
+                if (icon) { icon.classList.toggle('toggle-off', !box.checked); }
+            };
 
             fetch('/api/email-notification-types', { headers: { 'Accept': 'application/json' } })
                 .then(function (r) { return r.ok ? r.json() : null; })
@@ -953,7 +970,7 @@
                     list.innerHTML = '';
                     d.types.forEach(function (t) { list.appendChild(row(t)); });
                     showPanel();
-                    syncReminder();
+                    placeReminder();
                 })
                 .catch(function () { /* leave the panel hidden */ });
 

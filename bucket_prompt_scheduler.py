@@ -1,5 +1,12 @@
 """
-Raises the end-of-day bucket prompt at 20:00 in each user's own timezone.
+Raises the "entries to confirm" reminder, on each user's own cadence and in
+their own timezone.
+
+It used to raise two: a fixed 20:00 prompt about forecast entries, and a
+reminder on a chosen cadence about the balance. They were the same evening's
+question asked twice, so the fixed one is gone and the cadence carries both -
+entries waiting to be confirmed, and a balance to check. The claim table
+(bucket_prompts) and _is_due stay: the bank pull scheduler borrows the latter.
 
 A daemon thread, in the shape of the flush and dehydration workers it sits
 beside: wake on an interval, do a little work, exit promptly on shutdown.
@@ -9,10 +16,10 @@ Two things about it are not obvious and are worth stating before the code.
 **It must not assume it is the only one running.** The Debian install serves with
 one mod_wsgi daemon process, but the Docker image runs `gunicorn --workers 2`, so
 this thread exists in two processes and both wake at the same time. Each claims a
-user's evening with an INSERT that either wins or does nothing; only the winner
-sends anything. A check-then-act - "has this user been prompted today?" followed
-by a write - races between the two, and the symptom is a duplicate notification
-and a duplicate push, once a day, only in Docker.
+user's turn with auto_balance.claim_due - a conditional UPDATE that advances the
+cadence, which exactly one caller wins; only the winner sends anything. A
+check-then-act - "is this user due?" followed by a write - races between the
+two, and the symptom is a duplicate push and email, once a day, only in Docker.
 
 **A missing timezone is a reason to stay quiet, not to guess.** A user whose zone
 we do not know is skipped. Defaulting to the server's zone would fire the prompt
@@ -38,21 +45,18 @@ logger = get_logger(__name__)
 _thread = None
 _shutdown = threading.Event()
 
-# The local hour at which the prompt goes out.
+# The defaults _is_due answers with. Nothing here uses them any more - the
+# reminder runs at the hour each user chose - but the bank pull scheduler
+# passes its own hour and window through the same function.
 PROMPT_HOUR = 20
-
-# How often to look. Five minutes is fine: the window below is wider than the
-# interval, so a user cannot be stepped over.
-CHECK_INTERVAL = 300
-
-# A user is due when their local time is between PROMPT_HOUR:00 and this many
-# minutes later. Wider than CHECK_INTERVAL so a slow pass cannot skip anyone,
-# and the daily claim stops the overlap from prompting twice.
 WINDOW_MINUTES = 30
 
-# Marks the evening prompt in the notifications table, so the next one can
-# find and replace it. A stable key rather than matching the message text,
-# which changes whenever the wording does.
+# How often to look. Five minutes is fine: the reminder fires on the first
+# pass after the user's hour, and claim_due stops a second pass repeating it.
+CHECK_INTERVAL = 300
+
+# The type the fixed evening prompt used to write to the notifications table.
+# Kept so clear_prompt can still remove any such row an older release left.
 NOTIFICATION_TYPE = 'bucket_prompt'
 
 
@@ -61,7 +65,7 @@ def start():
     global _thread
     if ZoneInfo is None:
         log_warning(logger, 'BUCKET_PROMPT',
-                    "zoneinfo unavailable; end-of-day bucket prompts are disabled")
+                    "zoneinfo unavailable; the entries-to-confirm reminder is disabled")
         return
     if _thread is not None and _thread.is_alive():
         return
@@ -129,32 +133,16 @@ def run_once(now_utc=None):
         user_id = row[0] if not isinstance(row, dict) else row['id']
         tz_name = row[1] if not isinstance(row, dict) else row['timezone']
 
-        # The balance notification rides the same pass, but not the same clock:
-        # its time of day is the user's choice, so it needs the local time
-        # rather than the 20:00 window the bucket prompt uses. Sharing the walk
-        # is still worth it - the timezone handling is the fiddly part and a
-        # second thread doing it again is a second thing to keep in step.
+        # The user's own wall clock: the time of day is their choice.
         local_now = _local_now(tz_name, now_utc)
-        if local_now is not None:
-            try:
-                if _raise_balance_prompt(user_id, local_now):
-                    raised += 1
-            except Exception as e:
-                log_exception(logger, 'AUTOBALANCE',
-                              f"Failed to raise the balance prompt for user {user_id}: {e}")
-
-        due, local_date = _is_due(tz_name, now_utc)
-        if not due:
-            continue
-
-        if not _claim(user_id, local_date):
+        if local_now is None:
             continue
         try:
-            if _raise_prompt(user_id, local_date):
+            if _raise_balance_prompt(user_id, local_now):
                 raised += 1
         except Exception as e:
-            log_exception(logger, 'BUCKET_PROMPT',
-                          f"Failed to raise prompt for user {user_id}: {e}")
+            log_exception(logger, 'AUTOBALANCE',
+                          f"Failed to raise the reminder for user {user_id}: {e}")
 
     return raised
 
@@ -169,17 +157,19 @@ def _local_now(tz_name, now_utc):
 
 def _raise_balance_prompt(user_id, local_now):
     """
-    Notify a user that it is time to balance, if their cadence says so.
+    The "entries to confirm" reminder, when the user's cadence says so:
+    entries waiting to be confirmed, a balance to check, or both.
 
-    No notifications row, unlike the evening bucket prompt. This one is a nudge
-    to open the app, and the modal is driven by
-    autobalance_settings.pending_date instead - so it cannot leave a stale
-    'balance your account' line sitting in the list after the user has done it.
+    No notifications row. This is a nudge to open the app; the modals are
+    driven by what is actually outstanding (the entries list, and
+    autobalance_settings.pending_date for the balance) - so it cannot leave
+    a stale line in the list after the user has dealt with it.
 
     Email as well as push, because the point is to reach someone who is not
     looking at the app.
     """
     import auto_balance
+    import bucket_confirmation
 
     local_date = local_now.date()
     settings = auto_balance.get_settings(user_id)
@@ -198,29 +188,42 @@ def _raise_balance_prompt(user_id, local_now):
     if local_date == due_date and local_now.time() < auto_balance.notify_at(settings):
         return False
 
+    # What there is to ask about. Counted from MySQL, not the cache: at this
+    # hour the user is almost certainly not hydrated, and a cached read would
+    # say zero for exactly the people who most need reminding. The bank's
+    # rows count too - they wait in the same modal.
+    pending = bucket_confirmation.count_pending_from_db(user_id, on_date=local_date)
+    try:
+        import bank_import
+        pending += bank_import._count_pending_db(user_id)
+    except Exception as e:
+        log_warning(logger, 'AUTOBALANCE', f"Could not count the bank's rows for user {user_id}: {e}")
+    balance = auto_balance.anything_to_reconcile(user_id, local_date)
+
     # Nothing to ask about means nothing to send. Checked before the claim so
-    # the day is not consumed - if they unlink an account tomorrow, the reminder
+    # the day is not consumed - if something turns up tomorrow, the reminder
     # should come round normally rather than having been silently used up.
-    if not auto_balance.anything_to_reconcile(user_id, local_date):
+    if not pending and not balance:
         return False
 
     if not auto_balance.claim_due(user_id, local_date):
         return False
 
-    pending = auto_balance.pending_bucket_count(user_id, local_date)
-    if pending:
-        body = (f"Time to check your balance. {pending} "
-                f"{'entry' if pending == 1 else 'entries'} will be confirmed.")
+    if pending and balance:
+        body = (f"{pending} {'entry' if pending == 1 else 'entries'} to confirm, "
+                f"then your balance to check.")
+    elif pending:
+        body = f"{pending} {'entry' if pending == 1 else 'entries'} waiting to be confirmed."
     else:
         body = "Time to check your balance."
 
-    _push_balance(user_id, body)
+    _push_balance(user_id, body, 'bucket_prompt' if pending else 'autobalance')
     _email_balance(user_id, body)
-    log_info(logger, 'AUTOBALANCE', f"Balance prompt raised for user {user_id}")
+    log_info(logger, 'AUTOBALANCE', f"Reminder raised for user {user_id}: {body}")
     return True
 
 
-def _push_balance(user_id, body):
+def _push_balance(user_id, body, action='autobalance'):
     """Best-effort APNs nudge. A failure must not lose the in-app prompt."""
     try:
         from push_notifications import apns_enabled, send_apns_notification
@@ -239,7 +242,7 @@ def _push_balance(user_id, body):
         for token in tokens:
             try:
                 send_apns_notification(token, 'Blankee', body, None, 'default',
-                                       {'action': 'autobalance'})
+                                       {'action': action})
                 sent = True
             except Exception as e:
                 log_warning(logger, 'AUTOBALANCE',
@@ -277,95 +280,11 @@ def _email_balance(user_id, body):
         import auto_balance
         return send_notification_email_for_user(
             user, body, auto_balance._user_now(user_id),
-            kind='balance_reminder')
+            kind='entries_to_confirm')
     except Exception as e:
         log_warning(logger, 'AUTOBALANCE',
                     f"Could not email user {user_id}: {e}")
         return False
-
-
-def _claim(user_id, local_date):
-    """
-    Claim this user's evening, atomically.
-
-    INSERT IGNORE against the UNIQUE (user_id, prompt_date) key: exactly one
-    caller gets rowcount 1, everyone else gets 0 and stops. This is the whole
-    defence against the two gunicorn workers both waking at 20:00.
-    """
-    try:
-        # commit=True is required: get_cursor defaults to commit=False, and an
-        # uncommitted claim is no claim at all - every worker would win.
-        with get_db_pool().get_cursor(commit=True) as cursor:
-            cursor.execute(
-                "INSERT IGNORE INTO bucket_prompts (user_id, prompt_date) VALUES (%s, %s)",
-                (user_id, local_date.isoformat()))
-            return cursor.rowcount == 1
-    except Exception as e:
-        log_exception(logger, 'BUCKET_PROMPT', f"Claim failed for user {user_id}: {e}")
-        return False
-
-
-def _raise_prompt(user_id, local_date):
-    """Create the notification, and push it if push is configured."""
-    import bucket_confirmation
-
-    # Counted from MySQL, not from the Redis cache: at 20:00 the user is almost
-    # certainly not hydrated, and a cached read would report zero for exactly the
-    # people who have not opened the app and most need the reminder.
-    total = bucket_confirmation.count_pending_from_db(user_id, on_date=local_date)
-    if not total:
-        # Nothing to confirm. The claim stays, so the day is not retried - which
-        # is correct: they had no buckets due, and that will not change tonight.
-        _record_outcome(user_id, local_date, 0, False)
-        return False
-
-    noun = 'entry' if total == 1 else 'entries'
-    message = f"You have {total} {noun} to confirm."
-
-    try:
-        with get_db_pool().get_cursor(commit=True) as cursor:
-            # Exactly one of these exists at any time. Today's prompt already
-            # counts every outstanding date, so an older one says nothing today's
-            # does not - it is the same fact with a staler number.
-            #
-            # Read ones go too, not just unread. They were kept at first on the
-            # grounds that removing something the user had already been through
-            # was worse than a duplicate; it is not. A read prompt saying "3
-            # entries" sitting under an unread one saying "11" is two answers to
-            # one question, and the older is wrong.
-            #
-            # DELETE then INSERT inside one transaction, so no reader ever sees
-            # zero of them or two.
-            cursor.execute(
-                "DELETE FROM notifications WHERE user_id = %s AND type = %s",
-                (user_id, NOTIFICATION_TYPE))
-            superseded = cursor.rowcount
-            cursor.execute(
-                "INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, %s)",
-                (user_id, message, NOTIFICATION_TYPE))
-        if superseded:
-            log_info(logger, 'BUCKET_PROMPT',
-                     f"Replaced {superseded} earlier prompt(s) for user {user_id}")
-
-        # The notifications list is cached in Redis, and this wrote straight past
-        # it. Without dropping the key the user's next page load reads the old
-        # cached list: the prompt exists, the badge counts it, and the
-        # notifications page does not show it. Every other notification writer
-        # does the same thing after inserting - see _create_notification.
-        try:
-            if redis_manager._redis_client:
-                redis_manager._redis_client.delete(f"notifications:v1:{user_id}")
-        except Exception as cache_err:
-            log_warning(logger, 'BUCKET_PROMPT',
-                        f"Could not clear the notifications cache for user {user_id}: {cache_err}")
-    except Exception as e:
-        log_exception(logger, 'BUCKET_PROMPT', f"Could not write notification: {e}")
-
-    pushed = _push(user_id, total, noun)
-    _record_outcome(user_id, local_date, total, pushed)
-    log_info(logger, 'BUCKET_PROMPT',
-             f"Raised prompt for user {user_id}: {total} bucket(s), pushed={pushed}")
-    return True
 
 
 def clear_prompt(user_id):
@@ -404,53 +323,3 @@ def clear_prompt(user_id):
             log_warning(logger, 'BUCKET_PROMPT',
                         f"Could not clear the notifications cache for user {user_id}: {cache_err}")
     return removed
-
-
-def _push(user_id, total, noun):
-    """
-    Best-effort APNs nudge. Never fatal.
-
-    The in-app prompt is the feature; the push is a reminder to go and look. A
-    stale device token must not cost the user their prompt.
-    """
-    try:
-        from push_notifications import apns_enabled, send_apns_notification
-        if not apns_enabled():
-            return False
-    except Exception:
-        return False
-
-    sent = False
-    try:
-        with get_db_pool().get_cursor() as cursor:
-            cursor.execute(
-                "SELECT device_token FROM device_tokens WHERE user_id = %s", (user_id,))
-            tokens = [row[0] if not isinstance(row, dict) else row['device_token']
-                      for row in (cursor.fetchall() or [])]
-        for token in tokens:
-            try:
-                send_apns_notification(
-                    token,
-                    title="Confirm today's entries",
-                    body=f"{total} {noun} waiting for you.",
-                    badge=total,
-                    custom={'action': 'bucket_prompt'})
-                sent = True
-            except Exception as e:
-                log_warning(logger, 'BUCKET_PROMPT',
-                            f"Push to one device failed for user {user_id}: {e}")
-    except Exception as e:
-        log_warning(logger, 'BUCKET_PROMPT', f"Push step failed for user {user_id}: {e}")
-    return sent
-
-
-def _record_outcome(user_id, local_date, count, pushed):
-    """What the prompt covered, for diagnosing a quiet evening."""
-    try:
-        with get_db_pool().get_cursor(commit=True) as cursor:
-            cursor.execute(
-                "UPDATE bucket_prompts SET bucket_count = %s, pushed = %s "
-                " WHERE user_id = %s AND prompt_date = %s",
-                (count, 1 if pushed else 0, user_id, local_date.isoformat()))
-    except Exception as e:
-        log_warning(logger, 'BUCKET_PROMPT', f"Could not record prompt outcome: {e}")

@@ -8130,9 +8130,23 @@ transform: scale(1.2);
     box-sizing: border-box;
 }
 
+/* The Entries to confirm reminder's cadence, moved in under its row in the
+   email kinds list. The list is already the grey panel, so the cadence box
+   goes white inside it rather than grey on grey, and loses the side margins
+   the standalone panel needed. */
+.email-types-panel #balance-notification-form {
+    width: 100%;
+    margin: 0;
+}
+
+.email-types-panel .balance-notification-panel {
+    margin: 0 0 8px;
+    background-color: var(--white);
+}
+
 /* A labelled group of rows within a section, set off from what is above it
-   by a rule - the balance corrections under the reminder. The heading sits at
-   the rows' own 16px so it lines up with their labels. */
+   by a rule - the balance corrections at the foot of Settings. The heading
+   sits at the rows' own 16px so it lines up with their labels. */
 .settings-group {
     width: 100%;
     margin-top: 12px;
