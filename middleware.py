@@ -115,6 +115,7 @@ def init_redis_middleware(app):
             '/check_handle',
             '/save_setup_name',
             '/bank/',
+            '/ai/',
             '/static/',
             '/api/data-version',
             '/logout',
@@ -200,6 +201,10 @@ def init_redis_middleware(app):
         No Strict-Transport-Security: TLS terminates in front of this app and
         the proxy that does it is where that header belongs.
         """
+        # Static files the app serves itself (no Apache alias in front, as on
+        # dev) get the same revalidate-always rule the installer's vhost sets.
+        if request.path.startswith('/static/'):
+            response.headers.setdefault('Cache-Control', 'no-cache')
         response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
         response.headers.setdefault('X-Content-Type-Options', 'nosniff')
         response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')

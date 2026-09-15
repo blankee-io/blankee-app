@@ -32,6 +32,9 @@ Read this before writing a provider:
          'pending':            bool
          'transaction_type':   str
          'provider_created_at': str | None
+         'posted_at':          int | None - epoch the bank posted it, when the
+                                       vendor says; the importer compares it
+                                       with the moment an account was linked
          'enrichment': {             - {} when nothing enriched it
              'labels':              list[str],
              'merchant_id':         str,

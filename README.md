@@ -385,6 +385,75 @@ the right thing.
 
 ---
 
+## Connecting a bank (SimpleFIN)
+
+Blankee reads bank accounts through [SimpleFIN Bridge](https://beta-bridge.simplefin.org/),
+a service each person signs up for themselves - $1.50 a month or $15 a year,
+paid to SimpleFIN, not to Blankee. There is no widget: the Bridge hands the
+person a one-time **Setup Token**, and they paste it into Blankee. The setup
+wizard (step 3) and the **Bank Connection** section of the Settings page walk
+through it:
+
+1. **Create your SimpleFIN account** - sign up with an email, subscribe, then
+   add each bank under *Financial Institutions → New Connection*.
+2. **Make a Setup Token** - *Apps → New Connection*, name it "Blankee",
+   *Create Setup Token*, copy it. A token works once.
+3. **Paste it into Blankee** - the accounts appear; say what each one is
+   (Checking, Savings, Credit card, or Don't import). One checking and one
+   savings account can be imported, and any number of cards.
+
+Blankee keeps the resulting access URL encrypted with `SETTINGS_ENCRYPTION_KEY`
+and pulls from SimpleFIN at most about 20 times a day (the Bridge allows 24).
+
+**What happens after linking.** Every morning at six, in the person's own
+timezone, Blankee pulls what posted to the linked checking account and cards
+since the last pull (savings accounts are not imported - a transfer into
+savings is the checking side's expense, and the savings balance is read from
+the feed). Each posted transaction becomes an entry at once, in a guessed
+category - the merchant memory first, Claude if it is on, else a forecast
+nearby of the same amount, else Uncategorized - and waits in the "Did these
+come through?" modal to be confirmed or moved. Forecasts on a linked account
+are no longer asked about in the evening: a transaction that matches one
+fulfils it, and one nothing matches is moved to tomorrow. After each pull, and
+again when the last bank row is confirmed, the checking, savings and card
+balances are matched to the bank's as of yesterday. **Sync now** in the Bank
+Connection section runs the same pull by hand (it keeps two of the day's
+requests back for the morning). Import starts at the moment an account is linked -
+history is not fetched.
+
+Disconnecting in Blankee forgets the connection here; to stop SimpleFIN sharing
+a bank, also remove the app under *Apps* on the Bridge. The same applies after
+deleting a Blankee account: its SimpleFIN credentials go with it, the Bridge
+account is untouched, and a new Blankee account simply creates a new Setup
+Token there (tokens are single-use but unlimited) - remove the old app entry on
+the Bridge to keep things tidy. To turn the feature off for an installation,
+set `BANK_PROVIDER=null` in `.env`.
+
+## AI categorization (Claude)
+
+Optional, per person, and off until they switch it on. With a bank linked,
+Blankee can ask Claude to pick a category for each imported transaction the
+merchant memory does not already know - on the person's **own Anthropic API key**, so they
+control it and pay Anthropic directly from usage credits bought in advance. At
+today's prices that is roughly 25¢ per 1,000 transactions on Claude Haiku 4.5 -
+a few cents a month for most users - but Anthropic bills by usage and
+changes its prices, so treat that as an estimate. A Claude Pro or Max
+subscription does not include API access; the key comes from
+[platform.claude.com](https://platform.claude.com/) under *Billing* then
+*API keys*.
+
+The wizard (step 4, only after a bank is linked) and the **AI Categorization**
+section of the Settings page hold the key (encrypted), the model choice, a
+**Test** button, the switch, and **Remove key** to disconnect Claude. The
+switch cannot be turned on without a tested key and a linked bank account;
+disconnecting the last bank turns it off while keeping the key. When it is on,
+each pull sends Anthropic one request with the description, amount and
+direction of the transactions that came in, together with the names of your
+categories; nothing else is sent - no balances, no account details - and
+Anthropic's API terms do not use it for training. A transaction the merchant
+memory already knows is not sent at all. To turn the feature off for an
+installation, set `ENRICHMENT_PROVIDER=null`.
+
 ## Forgotten administrator password
 
 If email delivery is set up, use the Forgot Password link on the login page.

@@ -642,7 +642,7 @@ function goToReconnect() {
     if (window._bankReconnectData && window._bankReconnectData.length > 0) {
         // Go to profile page with reconnect parameter for first connection
         const connectionId = window._bankReconnectData[0].connection_id;
-        window.location.href = '/bank_accounts?reconnect=' + encodeURIComponent(connectionId);
+        window.location.href = '/settings?reconnect=' + encodeURIComponent(connectionId) + '#bank';
     } else {
         window.location.href = '/profile';
     }
@@ -1923,6 +1923,298 @@ function _bucketItemHtml(item, symbol) {
       '</div>';
 }
 
+function _bankItemHtml(item, symbol) {
+    // A row from the bank. The money has moved, so the only question is
+    // which category it was: the guess fills the field, the same category
+    // picker as everywhere else (search, icons, Create "x") offers the rest
+    // with the forecast each would consume, and one button says "that's
+    // right" - or "this one instead", if the field was changed.
+    var income = item.entry_type === "income";
+    var credit = item.entry_type === "c_expense";
+    var tone = credit ? "bucket-prompt-credit"
+             : income ? "bucket-prompt-income"
+             : "bucket-prompt-expense";
+    var title = _bucketEscape(item.merchant_name || item.description || "Bank transaction");
+    if (credit && item.card_name) { title = _bucketEscape(item.card_name) + " - " + title; }
+    var source = item.source === "memory" ? "remembered"
+               : item.source === "claude" ? "Claude's guess"
+               : item.source === "amount" ? "matched a forecast"
+               : "no guess";
+    var note = "";
+    if (item.forecast && item.forecast.amount != null &&
+            Math.abs(Number(item.forecast.amount) - Number(item.amount)) >= 0.005) {
+        // The forecast it consumed said a different figure; the bank's won.
+        note = " · forecast was " + symbol + Number(item.forecast.amount).toFixed(2);
+    }
+    _bankRowChoices[String(item.transaction_id)] = {
+        choices: (item.choices || []).slice(),
+        symbol: symbol,
+        entryType: item.entry_type,
+        creditAccountId: item.credit_account_id == null ? null : item.credit_account_id
+    };
+    var guessId = item.category_id == null ? "" : String(item.category_id);
+    return "" +
+      '<div class="bucket-prompt-item bucket-prompt-bank ' + tone + '" data-bank="1"' +
+          ' data-entry-id="' + _bucketEscape(item.entry_id) + '"' +
+          ' data-table="' + _bucketEscape(item.table) + '"' +
+          ' data-entry-type="' + _bucketEscape(item.entry_type) + '"' +
+          ' data-transaction-id="' + _bucketEscape(item.transaction_id) + '">' +
+        '<div class="bucket-prompt-head">' +
+          '<span class="bucket-prompt-cat">' + title + '</span>' +
+          '<span class="bucket-prompt-amount">' + symbol + Number(item.amount).toFixed(2) + '</span>' +
+        '</div>' +
+        '<div class="bucket-prompt-meta">' + _bucketEscape(item.account_name) + ' · ' +
+            _bucketEscape(item.date) + ' · <span class="bucket-prompt-source">' + source + '</span>' + note + '</div>' +
+        '<div class="bucket-prompt-actions bucket-prompt-choose">' +
+          '<div class="bucket-prompt-picker">' +
+            '<input type="text" class="bucket-prompt-category-input" placeholder="Type to search..."' +
+                ' autocomplete="off" aria-label="Category" value="' + _bucketEscape(item.category_name || "") + '">' +
+            '<input type="hidden" class="bucket-prompt-category-id" value="' + _bucketEscape(guessId) + '">' +
+          '</div>' +
+          '<button type="button" class="bucket-prompt-btn bucket-prompt-yes" data-action="categorise">Confirm</button>' +
+        '</div>' +
+      '</div>';
+}
+
+/* ---- the category picker on a bank row ------------------------------------
+
+   The same picker every entry form has - a field you type into, a list with
+   the matches first, Create "x" when nothing matches exactly, a rule, then
+   the rest - built here from the choices the server sent with each row, so
+   a card's row only ever offers that card's categories.
+
+   The list hangs off the body, position: fixed, placed against the field.
+   Inside the dialog it would be clipped: the list of rows scrolls, and an
+   absolutely positioned dropdown cannot escape a scrolling ancestor.
+   -------------------------------------------------------------------------- */
+
+// What each row may be filed under, keyed by the bank's transaction id, plus
+// the currency symbol and which direction (and card) the row belongs to.
+var _bankRowChoices = {};
+// The one open list, or null, and the field it hangs from. One at a time:
+// opening a second closes the first.
+var _bankDropdown = null;
+var _bankDropdownInput = null;
+// Set when a category was created from the prompt. The page behind holds
+// its category lists in arrays this file cannot reach, so it cannot draw an
+// entry filed under a category it has never heard of - the page reloads once
+// the dialog closes instead.
+var bucketPromptCategoryCreated = false;
+
+function _bankDropdownHide() {
+    if (_bankDropdown) {
+        _bankDropdown.remove();
+        _bankDropdown = null;
+    }
+    _bankDropdownInput = null;
+}
+
+function _bankDropdownPlace(input) {
+    if (!_bankDropdown) { return; }
+    var r = input.getBoundingClientRect();
+    _bankDropdown.style.left = r.left + "px";
+    _bankDropdown.style.top = (r.bottom + 2) + "px";
+    _bankDropdown.style.width = r.width + "px";
+    // As tall as the room below the field allows, and never so short that
+    // it cannot be scrolled sensibly.
+    _bankDropdown.style.maxHeight = Math.max(150, window.innerHeight - r.bottom - 20) + "px";
+}
+
+function _bankChoiceHtml(c, symbol) {
+    // Name and note in one box, so a search row (a flex row) cannot wrap
+    // the name around the note.
+    var html = getCategoryIcon(c) + ' <span class="bucket-prompt-choice">' + escapeHtml(c.name);
+    if (c.forecast && c.forecast.amount != null) {
+        html += '<span class="bucket-prompt-forecast">forecast ' + escapeHtml(symbol) +
+            Number(c.forecast.amount).toFixed(2) + ' on ' + escapeHtml(c.forecast.date) + '</span>';
+    }
+    return html + '</span>';
+}
+
+function _bankRowInfo(row) {
+    return _bankRowChoices[row.getAttribute("data-transaction-id")] ||
+        { choices: [], symbol: "", entryType: row.getAttribute("data-entry-type"), creditAccountId: null };
+}
+
+function _bankRowCategoryId(row) {
+    // The id behind the field. Typing clears it; picking from the list sets
+    // it; text that happens to spell a category exactly counts as picking it.
+    var input = row.querySelector(".bucket-prompt-category-input");
+    var hidden = row.querySelector(".bucket-prompt-category-id");
+    if (!input || !hidden) { return null; }
+    if (hidden.value) { return hidden.value; }
+    var typed = input.value.trim().toLowerCase();
+    if (!typed) { return null; }
+    var hit = _bankRowInfo(row).choices.filter(function (c) {
+        return String(c.name).toLowerCase() === typed;
+    })[0];
+    if (hit) {
+        hidden.value = String(hit.category_id);
+        return hidden.value;
+    }
+    return null;
+}
+
+function showBankCategoryDropdown(row, searchText) {
+    var input = row.querySelector(".bucket-prompt-category-input");
+    var hidden = row.querySelector(".bucket-prompt-category-id");
+    if (!input || !hidden) { return; }
+    var info = _bankRowInfo(row);
+    var cats = info.choices;
+    _bankDropdownHide();
+
+    var typed = (searchText || "").trim();
+    var q = typed.toLowerCase();
+    var matching = q ? cats.filter(function (c) { return String(c.name).toLowerCase().indexOf(q) !== -1; }) : [];
+    var matched = {};
+    matching.forEach(function (c) { matched[String(c.category_id)] = true; });
+    var rest = q ? cats.filter(function (c) { return !matched[String(c.category_id)]; }) : cats;
+    var exact = matching.some(function (c) { return String(c.name).toLowerCase() === q; });
+
+    var list = document.createElement("div");
+    list.className = "category-dropdown bucket-prompt-dropdown";
+
+    function pick(c) {
+        input.value = c.name;
+        hidden.value = String(c.category_id);
+        _bankDropdownHide();
+    }
+    function add(c, isMatch) {
+        var d = document.createElement("div");
+        d.className = "category-dropdown-item" + (isMatch ? " search-result" : "");
+        d.innerHTML = (isMatch ? '<i class="fa-solid fa-magnifying-glass search-icon"></i> ' : "") +
+            _bankChoiceHtml(c, info.symbol);
+        d.addEventListener("click", function () { pick(c); });
+        list.appendChild(d);
+    }
+
+    matching.forEach(function (c) { add(c, true); });
+    if (typed && !exact) {
+        var create = document.createElement("div");
+        create.className = "category-dropdown-item create-new-category";
+        create.innerHTML = '<i class="fa-solid fa-plus"></i> Create "' + escapeHtml(typed) + '"';
+        create.addEventListener("click", function () { createBankRowCategory(row, typed); });
+        list.appendChild(create);
+    }
+    if (q && list.children.length && rest.length) {
+        var sep = document.createElement("div");
+        sep.className = "dropdown-separator";
+        list.appendChild(sep);
+    }
+    rest.forEach(function (c) { add(c, false); });
+    if (!list.children.length) { return; }
+
+    document.body.appendChild(list);
+    _bankDropdown = list;
+    _bankDropdownInput = input;
+    _bankDropdownPlace(input);
+}
+
+function createBankRowCategory(row, name) {
+    // Create "x" from a bank row: the same routes the entry forms use. A
+    // card's row files under the card's own copy of the new category, which
+    // the expense route creates alongside and reports per card.
+    var info = _bankRowInfo(row);
+    var input = row.querySelector(".bucket-prompt-category-input");
+    var hidden = row.querySelector(".bucket-prompt-category-id");
+    var url = info.entryType === "income" ? "/add_income_category" : "/add_expense_category";
+    var form = new FormData();
+    form.append("name", name);
+    _bankDropdownHide();
+    row.classList.add("bucket-prompt-busy");
+    return fetch(url, { method: "POST", body: form })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        row.classList.remove("bucket-prompt-busy");
+        if (!res || res.status !== "success") {
+            showToast((res && res.message) || "Could not create that category.", "error");
+            return false;
+        }
+        var perCard = res.c_expense_categories || {};
+        function idFor(other) {
+            if (other.entryType !== "c_expense") { return res.new_category_id; }
+            return other.creditAccountId == null ? null : (perCard[other.creditAccountId] || null);
+        }
+        // Every row of the same direction can use it now, not just this one.
+        Object.keys(_bankRowChoices).forEach(function (key) {
+            var other = _bankRowChoices[key];
+            if (other.entryType !== info.entryType) { return; }
+            var id = idFor(other);
+            if (id == null) { return; }
+            other.choices.push({ category_id: id, name: name, forecast: null });
+            other.choices.sort(function (a, b) {
+                return String(a.name).toLowerCase().localeCompare(String(b.name).toLowerCase());
+            });
+        });
+        var mine = idFor(info);
+        if (mine == null) {
+            showToast("The category was created, but this card has no copy of it yet.", "error");
+            return false;
+        }
+        if (input) { input.value = name; }
+        if (hidden) { hidden.value = String(mine); }
+        bucketPromptCategoryCreated = true;
+        return true;
+      })
+      .catch(function () {
+        row.classList.remove("bucket-prompt-busy");
+        showToast("Could not reach the server.", "error");
+        return false;
+      });
+}
+
+// A click anywhere else closes the list. Scrolling and resizing move it
+// with its field instead: the dialog scrolls a field into view as it takes
+// focus, and a list that closed on that was gone before it was seen.
+document.addEventListener("click", function (e) {
+    if (!_bankDropdown) { return; }
+    if (_bankDropdown.contains(e.target)) { return; }
+    if (e.target.closest && e.target.closest(".bucket-prompt-category-input")) { return; }
+    _bankDropdownHide();
+});
+window.addEventListener("scroll", function (e) {
+    if (_bankDropdown && _bankDropdownInput && e.target !== _bankDropdown) {
+        _bankDropdownPlace(_bankDropdownInput);
+    }
+}, true);
+window.addEventListener("resize", function () {
+    if (_bankDropdown && _bankDropdownInput) { _bankDropdownPlace(_bankDropdownInput); }
+});
+
+function categoriseBankRow(row, categoryId) {
+    // One bank row answered: the guessed category kept, or another chosen.
+    // Resolves to whether it was saved; the caller removes the row.
+    return fetch("/bank/confirm-transaction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            transaction_id: row.getAttribute("data-transaction-id"),
+            entry_id: row.getAttribute("data-entry-id"),
+            entry_type: row.getAttribute("data-entry-type"),
+            category_id: categoryId
+        })
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res || res.status !== "success") {
+            showToast((res && res.message) || "Could not save that.", "error");
+            return false;
+        }
+        if (res.change) {
+            bucketPromptChanges.push(res.change);
+            // A forecast the guess had consumed is back on the page too.
+            if (res.change.restored) { bucketPromptChanges.push(res.change.restored); }
+            scheduleBucketRefresh();
+        }
+        // The last row answered: the balances were matched to the bank.
+        if (res.note) { showToast(res.note, "info", 6000); }
+        return true;
+      })
+      .catch(function () {
+        showToast("Could not reach the server.", "error");
+        return false;
+      });
+}
+
 function fitBucketTitles(bodyEl) {
     // A long card-and-category name has to give way, not push the amount off
     // the row or widen the dialog. CSS cannot size text to its container, so
@@ -1957,6 +2249,30 @@ function resolveAllBucketRows(bodyEl, action, close) {
             return;
         }
         row.classList.add("bucket-prompt-busy");
+
+        // A bank row: "Yes to all" confirms it with the category it shows.
+        // No and Skip are answers about a forecast - whether it happened -
+        // and this money has already moved, so those leave it alone.
+        if (row.getAttribute("data-bank")) {
+            if (action !== "came_through") {
+                row.classList.remove("bucket-prompt-busy");
+                next();
+                return;
+            }
+            // And a row whose field was cleared and never resettled has no
+            // answer to give; it stays for a per-row one.
+            var chosen = _bankRowCategoryId(row);
+            if (chosen == null) {
+                row.classList.remove("bucket-prompt-busy");
+                next();
+                return;
+            }
+            categoriseBankRow(row, chosen).then(function (ok) {
+                if (ok) { row.remove(); } else { row.classList.remove("bucket-prompt-busy"); }
+                next();
+            });
+            return;
+        }
 
         // "No to all" means the same as pressing No on each row, and a row
         // that does not offer No is an allowance whose period has ended -
@@ -2009,7 +2325,16 @@ function showBucketPrompt(opts) {
             }
 
             var symbol = _bucketCurrency(data.currency_type);
-            var html = data.items.map(function (i) {
+            var html = "";
+            // The bank's rows first: they are facts waiting for a name, and
+            // the forecasts below are guesses waiting for a fact.
+            var bankItems = data.bank_items || [];
+            if (bankItems.length) {
+                html += '<p class="bucket-prompt-section">From your bank</p>' +
+                    bankItems.map(function (i) { return _bankItemHtml(i, symbol); }).join("");
+                if (data.items.length) { html += '<p class="bucket-prompt-section">Forecasts</p>'; }
+            }
+            html += data.items.map(function (i) {
                 return _bucketItemHtml(i, symbol);
             }).join("");
 
@@ -2048,7 +2373,18 @@ function showBucketPrompt(opts) {
                 // Forwarded, not swallowed. Leaving this out was why the
                 // dialog vanished instead of shrinking into the corner: the
                 // hook existed and nothing ever handed it to the helper.
-                beforeClose: opts.beforeClose,
+                beforeClose: function () {
+                    _bankDropdownHide();
+                    if (bucketPromptCategoryCreated) {
+                        // See bucketPromptCategoryCreated: the page cannot
+                        // draw an entry in a category it does not hold.
+                        window.location.reload();
+                        return;
+                    }
+                    if (typeof opts.beforeClose === "function") {
+                        return opts.beforeClose.apply(this, arguments);
+                    }
+                },
                 message: "",
                 bodyHtml: html,
                 hideConfirm: true,
@@ -2062,6 +2398,15 @@ function showBucketPrompt(opts) {
                     startBucketOpenSequence();
                     // After the rows exist, before anyone reads them.
                     fitBucketTitles(bodyEl);
+                    // The body element is shared by every dialog and lives on
+                    // between openings, so its handlers are wired once. What
+                    // differs per opening - how to close - is kept on it, and
+                    // the handlers read it from there. Wiring again on every
+                    // opening stacked click handlers, and each reopening from
+                    // the bubble posted every answer once more.
+                    bodyEl.__bucketClose = close;
+                    if (bodyEl.__bucketWired) { return; }
+                    bodyEl.__bucketWired = true;
                     // Leaving the field closes it again, so an abandoned "Yes"
                     // does not sit there half-open.
                     //
@@ -2085,13 +2430,50 @@ function showBucketPrompt(opts) {
                         }, 120);
                     }, true);
 
+                    // The category field on a bank row. Typing searches and
+                    // unsets the id until something is picked; focusing shows
+                    // the whole list with the guess selected for typing over.
+                    // The selection is made at once, and the mouseup that
+                    // ends the click - which would collapse it to a caret -
+                    // is swallowed that once. A select() deferred in a timer
+                    // did this before, and re-focused the field to do it;
+                    // with two fields each re-selecting, that was a loop.
+                    bodyEl.addEventListener("input", function (ev) {
+                        var f = ev.target;
+                        if (!f || !f.classList || !f.classList.contains("bucket-prompt-category-input")) { return; }
+                        var bankRow = f.closest(".bucket-prompt-item");
+                        var hidden = bankRow && bankRow.querySelector(".bucket-prompt-category-id");
+                        if (hidden) { hidden.value = ""; }
+                        if (bankRow) { showBankCategoryDropdown(bankRow, f.value); }
+                    });
+                    bodyEl.addEventListener("focusin", function (ev) {
+                        var f = ev.target;
+                        if (!f || !f.classList || !f.classList.contains("bucket-prompt-category-input")) { return; }
+                        var bankRow = f.closest(".bucket-prompt-item");
+                        try { f.setSelectionRange(0, f.value.length); } catch (e) { /* not a text field */ }
+                        f.__keepSelection = true;
+                        if (bankRow) { showBankCategoryDropdown(bankRow, ""); }
+                    });
+                    bodyEl.addEventListener("mouseup", function (ev) {
+                        var f = ev.target;
+                        if (!f || !f.__keepSelection) { return; }
+                        f.__keepSelection = false;
+                        ev.preventDefault();
+                    });
+                    bodyEl.addEventListener("keydown", function (ev) {
+                        if (ev.key === "Escape" && _bankDropdown) {
+                            _bankDropdownHide();
+                            ev.stopPropagation();
+                        }
+                    });
+
                     bodyEl.addEventListener("click", function (ev) {
                         var bulk = ev.target.closest("button[data-bulk]");
                         if (bulk) {
                             // "Yes to all" takes each row at its forecast amount:
                             // correcting a figure is a per-row decision and there
                             // is nothing sensible to apply to all of them.
-                            resolveAllBucketRows(bodyEl, bulk.getAttribute("data-bulk"), close);
+                            resolveAllBucketRows(bodyEl, bulk.getAttribute("data-bulk"), bodyEl.__bucketClose);
                             return;
                         }
 
@@ -2100,6 +2482,25 @@ function showBucketPrompt(opts) {
                         var row = btn.closest(".bucket-prompt-item");
                         if (!row) { return; }
                         var action = btn.getAttribute("data-action");
+
+                        if (action === "categorise") {
+                            var chosen = _bankRowCategoryId(row);
+                            if (chosen == null) {
+                                showToast("Pick a category from the list first.", "error");
+                                return;
+                            }
+                            _bankDropdownHide();
+                            row.classList.add("bucket-prompt-busy");
+                            categoriseBankRow(row, chosen).then(function (ok) {
+                                row.classList.remove("bucket-prompt-busy");
+                                if (!ok) { return; }
+                                row.remove();
+                                if (!bodyEl.querySelector(".bucket-prompt-item")) {
+                                    bodyEl.__bucketClose(true);
+                                }
+                            });
+                            return;
+                        }
 
                         if (action === "open_amount") {
                             var panel = row.querySelector(".bucket-prompt-amount-row");
@@ -2144,7 +2545,7 @@ function showBucketPrompt(opts) {
                             }
                             row.remove();
                             if (!bodyEl.querySelector(".bucket-prompt-item")) {
-                                close(true);
+                                bodyEl.__bucketClose(true);
                             }
                           }).catch(function () {
                             row.classList.remove("bucket-prompt-busy");
@@ -2338,7 +2739,21 @@ function applyBucketChanges(changes, arrays) {
 
     changes.forEach(function (ch) {
         var arr = arrays[ch.table];
-        if (!arr || !arr.length) { return; }
+        if (!arr) { return; }
+        if (ch.added) {
+            // A forecast put back after a bank row was moved elsewhere: a
+            // row the page has never held, so it is appended rather than
+            // patched. Same shape as the rows the templates bake in.
+            arr.push({
+                id: ch.entry_id, category_id: ch.category_id, date: ch.date, amount: ch.amount,
+                is_bucket: ch.is_bucket, original_date: ch.original_date,
+                original_amount: ch.original_amount == null ? ch.amount : ch.original_amount,
+                processed: ch.processed, recurring_id: null
+            });
+            touched++;
+            return;
+        }
+        if (!arr.length) { return; }
         for (var i = arr.length - 1; i >= 0; i--) {
             if (String(arr[i].id) !== String(ch.entry_id)) { continue; }
             if (ch.removed) {
@@ -2351,6 +2766,8 @@ function applyBucketChanges(changes, arrays) {
                 arr[i].amount = ch.amount;
                 arr[i].is_bucket = ch.is_bucket;
                 arr[i].original_date = ch.original_date;
+                // A bank row confirmed into another category moves cells.
+                if (ch.category_id != null) { arr[i].category_id = ch.category_id; }
                 // Confirming an entry is what marks it paid now that nothing else
                 // can. resolve() has always returned this; dropping it here meant
                 // the week and month grids redrew from these arrays without the
@@ -2427,6 +2844,11 @@ function refreshAfterBucketAnswers(changes) {
     // The bottom-right spinner, the same one an added entry raises. Each page's
     // hook ends in a path that already calls showDashboardSpinner(false), so
     // raising it once here is balanced - the helper counts shows against hides.
+    // A category created in the prompt is one the page's arrays do not hold;
+    // the dialog reloads the page when it closes, and drawing before that
+    // would only show the entry in the wrong place. Nothing to do here.
+    if (bucketPromptCategoryCreated) { return; }
+
     _bucketSpinner(true);
 
     if (typeof window.blankeeBucketRefresh === "function") {
@@ -2700,12 +3122,6 @@ function _abEscape(text) {
     return d.innerHTML;
 }
 
-function _abEscape(text) {
-    var d = document.createElement("div");
-    d.textContent = text == null ? "" : String(text);
-    return d.innerHTML;
-}
-
 function _abCurrency(type) {
     return type === "EUR" ? "\u20ac" : type === "USD" ? "$" : (type || "$");
 }
@@ -2752,9 +3168,14 @@ function showAutoBalancePrompt(opts) {
             // One block per thing being reconciled: cash, savings if there is a
             // figure for it, and each card. Nothing is netted across them - a
             // card balance is a debt and savings is not spendable cash - so each
-            // gets its own "we think" and its own input.
-            var body = '<div class="autobalance-body">' +
-                _abBlock('autobalance-actual', 'Current account', shown, symbol);
+            // gets its own "we think" and its own input. An account a bank feed
+            // keeps current is not offered: the server leaves it out (cash
+            // false, no savings figure, the card not listed), and when every
+            // account is fed it says there is nothing pending at all.
+            var body = '<div class="autobalance-body">';
+            if (d.cash !== false) {
+                body += _abBlock('autobalance-actual', 'Current account', shown, symbol);
+            }
 
             if (d.savings_balance != null) {
                 body += _abBlock('autobalance-savings', 'Savings',
@@ -2778,7 +3199,8 @@ function showAutoBalancePrompt(opts) {
                 cancelText: "Not now",
                 modalClass: "autobalance-modal",
                 onReady: function (bodyEl) {
-                    var input = bodyEl.querySelector("#autobalance-actual");
+                    var input = bodyEl.querySelector("#autobalance-actual") ||
+                                bodyEl.querySelector(".autobalance-input");
                     // Pre-filled with what the app thinks, because the common
                     // case is agreement and the rest is typing over it.
                     if (input) { input.focus(); input.select(); }
@@ -2801,7 +3223,9 @@ function showAutoBalancePrompt(opts) {
                     // exists and still does what it says - nothing calls it.
                     return Promise.resolve(false);
                 }
-                if (typed === null || typed === "") {
+                if (d.cash === false) {
+                    typed = null;
+                } else if (typed === null || typed === "") {
                     showToast("Enter your current balance.", "error");
                     return false;
                 }
@@ -2854,7 +3278,7 @@ function _abApply(balance, savings, cards) {
                 parts.push("Recorded " + Math.abs(d.difference).toFixed(2) +
                            " " + d.direction + " in " +
                            (d.category_name || "Uncategorized") + ".");
-            } else {
+            } else if (d.cash !== false) {
                 parts.push("Your balance matches.");
             }
             if (d.savings && d.savings.entry_written) {
@@ -2868,6 +3292,7 @@ function _abApply(balance, savings, cards) {
                 parts.push("Adjusted " + cardsFixed +
                            (cardsFixed === 1 ? " card." : " cards."));
             }
+            if (!parts.length) { parts.push("Everything matches."); }
             showToast(parts.join(" "), "success");
 
             // The confirmations and the correction between them can have moved

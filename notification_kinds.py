@@ -19,12 +19,13 @@ logger = get_logger(__name__)
 # key, label, and what it covers. The description is the settings page's info
 # tip, so it says what arrives rather than restating the label.
 KINDS = (
+    # One reminder, on the cadence the person sets below it: entries waiting to
+    # be confirmed, and a balance to check. It used to be two - a fixed 20:00
+    # prompt for the entries and this cadence for the balance - which asked the
+    # same evening's question twice.
     ('entries_to_confirm', 'Entries to confirm',
-     'The evening reminder listing forecast entries waiting for you to say '
-     'whether they happened.'),
-    ('balance_reminder', 'Balance reminder',
-     'The reminder, on the cadence you set, asking whether you want to '
-     'reconcile against your real bank balance.'),
+     'The reminder, on the cadence you set here, that entries are waiting to '
+     'be confirmed and a balance is due to be checked.'),
     ('low_balance', 'Projected shortfall',
      'Sent when your projected remainder falls below zero on some future date, '
      'so a shortfall shows up before it arrives.'),
