@@ -507,9 +507,11 @@ def _memory_pick(user_id: int, row: Dict[str, Any], plan: Dict[str, Any]) -> Opt
 
 def _category_options(user_id: int, table: str, credit_account_id: Optional[int]) -> List[Dict[str, Any]]:
     """
-    [{'id', 'name'}] a row on `table` may be sorted into: the direction's
-    categories, or a card's own. Hidden categories and interest charges
-    are nobody's to choose.
+    [{'id', 'name', <icon flags>}] a row on `table` may be sorted into: the
+    direction's categories, or a card's own. Hidden categories, interest
+    charges, bundles and the starting balance are nobody's to choose - the
+    same set every category picker in the app offers. The flags are what
+    the picker draws its icons from.
     """
     import redis_manager
     from bucket_confirmation import ENTRY_TABLES as CATEGORY_TABLES
@@ -521,11 +523,17 @@ def _category_options(user_id: int, table: str, credit_account_id: Optional[int]
             cid = int(c['id'])
         except (TypeError, ValueError, KeyError):
             continue
-        if _flag(c.get('hidden')) or _flag(c.get('is_interest')):
+        if _flag(c.get('hidden')) or _flag(c.get('is_interest')) or _flag(c.get('is_bundle')):
+            continue
+        if (c.get('name') or '') == 'Starting Balance':
             continue
         if allowed is not None and cid not in allowed:
             continue
-        out.append({'id': cid, 'name': c.get('name') or ''})
+        out.append({'id': cid, 'name': c.get('name') or '',
+                    'is_recurring': _flag(c.get('is_recurring')),
+                    'is_credit_account': _flag(c.get('is_credit_account')),
+                    'is_savings': _flag(c.get('is_savings')),
+                    'is_auto_adjustment': _flag(c.get('is_auto_adjustment'))})
     return out
 
 
@@ -905,7 +913,7 @@ def _choices(user_id: int, table: str, txn_date: str, credit_account_id: Optiona
     nearby: Dict[int, Dict[str, Any]] = {}
     for c in candidates(user_id, table, txn_date, credit_account_id):
         nearby.setdefault(c['category_id'], {'amount': c['forecast_amount'], 'date': c['forecast_date']})
-    out = [{'category_id': o['id'], 'name': o['name'], 'forecast': nearby.get(o['id'])}
+    out = [dict(o, category_id=o['id'], forecast=nearby.get(o['id']))
            for o in _category_options(user_id, table, credit_account_id)]
     out.sort(key=lambda o: o['name'].lower())
     return out
@@ -961,6 +969,7 @@ def pending_bank_items(user_id: int) -> List[Dict[str, Any]]:
                 'merchant_name': t.get('merchant_name') or '',
                 'account_name': acc.get('alias') or acc.get('account_name') or '',
                 'card_name': cards.get(card_id, '') if card_id else '',
+                'credit_account_id': card_id,
                 'date': when,
                 'amount': float(e.get('amount') or 0),
                 'category_id': cid,
