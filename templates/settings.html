@@ -58,14 +58,72 @@
                             <!-- Inside a .profile-form on purpose: every label, input
                                  and toggle rule on this page is scoped to that class, so
                                  a panel outside one inherits none of it and the rows
-                                 render as bare checkboxes. -->
-                            <form id="email-types-form" class="profile-form">
+                                 render as bare checkboxes. A div rather than a form: the
+                                 reminder's own form is moved in under its row by script,
+                                 and a form inside a form is not allowed. -->
+                            <div id="email-types-form" class="profile-form">
                                 <div id="email-types-panel" class="email-types-panel" style="display:none;">
                                     <p class="email-types-heading">Send an email for<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which kinds of notification are emailed. All of them are on unless you turn one off, and the switch above still controls whether any email is sent at all.</span></span></p>
                                     <div id="email-types-list"></div>
                                 </div>
-                            </form>
+                            </div>
 
+                            <!-- The Entries to confirm reminder's cadence. Rendered here
+                                 and moved by script to sit under that row in the list
+                                 above; the row's switch is its switch, and the hidden
+                                 checkbox is what the script drives. The cadence controls
+                                 are the same widget as the recurring income page, so the
+                                 ids and classes match it. -->
+                            <form id="balance-notification-form" class="profile-form" hidden>
+                                <input type="checkbox" id="balance_reminder_enabled" class="hidden-checkbox">
+
+                                <!-- One grey panel around everything the switch controls, so
+                                     it reads as belonging to it rather than as three loose rows. -->
+                                <div id="balance-notification-panel" class="balance-notification-panel" style="display:none;">
+                                <div id="balance-cadence-options" class="balance-cadence-options">
+                                    <div class="input-group">
+                                    <label for="balance-cadence-interval">Repeat Every<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">How often to ask. The number and the unit together set the interval, so 2 and Week(s) means once a fortnight.</span></span></label>
+                                    <div class="cadence-row">
+                                        <input type="number" id="balance-cadence-interval" name="cadence_interval" class="login-input" min="1" max="365" value="2" required>
+                                        <select id="balance-cadence-unit" name="cadence_unit" class="login-input" required>
+                                            <option value="days">Day(s)</option>
+                                            <option value="weeks" selected>Week(s)</option>
+                                            <option value="months">Month(s)</option>
+                                        </select>
+                                    </div>
+                                    </div>
+
+                                    <div id="balance-weekly-options" style="display:none;">
+                                        <label>Repeat on:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which weekdays to ask on. The interval still applies, so every 2 weeks on Monday means alternate Mondays.</span></span></label>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="monday"> Mo</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="tuesday"> Tu</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="wednesday"> We</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="thursday"> Th</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="friday" checked> Fr</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="saturday"> Sa</div>
+                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="sunday"> Su</div>
+                                    </div>
+
+                                    <div id="balance-monthly-options" style="display:none;">
+                                        <label for="balance-monthly-days">Days of the month:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which days of the month to ask on. Last Day follows the length of each month.</span></span></label>
+                                        <div id="balance-monthly-day-container"></div>
+                                        <button type="button" id="balance-add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
+                                    </div>
+                                </div>
+
+                                <!-- A standard settings row rather than part of the indented
+                                     group above, so the check button sits where every other
+                                     submit button on the page does. -->
+                                <div class="input-group" id="balance-time-row">
+                                    <label for="balance-notify-time">At:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The time of day to send it, in your own timezone.</span></span></label>
+                                    <input type="time" id="balance-notify-time" name="notify_time" class="login-input" value="20:00" required>
+                                    <button type="submit" class="submit-button">
+                                        <i id="balance-notification-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                                <p class="balance-next-check" id="balance-next-check"></p>
+                                </div>
+                            </form>
                         </div>
                     </div>
                     <div class="data-section">
@@ -118,95 +176,43 @@
                                     </button>
                                 </div>
                             </form>
-                            <!-- Balance Reminder: asks, on a cadence, whether the
-                                 user wants to reconcile against their real balance. The
-                                 cadence controls are the same widget as the recurring
-                                 income page, so the ids and classes match it. -->
-                            <form id="balance-notification-form" class="profile-form">
-                                <div class="input-group">
-                                    <label for="balance_reminder_enabled">Balance Reminder:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Asks, on the cadence below, whether you want to reconcile against your real bank balance. Nothing is changed unless you say yes.</span></span></label>
-                                    <input type="text" disabled class="hidden-spacer">
-                                    <input type="checkbox" id="balance_reminder_enabled" class="hidden-checkbox">
-                                    <button type="button" class="toggle-switch" data-checkbox="balance_reminder_enabled">
-                                        <i class="fa-solid fa-toggle-large-on toggle-icon toggle-off"></i>
-                                    </button>
-                                </div>
-
-                                <!-- One grey panel around everything the toggle controls, so
-                                     it reads as belonging to it rather than as three loose rows. -->
-                                <div id="balance-notification-panel" class="balance-notification-panel" style="display:none;">
-                                <div id="balance-cadence-options" class="balance-cadence-options">
-                                    <div class="input-group">
-                                    <label for="balance-cadence-interval">Repeat Every<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">How often to ask. The number and the unit together set the interval, so 2 and Week(s) means once a fortnight.</span></span></label>
-                                    <div class="cadence-row">
-                                        <input type="number" id="balance-cadence-interval" name="cadence_interval" class="login-input" min="1" max="365" value="2" required>
-                                        <select id="balance-cadence-unit" name="cadence_unit" class="login-input" required>
-                                            <option value="days">Day(s)</option>
-                                            <option value="weeks" selected>Week(s)</option>
-                                            <option value="months">Month(s)</option>
-                                        </select>
-                                    </div>
-                                    </div>
-
-                                    <div id="balance-weekly-options" style="display:none;">
-                                        <label>Repeat on:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which weekdays to ask on. The interval still applies, so every 2 weeks on Monday means alternate Mondays.</span></span></label>
-                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="monday"> Mo</div>
-                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="tuesday"> Tu</div>
-                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="wednesday"> We</div>
-                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="thursday"> Th</div>
-                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="friday" checked> Fr</div>
-                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="saturday"> Sa</div>
-                                        <div class="weekday"><input type="checkbox" name="balance_weekdays" value="sunday"> Su</div>
-                                    </div>
-
-                                    <div id="balance-monthly-options" style="display:none;">
-                                        <label for="balance-monthly-days">Days of the month:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which days of the month to ask on. Last Day follows the length of each month.</span></span></label>
-                                        <div id="balance-monthly-day-container"></div>
-                                        <button type="button" id="balance-add-monthly-day-btn" class="add-day-btn">+ Add Another Day</button>
-                                    </div>
-                                </div>
-
-                                <!-- A standard settings row rather than part of the indented
-                                     group above, so the check button sits where every other
-                                     submit button on the page does. -->
-                                <div class="input-group" id="balance-time-row">
-                                    <label for="balance-notify-time">At:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The time of day to send it, in your own timezone.</span></span></label>
-                                    <input type="time" id="balance-notify-time" name="notify_time" class="login-input" value="20:00" required>
-                                    <button type="submit" class="submit-button">
-                                        <i id="balance-notification-submit-icon" class="fas fa-check"></i>
-                                    </button>
-                                </div>
-                                <p class="balance-next-check" id="balance-next-check"></p>
-                                </div>
-                            </form>
-                            <!-- Where a correction lands. Its own form because it is
-                                 its own decision: Balance now works whether or not the
-                                 reminder above is switched on, so this saves without
-                                 touching the cadence. -->
+                            <!-- Where a balance correction lands - whether the balance
+                                 was typed, or read from the bank. Its own form: this
+                                 saves without touching the reminder's cadence. -->
+                            <div class="settings-group" id="balance-corrections-group">
+                                <p class="settings-group-heading">Balance corrections<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Where the difference goes when a balance - one you type, or one read from your bank - does not match what Blankee expected.</span></span></p>
                             <form id="balance-categories-form" class="profile-form">
-                                <div class="input-group">
+                                <!-- One row, two choices: they are a pair, and one check saves both. -->
+                                <div class="input-group corrections-row">
                                     <label for="balance-expense-category">Shortfall goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds less than Blankee expected, the difference is written here as an expense.</span></span></label>
                                     <select id="balance-expense-category" class="login-input"></select>
-                                </div>
-                                <div class="input-group">
-                                    <label for="balance-income-category">Extra goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds more than Blankee expected, the difference is written here as income.</span></span></label>
+                                    <label for="balance-income-category" class="corrections-inline-label">Extra goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds more than Blankee expected, the difference is written here as income.</span></span></label>
                                     <select id="balance-income-category" class="login-input"></select>
                                     <button type="submit" class="submit-button">
                                         <i id="balance-categories-submit-icon" class="fas fa-check"></i>
                                     </button>
                                 </div>
                             </form>
-                            <form id="balance-now-form" class="profile-form">
-                                <div class="input-group">
-                                    <label>Balance now:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Reconcile straight away rather than waiting for the next scheduled check.</span></span></label>
-                                    <input type="text" disabled class="hidden-spacer">
-                                    <button type="button" id="balance-now-btn" class="submit-button">
-                                        <i class="fa-solid fa-scale-balanced"></i>
-                                    </button>
-                                </div>
-                            </form>
+                            </div>
                         </div>
                     </div>
+                    {# The bank connection. Shown when there is a provider to
+                       connect through, or something already connected on an
+                       install that has since turned the provider off. #}
+                    {% if bank_connect_available or has_bank_connections or has_bank_accounts %}
+                    <div class="profile-section profile-bank-connections settings-bank-section" id="bank">
+                        {% include '_bank_connections.html' %}
+                    </div>
+                    {% endif %}
+                    {# Claude: connect a key, test it, switch it on or off, remove
+                       it. Only when Claude is the enrichment provider. #}
+                    {% if ai %}
+                    <div class="profile-section ai-profile-section settings-ai-section" id="ai">
+                        <div class="section-liner">
+                            {% include '_ai_settings_panel.html' %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -217,6 +223,13 @@
 
     <!-- Include the external JavaScript file for additional functionality -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    {% if bank_connect_available or has_bank_connections or has_bank_accounts %}
+    {% include '_bank_connections_js.html' %}
+    {% endif %}
+    {% if ai %}
+    <script src="{{ url_for('static', filename='js/ai_settings.js') }}"></script>
+    <script>document.addEventListener('DOMContentLoaded', function () { if (window.AISettings) AISettings.init({}); });</script>
+    {% endif %}
 
     <script type="text/javascript">
         document.getElementById('loading-screen').style.display = 'none';
@@ -711,6 +724,8 @@
                         showForEnabled();
                         showForUnit();
                         showNextCheck(d);
+                        // The Entries to confirm row above shows this flag.
+                        if (window.syncEntriesToConfirmRow) { window.syncEntriesToConfirmRow(); }
                     })
                     .catch(function () { /* leave the defaults showing */ });
             }
@@ -814,13 +829,6 @@
                 });
             })();
 
-            var now = document.getElementById('balance-now-btn');
-            if (now) {
-                now.addEventListener('click', function () {
-                    // force, so it works whether or not the cadence is due.
-                    showAutoBalancePrompt({ force: true });
-                });
-            }
 
             load();
         })();
@@ -876,6 +884,12 @@
                     box.checked = !box.checked;
                     icon.classList.toggle('toggle-off', !box.checked);
                     save();
+                    // The Entries to confirm row is also the reminder's switch:
+                    // off here is off altogether, not merely unemailed.
+                    if (t.key === REMINDER_KIND) {
+                        var enabled = document.getElementById('balance_reminder_enabled');
+                        if (enabled) { enabled.checked = box.checked; $(enabled).trigger('change'); }
+                    }
                 });
 
                 wrap.appendChild(label);
@@ -920,6 +934,34 @@
                     .catch(function () { showToast('Could not reach the server.', 'error'); });
             }
 
+            // Entries to confirm is the one kind with settings of its own: the
+            // cadence the reminder runs on. Its form is rendered further down
+            // the page and moved in under the row here, and the row's switch
+            // mirrors the reminder's own enabled flag rather than only the
+            // email opt-out. The reminder's script loads that flag by itself;
+            // syncEntriesToConfirmRow is what keeps the row in step with it,
+            // whichever of the two fetches lands last.
+            var REMINDER_KIND = 'entries_to_confirm';
+            function placeReminder() {
+                var box = document.getElementById('email-type-' + REMINDER_KIND);
+                var form = document.getElementById('balance-notification-form');
+                if (!box || !form) { return; }
+                var rowEl = box.closest('.input-group');
+                if (rowEl && form.previousElementSibling !== rowEl) {
+                    rowEl.parentNode.insertBefore(form, rowEl.nextSibling);
+                }
+                form.hidden = false;
+                window.syncEntriesToConfirmRow();
+            }
+            window.syncEntriesToConfirmRow = function () {
+                var box = document.getElementById('email-type-' + REMINDER_KIND);
+                var enabled = document.getElementById('balance_reminder_enabled');
+                if (!box || !enabled) { return; }
+                box.checked = enabled.checked;
+                var icon = box.parentNode.querySelector('.toggle-switch[data-checkbox="' + box.id + '"] .toggle-icon');
+                if (icon) { icon.classList.toggle('toggle-off', !box.checked); }
+            };
+
             fetch('/api/email-notification-types', { headers: { 'Accept': 'application/json' } })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {
@@ -927,6 +969,7 @@
                     list.innerHTML = '';
                     d.types.forEach(function (t) { list.appendChild(row(t)); });
                     showPanel();
+                    placeReminder();
                 })
                 .catch(function () { /* leave the panel hidden */ });
 

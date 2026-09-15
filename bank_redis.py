@@ -116,7 +116,7 @@ def update_provider_profile(profile_data: Dict[str, Any], user_id: Optional[int]
     Update or create provider profile (Redis-only, MySQL flush happens periodically).
     
     Args:
-        profile_data: Dict with profile fields (profile_id, session_token, session_expires_at, etc.)
+        profile_data: Dict with profile fields (provider, provider_ref, metadata)
         user_id: User ID (defaults to current_user.id)
         
     Returns:
@@ -273,6 +273,31 @@ def upsert_linked_connection(connection_data: Dict[str, Any], user_id: Optional[
         return None
 
 
+def linked_account_kind(account: Dict[str, Any]) -> Optional[str]:
+    """
+    'checking' / 'savings' / 'credit' / None for a linked account row.
+
+    account_subtype is the user's own classification (SimpleFIN gives no
+    type, so the user chooses at link time); it wins. The name-substring rule
+    is what the previous provider's data relied on and is kept as the
+    fallback so nothing already stored changes behaviour. None means the
+    account is of a kind Blankee has nowhere to put (loans, investments).
+    """
+    account_type = (account.get('account_type') or '').upper()
+    subtype = (account.get('account_subtype') or '').lower()
+    if account_type == 'CREDIT' or subtype == 'credit_card':
+        return 'credit'
+    if subtype in ('checking', 'savings'):
+        return subtype
+    if account_type == 'DEPOSITORY':
+        name = (account.get('account_name') or '').lower()
+        if 'checking' in name:
+            return 'checking'
+        if 'savings' in name:
+            return 'savings'
+    return None
+
+
 def get_linked_accounts(user_id: Optional[int] = None, connection_db_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get user's linked accounts from Redis or MySQL.
@@ -297,22 +322,9 @@ def get_linked_accounts(user_id: Optional[int] = None, connection_db_id: Optiona
             if connection_db_id is not None:
                 cached_data = [a for a in cached_data if a.get('connection_id') == connection_db_id]
             
-            # Filter to only include relevant account types (DEPOSITORY for checking/savings, CREDIT)
-            filtered_accounts = []
-            for account in cached_data:
-                account_type = account.get('account_type', '').upper()
-                account_name_lower = account.get('account_name', '').lower()
-                
-                # Include DEPOSITORY accounts with 'checking' or 'savings' in name
-                if account_type == 'DEPOSITORY':
-                    if 'checking' in account_name_lower or 'savings' in account_name_lower:
-                        filtered_accounts.append(account)
-                # Include all CREDIT accounts
-                elif account_type == 'CREDIT':
-                    filtered_accounts.append(account)
-            
-            return filtered_accounts
-    
+            # Only the kinds Blankee can model - see linked_account_kind.
+            return [account for account in cached_data if linked_account_kind(account)]
+
     # Fallback to MySQL
     try:
         with get_db_pool().get_cursor(dictionary=True) as cursor:
@@ -322,8 +334,9 @@ def get_linked_accounts(user_id: Optional[int] = None, connection_db_id: Optiona
                     WHERE user_id = %s AND connection_id = %s AND is_active = 1
                     AND (
                         (account_type = 'CREDIT')
+                        OR LOWER(COALESCE(account_subtype, '')) IN ('checking', 'savings', 'credit_card')
                         OR (account_type = 'DEPOSITORY' AND (
-                            LOWER(account_name) LIKE '%%checking%%' 
+                            LOWER(account_name) LIKE '%%checking%%'
                             OR LOWER(account_name) LIKE '%%savings%%'
                         ))
                     )
@@ -334,8 +347,9 @@ def get_linked_accounts(user_id: Optional[int] = None, connection_db_id: Optiona
                     WHERE user_id = %s AND is_active = 1
                     AND (
                         (account_type = 'CREDIT')
+                        OR LOWER(COALESCE(account_subtype, '')) IN ('checking', 'savings', 'credit_card')
                         OR (account_type = 'DEPOSITORY' AND (
-                            LOWER(account_name) LIKE '%%checking%%' 
+                            LOWER(account_name) LIKE '%%checking%%'
                             OR LOWER(account_name) LIKE '%%savings%%'
                         ))
                     )
@@ -816,10 +830,7 @@ def upsert_linked_transaction(transaction_data: Dict[str, Any], user_id: Optiona
                 break
         
         if not found:
-            # Generate temporary ID for new transaction
-            import time
-            temp_id = int(time.time() * 1000) % 1000000
-            db_id = temp_id
+            db_id = _next_temp_id(cached_data)
             new_txn = {
                 'id': db_id,
                 'user_id': user_id,
@@ -835,6 +846,88 @@ def upsert_linked_transaction(transaction_data: Dict[str, Any], user_id: Optiona
     except Exception as e:
         log_exception(logger, 'BANK', f"Error upserting linked transaction: {e}")
         return None
+
+
+def _next_temp_id(rows: List[Dict[str, Any]]) -> int:
+    """
+    A temporary id for a row that has no MySQL id yet: negative, and below
+    every id already in the list, so it can collide with neither a real id
+    nor another temporary one. The flush never sends this id for
+    linked_transactions - the row is keyed on (user_id, transaction_id) - so
+    it only has to be unique within the cached list.
+
+    The old scheme, milliseconds modulo a million, could hand two rows the
+    same id inside one busy second and had no answer for a bulk insert.
+    """
+    lowest = 0
+    for r in rows:
+        try:
+            lowest = min(lowest, int(r.get('id') or 0))
+        except (TypeError, ValueError):
+            continue
+    return lowest - 1
+
+
+def bulk_upsert_linked_transactions(rows: List[Dict[str, Any]], user_id: int) -> int:
+    """
+    Insert or update many linked transactions in one Redis write.
+
+    A pull brings tens of rows at once; writing the cached list once per row
+    is tens of round trips and tens of dirty marks for one change. Each row
+    is matched on transaction_id: an existing row is updated in place (keys
+    it already has and the row does not mention are kept - imported_to_entry_id
+    survives a re-pull), a new one is appended with a temporary id.
+    """
+    cached = _get_from_redis('linked_transactions', user_id)
+    if cached is None:
+        cached = list(get_linked_transactions(user_id) or [])
+    by_id = {str(t.get('transaction_id')): t for t in cached}
+    written = 0
+    for row in rows:
+        tid = row.get('transaction_id')
+        if not tid:
+            continue
+        current = by_id.get(str(tid))
+        if current is not None:
+            current.update(row)
+        else:
+            new = {'id': _next_temp_id(cached), 'user_id': user_id, **row}
+            cached.append(new)
+            by_id[str(tid)] = new
+        written += 1
+    if written:
+        _set_to_redis('linked_transactions', user_id, cached)
+    return written
+
+
+def delete_linked_transactions(transaction_ids: List[str], user_id: int) -> int:
+    """
+    Remove linked transactions by provider id, from Redis and from MySQL.
+
+    MySQL directly as well, because the flush has no orphan pass for this
+    table (its deletion marker only covers a whole connection going away): a
+    row dropped from the cached list alone would sit in MySQL until the next
+    hydration brought it back. The importer uses this for a pending
+    transaction the bank withdrew or replaced with a posted one.
+    """
+    ids = {str(t) for t in (transaction_ids or []) if t}
+    if not ids:
+        return 0
+    cached = _get_from_redis('linked_transactions', user_id)
+    if cached is None:
+        cached = list(get_linked_transactions(user_id) or [])
+    kept = [t for t in cached if str(t.get('transaction_id')) not in ids]
+    removed = len(cached) - len(kept)
+    if removed:
+        _set_to_redis('linked_transactions', user_id, kept)
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            placeholders = ', '.join(['%s'] * len(ids))
+            cursor.execute(f"DELETE FROM linked_transactions WHERE user_id = %s AND transaction_id IN ({placeholders})",
+                           (user_id, *ids))
+    except Exception as e:
+        log_error(logger, 'BANK', f"Error deleting linked transactions from MySQL for user {user_id}: {e}")
+    return removed
 
 
 def update_transaction_recurrence(recurrence_map: dict, user_id: int) -> int:
@@ -1152,16 +1245,15 @@ def get_user_linked_account_flags(user_id: int) -> Dict[str, Any]:
         linked_accounts = get_linked_accounts(user_id)
         
         for account in linked_accounts:
-            account_type = account.get('account_type', '').upper()
-            account_name = account.get('account_name', '').lower()
-            
-            if account_type == 'DEPOSITORY':
-                if 'checking' in account_name:
-                    result['has_checking'] = True
-                if 'savings' in account_name:
-                    result['has_savings'] = True
-            # CREDIT accounts are handled separately via credit_accounts table
-        
+            if int(account.get('is_active', 1) or 0) != 1:
+                continue
+            kind = linked_account_kind(account)
+            if kind == 'checking':
+                result['has_checking'] = True
+            elif kind == 'savings':
+                result['has_savings'] = True
+            # credit: handled through the credit_accounts table below
+
         # Get bank-linked credit accounts from credit_accounts table
         result['linked_credit_ids'] = get_linked_credit_account_ids(user_id)
         

@@ -4,8 +4,12 @@ Provider registry.
 Selection is by env var so swapping vendors is a config change plus one new
 module, not an edit to app.py:
 
-    BANK_PROVIDER=null          (default)
-    ENRICHMENT_PROVIDER=null    (default)
+    BANK_PROVIDER=null | simplefin        (installer default: simplefin)
+    ENRICHMENT_PROVIDER=null | claude     (installer default: claude)
+
+Both real providers are inert per user until that user connects (a SimpleFIN
+Setup Token, an Anthropic API key), so selecting them on an instance where
+nobody has done so changes nothing.
 
 To add a vendor: write providers/<vendor>.py implementing BankProvider or
 EnrichmentProvider from providers/base.py, then register it in the maps below.
@@ -17,15 +21,19 @@ from log_config import get_logger, log_info, log_warning
 from providers.base import BankProvider, EnrichmentProvider
 from providers.null_bank import NullBankProvider
 from providers.null_enrichment import NullEnrichmentProvider
+from providers.simplefin import SimpleFINBankProvider
+from providers.claude_enrichment import ClaudeEnrichmentProvider
 
 logger = get_logger(__name__)
 
 _BANK_PROVIDERS = {
     'null': NullBankProvider,
+    'simplefin': SimpleFINBankProvider,
 }
 
 _ENRICHMENT_PROVIDERS = {
     'null': NullEnrichmentProvider,
+    'claude': ClaudeEnrichmentProvider,
 }
 
 _bank_instance = None

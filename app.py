@@ -375,6 +375,14 @@ if _redis_client:
     except Exception as _e:
         log_exception(logger, 'BUCKET_PROMPT',
                       f"Could not start the bucket prompt scheduler: {_e}")
+    # The morning bank pull, on its own thread: a pull can take minutes and
+    # must not hold up the evening walk above.
+    try:
+        import bank_pull_scheduler
+        bank_pull_scheduler.start()
+    except Exception as _e:
+        log_exception(logger, 'BANK_PULL',
+                      f"Could not start the bank pull scheduler: {_e}")
 
     # Initialize Redis middleware and routes
     init_redis_middleware(app)
@@ -850,18 +858,6 @@ def inject_unread_notifications():
         except Exception:
             pass
 
-    # Count pending transactions (pending=1 or auto_confirmed=1) for nav badge
-    pending_transactions_count = 0
-    if current_user.is_authenticated and has_bank_accounts:
-        try:
-            for table_name in ('income_entries', 'expense_entries', 'c_expense_entries'):
-                entries = _get_entries_from_redis(table_name, current_user.id) or []
-                for entry in entries:
-                    if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
-                        pending_transactions_count += 1
-        except Exception:
-            pass
-
     # Get data version for cross-tab sync
     data_version = '0'
     if current_user.is_authenticated:
@@ -873,7 +869,9 @@ def inject_unread_notifications():
         nav_last_name=last_name,
         has_bank_accounts=has_bank_accounts,
         has_bank_connections=has_bank_connections,
-        pending_transactions_count=pending_transactions_count,
+        # A provider is configured, so the menu offers "Connect Accounts"
+        # before any connection exists. False with the null provider.
+        bank_connect_available=(getattr(get_bank_provider(), 'name', 'null') != 'null'),
         data_version=data_version
     )
 
@@ -1732,28 +1730,14 @@ def setup_profile():
     if user_data is None:
         user_data = {}
 
-    # Clean up any connections left over from an abandoned setup attempt.
-    # The wizard no longer has a bank step, so this only ever runs against
-    # rows a previous provider left behind.
-    try:
-        from bank_redis import get_linked_connections, delete_linked_connection
-        user_id = current_user.id
-        connections = get_linked_connections(user_id)
-        if connections:
-            log_info(logger, 'SETUP_PROFILE', f"Cleaning up {len(connections)} abandoned connection(s) for user {user_id}")
-            for conn in connections:
-                conn_id = conn.get('connection_id')
-                if conn_id:
-                    delete_linked_connection(conn_id, user_id)
-            log_info(logger, 'SETUP_PROFILE', f"Cleanup complete for user {user_id}")
-    except Exception as e:
-        log_error(logger, 'SETUP_PROFILE', f"Cleanup error (non-fatal): {e}")
-
-    # Ask the provider how to open its connect flow. None means there is no
-    # provider, and the template must hide the connect step rather than render
-    # a button that cannot work.
-    _widget = get_bank_provider().connect_widget_config(user_id)
-    connector_id = (_widget or {}).get('connector_id', '')
+    # The wizard's bank step (SimpleFIN) links accounts that must survive a
+    # resume, so nothing is cleaned up here any more; a connection the user
+    # made is theirs until they disconnect it.
+    user_id = current_user.id
+    # What the bank step renders: with the null provider this is None and the
+    # template hides the step; with SimpleFIN it is the guided token flow.
+    _widget = get_bank_provider().connect_widget_config(user_id) or {}
+    _ai = _ai_display(user_id)
     
     # Extract saved form data for prefilling (permanent fields from users blob)
     saved_first_name = user_data.get('first_name', '') or ''
@@ -1800,7 +1784,9 @@ def setup_profile():
     
     # Render the setup profile page with connector ID and resume state
     return render_template('setup_profile.html',
-                           connector_id=connector_id,
+                           bank=_widget,
+                           ai=_ai,
+                           sf_mode='setup',
                            setup_step=setup_step,
                            mfa_enabled=mfa_enabled,
                            saved_first_name=saved_first_name,
@@ -1809,6 +1795,7 @@ def setup_profile():
                            saved_starting_savings=saved_starting_savings,
                            saved_balance_threshold=saved_balance_threshold,
                            saved_starting_balance=saved_starting_balance,
+                           linked_balances=_linked_starting_balances(user_id),
                            saved_selected_account_ids=saved_selected_account_ids,
                            saved_categories=saved_categories)
 
@@ -5641,6 +5628,138 @@ def _update_payment_entry_in_redis(user_id, account_id, entry_date, amount):
     except Exception as e:
         pass
 
+def _shift_payment_in_redis(user_id, account_id, old_date, new_date, old_amount, new_amount):
+    """
+    An expense in a card's mirror category ("Quicksilver payment") is one
+    payment towards that card, and the card side holds it as a c_payment
+    cell on the same day. This keeps the two together when the expense
+    moves or changes size: old_amount leaves the cell on old_date (the row
+    goes when nothing is left in it) and new_amount joins the cell on
+    new_date (None: it leaves altogether). Adding and deleting already keep
+    them in step; moving and answering the evening prompt did not, so a
+    payment dragged to tomorrow stayed on today for the card, and the card's
+    balance kept showing it a day early.
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    try:
+        table_name = 'c_payment_entries'
+        entries = _get_entries_from_redis(table_name, user_id)
+        if entries is None:
+            entries = []
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT cpe.* FROM c_payment_entries cpe
+                    JOIN credit_accounts ca ON cpe.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                entries = list(cursor.fetchall())
+                cursor.close()
+            entries = _filter_pending_deletions(table_name, user_id, entries)
+
+        def _day(value):
+            return value.isoformat() if isinstance(value, date) else (str(value)[:10] if value else None)
+        old_day, new_day = _day(old_date), _day(new_date)
+
+        def _cell(day):
+            return next((e for e in entries
+                         if int(e.get('account_id', 0)) == int(account_id) and _day(e.get('date')) == day), None)
+
+        deleted_ids = []
+        if old_day and old_amount:
+            cell = _cell(old_day)
+            if cell is not None:
+                left = float(cell.get('amount') or 0) - float(old_amount)
+                if left > 0.005:
+                    cell['amount'] = round(left, 2)
+                else:
+                    entries.remove(cell)
+                    if cell.get('id') and int(cell['id']) > 0:
+                        deleted_ids.append(str(cell['id']))
+        if new_day and new_amount:
+            cell = _cell(new_day)
+            if cell is not None:
+                cell['amount'] = round(float(cell.get('amount') or 0) + float(new_amount), 2)
+            else:
+                max_id = max([abs(int(e.get('id', 0))) for e in entries], default=0)
+                entries.append({'id': -(max_id + 1), 'account_id': int(account_id), 'date': new_day,
+                                'amount': round(float(new_amount), 2), 'recurring_id': None, 'processed': 0})
+
+        _set_entries_to_redis(table_name, user_id, entries)
+        if deleted_ids:
+            pending_key = f"pending_deletes:{table_name}:{user_id}"
+            _redis_client.sadd(pending_key, *deleted_ids)
+            _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+    except Exception as e:
+        log_warning(logger, 'PAYMENT', f"user {user_id}: could not move the card payment for account {account_id}: {e}")
+
+def _shift_payment_in_redis(user_id, account_id, old_date, new_date, old_amount, new_amount):
+    """
+    An expense in a card's mirror category ("Quicksilver payment") is one
+    payment towards that card, and the card side holds it as a c_payment
+    cell on the same day. This keeps the two together when the expense
+    moves or changes size: old_amount leaves the cell on old_date (the row
+    goes when nothing is left in it) and new_amount joins the cell on
+    new_date (None: it leaves altogether). Adding and deleting already keep
+    them in step; moving and answering the evening prompt did not, so a
+    payment dragged to tomorrow stayed on today for the card, and the card's
+    balance kept showing it a day early.
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    try:
+        table_name = 'c_payment_entries'
+        entries = _get_entries_from_redis(table_name, user_id)
+        if entries is None:
+            entries = []
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT cpe.* FROM c_payment_entries cpe
+                    JOIN credit_accounts ca ON cpe.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                entries = list(cursor.fetchall())
+                cursor.close()
+            entries = _filter_pending_deletions(table_name, user_id, entries)
+
+        def _day(value):
+            return value.isoformat() if isinstance(value, date) else (str(value)[:10] if value else None)
+        old_day, new_day = _day(old_date), _day(new_date)
+
+        def _cell(day):
+            return next((e for e in entries
+                         if int(e.get('account_id', 0)) == int(account_id) and _day(e.get('date')) == day), None)
+
+        deleted_ids = []
+        if old_day and old_amount:
+            cell = _cell(old_day)
+            if cell is not None:
+                left = float(cell.get('amount') or 0) - float(old_amount)
+                if left > 0.005:
+                    cell['amount'] = round(left, 2)
+                else:
+                    entries.remove(cell)
+                    if cell.get('id') and int(cell['id']) > 0:
+                        deleted_ids.append(str(cell['id']))
+        if new_day and new_amount:
+            cell = _cell(new_day)
+            if cell is not None:
+                cell['amount'] = round(float(cell.get('amount') or 0) + float(new_amount), 2)
+            else:
+                max_id = max([abs(int(e.get('id', 0))) for e in entries], default=0)
+                entries.append({'id': -(max_id + 1), 'account_id': int(account_id), 'date': new_day,
+                                'amount': round(float(new_amount), 2), 'recurring_id': None, 'processed': 0})
+
+        _set_entries_to_redis(table_name, user_id, entries)
+        if deleted_ids:
+            pending_key = f"pending_deletes:{table_name}:{user_id}"
+            _redis_client.sadd(pending_key, *deleted_ids)
+            _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+    except Exception as e:
+        log_warning(logger, 'PAYMENT', f"user {user_id}: could not move the card payment for account {account_id}: {e}")
+
 def _delete_payment_entry_in_redis(user_id, account_id, start_date, end_date):
     """
     Delete payment entries from Redis cache by account and date range.
@@ -9256,213 +9375,223 @@ def update_monthly_ca_totals(user_id, start_date):
 @app.route('/save_totals_remainders_d', methods=['POST'])
 @login_required
 def save_totals_remainders_d():
+    """The route. Parses the request; the work is in the function below."""
+    data = request.get_json(silent=True) or {}
+    start_date = None
+    if data.get('start_date'):
+        try:
+            start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
+        except Exception:
+            return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
     try:
-        data = request.get_json(silent=True) or {}
-        start_date_str = data.get('start_date')
-        user_id = current_user.id
+        return jsonify(_recalc_totals_remainders(current_user.id, start_date))
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-        # Fetch goofy_week_mode for the current user (Redis first, then MySQL)
-        goofy_week_mode = None
-        if app.config.get('REDIS_OK'):
-            try:
-                cached = _redis_client.get(f"users:v1:{user_id}")
-                if cached:
-                    user_data = json.loads(cached)
-                    if 'goofy_week_mode' in user_data:
-                        goofy_week_mode = bool(int(user_data['goofy_week_mode']))
-            except Exception:
-                pass
-        if goofy_week_mode is None:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-                row = cursor.fetchone()
-                goofy_week_mode = bool(row[0]) if row else False
-                cursor.close()
 
-        # Determine the starting date for incremental update
-        if start_date_str:
-            try:
-                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-            except Exception:
-                return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
-        else:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT MIN(date) FROM totals_remainders_d WHERE user_id = %s", (user_id,))
-                min_date_row = cursor.fetchone()
-                start_date = min_date_row[0] if min_date_row and min_date_row[0] else _user_today_for(current_user.id)
-                cursor.close()
+def _recalc_totals_remainders(user_id, start_date=None):
+    """
+    Recompute the daily, weekly and monthly totals from start_date (default:
+    the earliest day on record) and return what the pages redraw from.
 
-        date_to_remainder = {}
+    No request in sight: the bank importer calls this from a pull, where
+    there is no request and no current_user, and the route above is only
+    the HTTP face of the same work.
+    """
 
-        # Run daily, weekly, and monthly updates (these now update Redis automatically)
-        update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
-        update_daily_savings_for_savings_category(user_id, start_date)
-        update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
-        update_monthly_totals(user_id, start_date, date_to_remainder)
-
-        # Try to fetch from Redis first, fallback to MySQL
-        cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id, start_date)
-        cached_weekly = _get_totals_remainders_from_redis('totals_remainders', user_id, start_date)
-        cached_monthly = _get_totals_remainders_from_redis('totals_remainders_m', user_id, start_date)
-        cached_savings = _get_savings_entries_from_redis(user_id, start_date)
-        
-        if cached_daily and cached_weekly and cached_monthly and cached_savings:
-            # Redis hit - use cached data
-            
-            # Enrich daily totals with last_week_remainder
-            results = []
-            weekly_by_date = {row['date']: row for row in cached_weekly}
-            
-            for daily_row in cached_daily:
-                current_date = datetime.strptime(daily_row['date'], '%Y-%m-%d').date() if isinstance(daily_row['date'], str) else daily_row['date']
-                
-                # Find the most recent previous week-end date
-                # In goofy mode, weekly data is stored on Thursday (weekday 3)
-                # In normal mode, weekly data is stored on Friday (weekday 4)
-                if goofy_week_mode:
-                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
-                else:
-                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
-                
-                prev_week_end_str = prev_week_end.isoformat()
-                last_week_remainder = float(weekly_by_date.get(prev_week_end_str, {}).get('remainder', 0.0))
-                
-                result = {
-                    'date': current_date if isinstance(current_date, date) else datetime.strptime(current_date, '%Y-%m-%d').date(),
-                    'total_income': float(daily_row.get('total_income', 0)),
-                    'total_expenses': float(daily_row.get('total_expenses', 0)),
-                    'remainder': float(daily_row.get('remainder', 0)),
-                    'last_day_remainder': float(daily_row.get('last_day_remainder', 0)),
-                    'last_week_remainder': last_week_remainder
-                }
-                results.append(result)
-            
-            # Format monthly results
-            monthly_results = [
-                {
-                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
-                    'total_income': float(row.get('total_income', 0)),
-                    'total_expenses': float(row.get('total_expenses', 0)),
-                    'remainder': float(row.get('remainder', 0)),
-                    'last_month_remainder': float(row.get('last_month_remainder', 0))
-                }
-                for row in cached_monthly
-            ]
-            
-            # Format savings entries
-            savings_entries = [
-                {
-                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
-                    'amount': float(row.get('amount', 0))
-                }
-                for row in cached_savings
-            ]
-            
-            # Check for negative remainders and create notifications
-            check_negative_remainders(user_id)
-            
-            return jsonify({
-                "status": "success",
-                "updated_totals_remainders": results,
-                "updated_monthly_totals_remainders": monthly_results,
-                "updated_savings_entries": savings_entries
-            })
-        
-        # Redis miss - fallback to MySQL
-        
-        # Prepare the response: for each date, fetch last_week_remainder from totals_remainders table
+    # Fetch goofy_week_mode for the current user (Redis first, then MySQL)
+    goofy_week_mode = None
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(f"users:v1:{user_id}")
+            if cached:
+                user_data = json.loads(cached)
+                if 'goofy_week_mode' in user_data:
+                    goofy_week_mode = bool(int(user_data['goofy_week_mode']))
+        except Exception:
+            pass
+    if goofy_week_mode is None:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT date FROM totals_remainders_d
-                WHERE user_id = %s AND date >= %s
-                ORDER BY date ASC
-            """, (user_id, start_date))
-            all_dates = [row[0] for row in cursor.fetchall()]
-
-            results = []
-            for current_date in all_dates:
-                # Find the most recent previous week-end date
-                # In goofy mode, weekly data is stored on Thursday (weekday 3)
-                # In normal mode, weekly data is stored on Friday (weekday 4)
-                if goofy_week_mode:
-                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
-                else:
-                    prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
-
-                cursor.execute("""
-                    SELECT remainder FROM totals_remainders
-                    WHERE user_id = %s AND date = %s
-                """, (user_id, prev_week_end))
-                last_week_remainder_row = cursor.fetchone()
-                last_week_remainder = float(last_week_remainder_row[0]) if last_week_remainder_row else 0.0
-
-                cursor.execute("""
-                    SELECT total_income, total_expenses, remainder, last_day_remainder
-                    FROM totals_remainders_d
-                    WHERE user_id = %s AND date = %s
-                """, (user_id, current_date))
-                row = cursor.fetchone()
-                if not row:
-                    continue
-
-                result = {
-                    'date': current_date,
-                    'total_income': float(row[0]),
-                    'total_expenses': float(row[1]),
-                    'remainder': float(row[2]),
-                    'last_day_remainder': float(row[3]),
-                    'last_week_remainder': float(last_week_remainder)
-                }
-                results.append(result)
-
-            # Fetch updated monthly totals
-            cursor.execute("""
-                SELECT date, total_income, total_expenses, remainder, last_month_remainder
-                FROM totals_remainders_m
-                WHERE user_id = %s AND date >= %s
-                ORDER BY date ASC
-            """, (user_id, start_date))
-            monthly_results = [
-                {
-                    'date': row[0],
-                    'total_income': float(row[1]),
-                    'total_expenses': float(row[2]),
-                    'remainder': float(row[3]),
-                    'last_month_remainder': float(row[4])
-                }
-                for row in cursor.fetchall()
-            ]
-
-            # --- Fetch updated savings entries ---
-            cursor.execute("""
-                SELECT date, amount FROM savings_entries
-                WHERE user_id = %s AND date >= %s
-                ORDER BY date ASC
-            """, (user_id, start_date))
-            savings_entries = [
-                {'date': row[0], 'amount': float(row[1])}
-                for row in cursor.fetchall()
-            ]
+            cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+            row = cursor.fetchone()
+            goofy_week_mode = bool(row[0]) if row else False
             cursor.close()
 
+    # Determine the starting date for incremental update
+    if start_date is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT MIN(date) FROM totals_remainders_d WHERE user_id = %s", (user_id,))
+            min_date_row = cursor.fetchone()
+            start_date = min_date_row[0] if min_date_row and min_date_row[0] else _user_today_for(user_id)
+            cursor.close()
+
+    date_to_remainder = {}
+
+    # Run daily, weekly, and monthly updates (these now update Redis automatically)
+    update_daily_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
+    update_daily_savings_for_savings_category(user_id, start_date)
+    update_weekly_totals(user_id, start_date, goofy_week_mode, date_to_remainder)
+    update_monthly_totals(user_id, start_date, date_to_remainder)
+
+    # Try to fetch from Redis first, fallback to MySQL
+    cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id, start_date)
+    cached_weekly = _get_totals_remainders_from_redis('totals_remainders', user_id, start_date)
+    cached_monthly = _get_totals_remainders_from_redis('totals_remainders_m', user_id, start_date)
+    cached_savings = _get_savings_entries_from_redis(user_id, start_date)
+    
+    if cached_daily and cached_weekly and cached_monthly and cached_savings:
+        # Redis hit - use cached data
+        
+        # Enrich daily totals with last_week_remainder
+        results = []
+        weekly_by_date = {row['date']: row for row in cached_weekly}
+        
+        for daily_row in cached_daily:
+            current_date = datetime.strptime(daily_row['date'], '%Y-%m-%d').date() if isinstance(daily_row['date'], str) else daily_row['date']
+            
+            # Find the most recent previous week-end date
+            # In goofy mode, weekly data is stored on Thursday (weekday 3)
+            # In normal mode, weekly data is stored on Friday (weekday 4)
+            if goofy_week_mode:
+                prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
+            else:
+                prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
+            
+            prev_week_end_str = prev_week_end.isoformat()
+            last_week_remainder = float(weekly_by_date.get(prev_week_end_str, {}).get('remainder', 0.0))
+            
+            result = {
+                'date': current_date if isinstance(current_date, date) else datetime.strptime(current_date, '%Y-%m-%d').date(),
+                'total_income': float(daily_row.get('total_income', 0)),
+                'total_expenses': float(daily_row.get('total_expenses', 0)),
+                'remainder': float(daily_row.get('remainder', 0)),
+                'last_day_remainder': float(daily_row.get('last_day_remainder', 0)),
+                'last_week_remainder': last_week_remainder
+            }
+            results.append(result)
+        
+        # Format monthly results
+        monthly_results = [
+            {
+                'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                'total_income': float(row.get('total_income', 0)),
+                'total_expenses': float(row.get('total_expenses', 0)),
+                'remainder': float(row.get('remainder', 0)),
+                'last_month_remainder': float(row.get('last_month_remainder', 0))
+            }
+            for row in cached_monthly
+        ]
+        
+        # Format savings entries
+        savings_entries = [
+            {
+                'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                'amount': float(row.get('amount', 0))
+            }
+            for row in cached_savings
+        ]
+        
         # Check for negative remainders and create notifications
         check_negative_remainders(user_id)
         
-        return jsonify({
+        return ({
             "status": "success",
             "updated_totals_remainders": results,
             "updated_monthly_totals_remainders": monthly_results,
             "updated_savings_entries": savings_entries
         })
-
-    except mysql.connector.Error as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
     
+    # Redis miss - fallback to MySQL
+    
+    # Prepare the response: for each date, fetch last_week_remainder from totals_remainders table
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT date FROM totals_remainders_d
+            WHERE user_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (user_id, start_date))
+        all_dates = [row[0] for row in cursor.fetchall()]
+
+        results = []
+        for current_date in all_dates:
+            # Find the most recent previous week-end date
+            # In goofy mode, weekly data is stored on Thursday (weekday 3)
+            # In normal mode, weekly data is stored on Friday (weekday 4)
+            if goofy_week_mode:
+                prev_week_end = current_date - timedelta(days=(current_date.weekday() - 3) % 7 or 7)
+            else:
+                prev_week_end = current_date - timedelta(days=(current_date.weekday() - 4) % 7 or 7)
+
+            cursor.execute("""
+                SELECT remainder FROM totals_remainders
+                WHERE user_id = %s AND date = %s
+            """, (user_id, prev_week_end))
+            last_week_remainder_row = cursor.fetchone()
+            last_week_remainder = float(last_week_remainder_row[0]) if last_week_remainder_row else 0.0
+
+            cursor.execute("""
+                SELECT total_income, total_expenses, remainder, last_day_remainder
+                FROM totals_remainders_d
+                WHERE user_id = %s AND date = %s
+            """, (user_id, current_date))
+            row = cursor.fetchone()
+            if not row:
+                continue
+
+            result = {
+                'date': current_date,
+                'total_income': float(row[0]),
+                'total_expenses': float(row[1]),
+                'remainder': float(row[2]),
+                'last_day_remainder': float(row[3]),
+                'last_week_remainder': float(last_week_remainder)
+            }
+            results.append(result)
+
+        # Fetch updated monthly totals
+        cursor.execute("""
+            SELECT date, total_income, total_expenses, remainder, last_month_remainder
+            FROM totals_remainders_m
+            WHERE user_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (user_id, start_date))
+        monthly_results = [
+            {
+                'date': row[0],
+                'total_income': float(row[1]),
+                'total_expenses': float(row[2]),
+                'remainder': float(row[3]),
+                'last_month_remainder': float(row[4])
+            }
+            for row in cursor.fetchall()
+        ]
+
+        # --- Fetch updated savings entries ---
+        cursor.execute("""
+            SELECT date, amount FROM savings_entries
+            WHERE user_id = %s AND date >= %s
+            ORDER BY date ASC
+        """, (user_id, start_date))
+        savings_entries = [
+            {'date': row[0], 'amount': float(row[1])}
+            for row in cursor.fetchall()
+        ]
+        cursor.close()
+
+    # Check for negative remainders and create notifications
+    check_negative_remainders(user_id)
+    
+    return ({
+        "status": "success",
+        "updated_totals_remainders": results,
+        "updated_monthly_totals_remainders": monthly_results,
+        "updated_savings_entries": savings_entries
+    })
+
+
 @app.route('/api/credit-interest-entries')
 @login_required
 def api_credit_interest_entries():
@@ -9582,177 +9711,184 @@ def api_credit_interest_entries():
 @app.route('/save_ca_daily_balance', methods=['POST'])
 @login_required
 def save_ca_daily_balance():
+    """The route. Parses the request; the work is in the function below."""
+    data = request.get_json(silent=True) or {}
+    start_date = None
+    if data.get('start_date'):
+        try:
+            start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
+        except Exception:
+            return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
     try:
-        data = request.get_json(silent=True) or {}
-        start_date_str = data.get('start_date')
-        user_id = current_user.id
+        return jsonify(_recalc_ca_daily_balance(current_user.id, start_date))
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-        # Fetch goofy_week_mode for the current user (Redis first, then MySQL)
-        goofy_week_mode = None
-        if app.config.get('REDIS_OK'):
-            try:
-                cached = _redis_client.get(f"users:v1:{user_id}")
-                if cached:
-                    user_data = json.loads(cached)
-                    if 'goofy_week_mode' in user_data:
-                        goofy_week_mode = bool(int(user_data['goofy_week_mode']))
-            except Exception:
-                pass
-        if goofy_week_mode is None:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-                row = cursor.fetchone()
-                goofy_week_mode = bool(row[0]) if row else False
-                cursor.close()
 
-        # Determine the starting date for incremental update
-        if start_date_str:
-            try:
-                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-            except Exception:
-                return jsonify({"status": "error", "message": "Invalid start_date format"}), 400
-        else:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT MIN(date) FROM c_a_balances_d
-                    WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
-                """, (user_id,))
-                min_date_row = cursor.fetchone()
-                start_date = min_date_row[0] if min_date_row and min_date_row[0] else _user_today_for(current_user.id)
-                cursor.close()
+def _recalc_ca_daily_balance(user_id, start_date=None):
+    """
+    Recompute the credit-card balances (daily, weekly, monthly) from
+    start_date and return what the pages redraw from. See
+    _recalc_totals_remainders for why this is not the route itself.
+    """
 
-        # Update CA balances (daily, weekly, monthly) - these now update Redis automatically
-        update_daily_ca_totals(user_id, start_date)
-        update_weekly_ca_totals(user_id, start_date, goofy_week_mode)
-        update_monthly_ca_totals(user_id, start_date)
+    # Fetch goofy_week_mode for the current user (Redis first, then MySQL)
+    goofy_week_mode = None
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(f"users:v1:{user_id}")
+            if cached:
+                user_data = json.loads(cached)
+                if 'goofy_week_mode' in user_data:
+                    goofy_week_mode = bool(int(user_data['goofy_week_mode']))
+        except Exception:
+            pass
+    if goofy_week_mode is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
+            row = cursor.fetchone()
+            goofy_week_mode = bool(row[0]) if row else False
+            cursor.close()
 
-        # Try to fetch from Redis first, fallback to MySQL
-        cached_daily = _get_ca_balances_from_redis('c_a_balances_d', user_id, start_date=start_date)
-        cached_weekly = _get_ca_balances_from_redis('c_a_balances', user_id, start_date=start_date)
-        cached_monthly = _get_ca_balances_from_redis('c_a_balances_m', user_id, start_date=start_date)
-        
-        if cached_daily and cached_weekly and cached_monthly:
-            # Redis hit - use cached data
-            
-            # Format daily balances
-            ca_balances_d = [
-                {
-                    'id': row.get('id'),
-                    'account_id': row.get('account_id'),
-                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
-                    'total_expenses': float(row.get('total_expenses', 0)),
-                    'balance': float(row.get('balance', 0))
-                }
-                for row in cached_daily
-            ]
-            
-            # Format weekly balances
-            ca_balances = [
-                {
-                    'id': row.get('id'),
-                    'account_id': row.get('account_id'),
-                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
-                    'total_expenses': float(row.get('total_expenses', 0)),
-                    'balance': float(row.get('balance', 0))
-                }
-                for row in cached_weekly
-            ]
-            
-            # Format monthly balances
-            ca_balances_m = [
-                {
-                    'id': row.get('id'),
-                    'account_id': row.get('account_id'),
-                    'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
-                    'total_expenses': float(row.get('total_expenses', 0)),
-                    'balance': float(row.get('balance', 0))
-                }
-                for row in cached_monthly
-            ]
-            
-            return jsonify({
-                "status": "success",
-                "updated_ca_balances_d": ca_balances_d,
-                "updated_ca_balances": ca_balances,
-                "updated_ca_balances_m": ca_balances_m
-            })
-        
-        # Redis miss - fallback to MySQL
-        
-        # Fetch updated daily CA balances
+    # Determine the starting date for incremental update
+    if start_date is None:
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT * FROM c_a_balances_d
-                WHERE account_id IN (
-                    SELECT id FROM credit_accounts WHERE user_id = %s
-                ) AND date >= %s
-                ORDER BY account_id ASC, date ASC
-            """, (user_id, start_date))
-            ca_balances_d = [
-                {
-                    'id': row[0],
-                    'account_id': row[1],
-                    'date': row[2],
-                    'total_expenses': float(row[3]) if row[3] is not None else 0.0,
-                    'balance': float(row[4]) if row[4] is not None else 0.0
-                }
-                for row in cursor.fetchall()
-            ]
-
-            # Fetch updated weekly CA balances
-            cursor.execute("""
-                SELECT * FROM c_a_balances
-                WHERE account_id IN (
-                    SELECT id FROM credit_accounts WHERE user_id = %s
-                ) AND date >= %s
-                ORDER BY account_id ASC, date ASC
-            """, (user_id, start_date))
-            ca_balances = [
-                {
-                    'id': row[0],
-                    'account_id': row[1],
-                    'date': row[2],
-                    'total_expenses': float(row[3]) if row[3] is not None else 0.0,
-                    'balance': float(row[4]) if row[4] is not None else 0.0
-                }
-                for row in cursor.fetchall()
-            ]
-
-            # Fetch updated monthly CA balances
-            cursor.execute("""
-                SELECT * FROM c_a_balances_m
-                WHERE account_id IN (
-                    SELECT id FROM credit_accounts WHERE user_id = %s
-                ) AND date >= %s
-                ORDER BY account_id ASC, date ASC
-            """, (user_id, start_date))
-            ca_balances_m = [
-                {
-                    'id': row[0],
-                    'account_id': row[1],
-                    'date': row[2],
-                    'total_expenses': float(row[3]) if row[3] is not None else 0.0,
-                    'balance': float(row[4]) if row[4] is not None else 0.0
-                }
-                for row in cursor.fetchall()
-            ]
+                SELECT MIN(date) FROM c_a_balances_d
+                WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)
+            """, (user_id,))
+            min_date_row = cursor.fetchone()
+            start_date = min_date_row[0] if min_date_row and min_date_row[0] else _user_today_for(user_id)
             cursor.close()
 
-        return jsonify({
+    # Update CA balances (daily, weekly, monthly) - these now update Redis automatically
+    update_daily_ca_totals(user_id, start_date)
+    update_weekly_ca_totals(user_id, start_date, goofy_week_mode)
+    update_monthly_ca_totals(user_id, start_date)
+
+    # Try to fetch from Redis first, fallback to MySQL
+    cached_daily = _get_ca_balances_from_redis('c_a_balances_d', user_id, start_date=start_date)
+    cached_weekly = _get_ca_balances_from_redis('c_a_balances', user_id, start_date=start_date)
+    cached_monthly = _get_ca_balances_from_redis('c_a_balances_m', user_id, start_date=start_date)
+    
+    if cached_daily and cached_weekly and cached_monthly:
+        # Redis hit - use cached data
+        
+        # Format daily balances
+        ca_balances_d = [
+            {
+                'id': row.get('id'),
+                'account_id': row.get('account_id'),
+                'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                'total_expenses': float(row.get('total_expenses', 0)),
+                'balance': float(row.get('balance', 0))
+            }
+            for row in cached_daily
+        ]
+        
+        # Format weekly balances
+        ca_balances = [
+            {
+                'id': row.get('id'),
+                'account_id': row.get('account_id'),
+                'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                'total_expenses': float(row.get('total_expenses', 0)),
+                'balance': float(row.get('balance', 0))
+            }
+            for row in cached_weekly
+        ]
+        
+        # Format monthly balances
+        ca_balances_m = [
+            {
+                'id': row.get('id'),
+                'account_id': row.get('account_id'),
+                'date': datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date'],
+                'total_expenses': float(row.get('total_expenses', 0)),
+                'balance': float(row.get('balance', 0))
+            }
+            for row in cached_monthly
+        ]
+        
+        return ({
             "status": "success",
             "updated_ca_balances_d": ca_balances_d,
             "updated_ca_balances": ca_balances,
             "updated_ca_balances_m": ca_balances_m
         })
-
-    except mysql.connector.Error as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
     
+    # Redis miss - fallback to MySQL
+    
+    # Fetch updated daily CA balances
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM c_a_balances_d
+            WHERE account_id IN (
+                SELECT id FROM credit_accounts WHERE user_id = %s
+            ) AND date >= %s
+            ORDER BY account_id ASC, date ASC
+        """, (user_id, start_date))
+        ca_balances_d = [
+            {
+                'id': row[0],
+                'account_id': row[1],
+                'date': row[2],
+                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
+                'balance': float(row[4]) if row[4] is not None else 0.0
+            }
+            for row in cursor.fetchall()
+        ]
+
+        # Fetch updated weekly CA balances
+        cursor.execute("""
+            SELECT * FROM c_a_balances
+            WHERE account_id IN (
+                SELECT id FROM credit_accounts WHERE user_id = %s
+            ) AND date >= %s
+            ORDER BY account_id ASC, date ASC
+        """, (user_id, start_date))
+        ca_balances = [
+            {
+                'id': row[0],
+                'account_id': row[1],
+                'date': row[2],
+                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
+                'balance': float(row[4]) if row[4] is not None else 0.0
+            }
+            for row in cursor.fetchall()
+        ]
+
+        # Fetch updated monthly CA balances
+        cursor.execute("""
+            SELECT * FROM c_a_balances_m
+            WHERE account_id IN (
+                SELECT id FROM credit_accounts WHERE user_id = %s
+            ) AND date >= %s
+            ORDER BY account_id ASC, date ASC
+        """, (user_id, start_date))
+        ca_balances_m = [
+            {
+                'id': row[0],
+                'account_id': row[1],
+                'date': row[2],
+                'total_expenses': float(row[3]) if row[3] is not None else 0.0,
+                'balance': float(row[4]) if row[4] is not None else 0.0
+            }
+            for row in cursor.fetchall()
+        ]
+        cursor.close()
+
+    return ({
+        "status": "success",
+        "updated_ca_balances_d": ca_balances_d,
+        "updated_ca_balances": ca_balances,
+        "updated_ca_balances_m": ca_balances_m
+    })
+
+
 def _move_returns_to_forecast(user_id, entry, new_date):
     """
     Whether moving this entry to new_date turns it back into a forecast.
@@ -9934,8 +10070,8 @@ def move_entry_d():
                 
                 # Verify authorization and get category details
                 cursor.execute("""
-                    SELECT id, is_credit_account, name 
-                    FROM expense_categories 
+                    SELECT id, is_credit_account, credit_account_id, name
+                    FROM expense_categories
                     WHERE id = %s AND user_id = %s
                 """, (category_id, current_user.id))
                 row = cursor.fetchone()
@@ -9943,6 +10079,7 @@ def move_entry_d():
                     cursor.close()
                     return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
                 is_credit = row['is_credit_account']
+                payment_account_id = row.get('credit_account_id')
                 
                 amount = Decimal(entry_to_move.get('amount', 0))
                 old_date = entry_to_move.get('date')
@@ -9996,8 +10133,13 @@ def move_entry_d():
                                         f"Moved entry became a forecast but its bucket "
                                         f"record was not created: {e}")
 
-                # If is_credit_account, trigger CA balance update
+                # A payment towards a card: the card's own copy of it moves
+                # too, or the balance recalculated below would still carry it
+                # on the old day.
                 if is_credit == 1:
+                    if payment_account_id:
+                        _shift_payment_in_redis(current_user.id, payment_account_id,
+                                                old_date, new_date, float(amount), float(amount))
                     ca_triggered = True
 
             elif entry_type == 'ca':
@@ -15922,7 +16064,7 @@ def widget_pending_transactions():
         'pending_transactions': pending_txns,
         'currency_symbol': currency_symbol,
         'currency_type': currency_type,
-        'categorization_url': 'https://app.blankee.io/pending-transactions'
+        'categorization_url': 'https://app.blankee.io/dashboard'
     })
 
 
@@ -16357,6 +16499,7 @@ def profile():
     # Pass all retrieved data to the template
     return render_template(
         'profile.html',
+        ai=_ai_display(current_user.id),
         # Prefer the Redis blob: current_user comes from MySQL, which lags a
         # Redis-first email change until the flush worker catches up.
         current_username=(user_data.get('username') if user_data else None) or current_user.username or '',
@@ -16371,11 +16514,14 @@ def profile():
         mfa_enabled=mfa_enabled,
     )
 
-@app.route('/bank_accounts', methods=['GET'])
-@login_required
-def bank_accounts():
+def _bank_page_context(user_id):
+    """
+    Everything the bank connection section of the Settings page needs:
+    the provider's state, the connections with their accounts and the
+    Blankee card each backs, and the cards available to link.
+    """
     # Get user settings for landing_page and currency
-    redis_key = f"users:v1:{current_user.id}"
+    redis_key = f"users:v1:{user_id}"
     user_data = None
 
     if app.config.get('REDIS_OK'):
@@ -16391,7 +16537,7 @@ def bank_accounts():
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute(
                 "SELECT landing_page, currency_type FROM users WHERE id = %s",
-                (current_user.id,)
+                (user_id,)
             )
             user_data = cursor.fetchone()
             cursor.close()
@@ -16402,13 +16548,24 @@ def bank_accounts():
     # Get linked connections
     connections = []
     currency_symbol = '$'
-    _widget = get_bank_provider().connect_widget_config(current_user.id)
-    connector_id = (_widget or {}).get('connector_id', '')
-
+    _widget = get_bank_provider().connect_widget_config(user_id) or {}
+    existing_cards = []
     try:
-        connections = get_linked_connections(current_user.id)
+        from credit_link import cards_for_linking
+        existing_cards = cards_for_linking(user_id)
+    except Exception as e:
+        log_error(app.logger, 'PROFILE', f"Error loading cards for bank_accounts: {e}")
+    try:
+        connections = get_linked_connections(user_id)
+        from bank_redis import _get_all_linked_accounts_raw
+        all_accounts = _get_all_linked_accounts_raw(user_id) or []
         for conn_row in connections:
-            accounts = get_linked_accounts(current_user.id, conn_row.get('id'))
+            accounts = [a for a in all_accounts if a.get('connection_id') == conn_row.get('id')]
+            for a in accounts:
+                for k in ('current_balance', 'available_balance'):
+                    if a.get(k) is not None:
+                        a[k] = float(a[k])
+                a['card'] = next((c for c in existing_cards if c.get('linked_account_id') == a.get('account_id')), None)
             conn_row['accounts'] = accounts
 
         currency_symbols = {'USD': '$', 'EUR': '\u20ac'}
@@ -16416,14 +16573,17 @@ def bank_accounts():
     except Exception as e:
         log_error(app.logger, 'PROFILE', f"Error loading linked bank data for bank_accounts: {e}")
 
-    last_txn_date = get_last_linked_transaction_date(current_user.id)
+    last_txn_date = get_last_linked_transaction_date(user_id)
 
-    return render_template(
-        'bank_accounts.html',
-        landing_page=landing_page,
+    # No landing_page and no ai: the Settings route passes its own, and a
+    # second copy of either would collide with it.
+    return dict(
         connections=connections,
         currency_symbol=currency_symbol,
-        connector_id=connector_id,
+        bank=_widget,
+        sf_mode='replace' if _widget.get('needs_new_token') else 'page',
+        existing_cards=existing_cards,
+        reconnect_id=request.args.get('reconnect', ''),
         bank_last_txn_date=last_txn_date,
         bank_last_txn_date_formatted=(
             datetime.strptime(last_txn_date, '%Y-%m-%d').strftime('%m/%d/%Y')
@@ -16433,6 +16593,20 @@ def bank_accounts():
 
 # Exempt for the same reason as /api/widget-token: native iOS code registers
 # and unregisters the device, with the session cookie and nothing else.
+
+
+@app.route('/bank_accounts', methods=['GET'])
+@login_required
+def bank_accounts():
+    """
+    The bank connection moved to the Settings page. Kept as a redirect:
+    notifications and the reconnect modal link here with ?reconnect=<id>,
+    and the section on the settings page reads that.
+    """
+    reconnect = request.args.get('reconnect', '')
+    return redirect(url_for('settings', reconnect=reconnect or None, _anchor='bank'))
+
+
 @app.route('/api/notifications/register', methods=['POST'])
 @csrf.exempt
 @login_required
@@ -17249,250 +17423,6 @@ def resend_smtp_code():
                     'smtp': get_smtp_config_for_display()}), 200
 
 
-@app.route('/pending-transactions', methods=['GET'])
-@login_required
-def pending_transactions():
-    """Show pending transactions that need category confirmation"""
-    # Try to get user settings from Redis first
-    redis_key = f"users:v1:{current_user.id}"
-    user_data = None
-    
-    if app.config.get('REDIS_OK'):
-        try:
-            cached = _redis_client.get(redis_key)
-            if cached:
-                user_data = json.loads(cached)
-        except Exception as e:
-            pass
-    
-    # If not in Redis, load from MySQL
-    if not user_data:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT profile_picture, landing_page, currency_type
-                FROM users 
-                WHERE id = %s
-            """, (current_user.id,))
-            result = cursor.fetchone()
-            cursor.close()
-            
-            if result:
-                user_data = result
-
-    profile_picture = user_data.get('profile_picture') if user_data else None
-    landing_page = user_data.get('landing_page', 'dashboard_3m') if user_data else 'dashboard_3m'
-    currency_type = user_data.get('currency_type', 'USD') if user_data else 'USD'
-    
-    # Currency symbol mapping
-    currency_symbols = {
-        'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CAD': 'C$', 
-        'AUD': 'A$', 'CHF': 'Fr', 'CNY': '¥', 'INR': '₹', 'MXN': 'Mex$'
-    }
-    currency_symbol = currency_symbols.get(currency_type, '$')
-    
-    # Get bank transactions that have been imported but are pending review
-    # A transaction is pending review when:
-    # 1. It has been imported (imported_to_entry_id is not NULL)
-    # 2. The corresponding budget entry has pending=1
-    pending_txns = []
-    
-    from bank_redis import get_linked_transactions, get_linked_accounts
-    linked_transactions = get_linked_transactions(current_user.id)
-    linked_accounts = get_linked_accounts(current_user.id)
-    
-    # Build account lookup
-    account_lookup = {acc.get('account_id'): acc for acc in (linked_accounts or [])}
-    
-    # Get all entries that are pending (pending=1) OR auto_confirmed (auto_confirmed=1) and imported from the bank provider
-    # Check income_entries, expense_entries, c_expense_entries
-    pending_entry_ids = {'income': set(), 'expense': set(), 'c_expense': set()}
-    
-    # Build entry lookup to get category_id and auto_confirmed status for each entry
-    entry_category_lookup = {'income': {}, 'expense': {}, 'c_expense': {}}
-    entry_auto_confirmed_lookup = {'income': {}, 'expense': {}, 'c_expense': {}}
-    
-    # Get income entries with category_id
-    redis_key = f"income_entries:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        income_entries = json.loads(cached)
-        for entry in income_entries:
-            # Include if pending=1 OR auto_confirmed=1
-            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
-                pending_entry_ids['income'].add(entry.get('id'))
-                entry_category_lookup['income'][entry.get('id')] = entry.get('category_id')
-                entry_auto_confirmed_lookup['income'][entry.get('id')] = entry.get('auto_confirmed', 0)
-    
-    # Get expense entries with category_id
-    redis_key = f"expense_entries:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        expense_entries = json.loads(cached)
-        for entry in expense_entries:
-            # Include if pending=1 OR auto_confirmed=1
-            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
-                pending_entry_ids['expense'].add(entry.get('id'))
-                entry_category_lookup['expense'][entry.get('id')] = entry.get('category_id')
-                entry_auto_confirmed_lookup['expense'][entry.get('id')] = entry.get('auto_confirmed', 0)
-    
-    # Get c_expense entries with category_id
-    redis_key = f"c_expense_entries:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        c_expense_entries = json.loads(cached)
-        for entry in c_expense_entries:
-            # Include if pending=1 OR auto_confirmed=1
-            if entry.get('pending') == 1 or entry.get('auto_confirmed') == 1:
-                pending_entry_ids['c_expense'].add(entry.get('id'))
-                entry_category_lookup['c_expense'][entry.get('id')] = entry.get('category_id')
-                entry_auto_confirmed_lookup['c_expense'][entry.get('id')] = entry.get('auto_confirmed', 0)
-    
-    # Load categories BEFORE processing transactions (needed for credit_account_id lookup)
-    expense_categories = []
-    income_categories = []
-    c_expense_categories = []
-    
-    redis_key = f"expense_categories:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        expense_categories = [c for c in json.loads(cached) if not c.get('hidden')]
-    
-    redis_key = f"income_categories:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        income_categories = [c for c in json.loads(cached) if not c.get('hidden')]
-    
-    redis_key = f"c_expense_categories:v1:{current_user.id}"
-    cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-    if cached:
-        # Filter out hidden categories and "Starting Balance" category
-        c_expense_categories = [c for c in json.loads(cached) 
-                               if not c.get('hidden') and c.get('name', '').lower() != 'starting balance']
-    
-    # Find bank transactions that link to these pending entries
-    for txn in (linked_transactions or []):
-        imported_entry_id = txn.get('imported_to_entry_id')
-        entry_type = txn.get('imported_entry_type')
-        
-        if not imported_entry_id or not entry_type:
-            continue
-        
-        # Check if this entry is pending
-        if entry_type in pending_entry_ids and imported_entry_id in pending_entry_ids[entry_type]:
-            # Get account info
-            account_info = account_lookup.get(txn.get('account_id'), {})
-            
-            # Parse enrichment labels
-            enrichment_labels_raw = txn.get('enrichment_labels')
-            enrichment_labels = None
-            if enrichment_labels_raw:
-                try:
-                    labels = json.loads(enrichment_labels_raw) if isinstance(enrichment_labels_raw, str) else enrichment_labels_raw
-                    if isinstance(labels, list):
-                        enrichment_labels = ', '.join(labels)
-                except:
-                    enrichment_labels = str(enrichment_labels_raw)
-            
-            # Determine if expense based on entry type
-            is_expense = entry_type in ('expense', 'c_expense')
-            
-            # Get current category_id from entry
-            current_category_id = entry_category_lookup.get(entry_type, {}).get(imported_entry_id)
-            
-            # Get credit_account_id for c_expense entries (need to look up from category)
-            credit_account_id = None
-            current_canonical_category_id = None
-            if entry_type == 'c_expense' and current_category_id:
-                # Look up the credit account id and canonical name from the per-account category
-                _c_name = None
-                for cat in c_expense_categories if c_expense_categories else []:
-                    if cat.get('id') == current_category_id:
-                        credit_account_id = cat.get('account_id')
-                        _c_name = cat.get('name')
-                        break
-                # Translate per-account c_expense id -> canonical expense_categories.id by name match
-                if _c_name:
-                    _c_name_lower = _c_name.lower()
-                    for ec in expense_categories:
-                        if (ec.get('name') or '').lower() == _c_name_lower:
-                            current_canonical_category_id = ec.get('id')
-                            break
-            
-            # Get cached custom category suggestion (from the enrichment provider direct API)
-            custom_category_suggestion = txn.get('custom_category_suggestion')
-            custom_category_id = txn.get('custom_category_id')
-            custom_category_type = txn.get('custom_category_type')
-            custom_category_confidence = txn.get('custom_category_confidence')
-            
-            # Check if this entry was auto-confirmed
-            is_auto_confirmed = entry_auto_confirmed_lookup.get(entry_type, {}).get(imported_entry_id, 0) == 1
-            
-            pending_txns.append({
-                'transaction_id': txn.get('transaction_id'),
-                'merchant_name': txn.get('merchant_name'),
-                'description': txn.get('description'),
-                'amount': float(txn.get('amount', 0)),
-                'date': txn.get('date'),
-                'account_id': txn.get('account_id'),  # linked account_id
-                'account_name': account_info.get('alias') or account_info.get('account_name', 'Unknown'),
-                'enrichment_labels': enrichment_labels,
-                'imported_to_entry_id': imported_entry_id,
-                'imported_entry_type': entry_type,
-                'is_expense': is_expense,
-                'current_category_id': current_category_id,
-                'credit_account_id': credit_account_id,  # Blankee credit account id
-                'current_canonical_category_id': current_canonical_category_id,  # canonical expense_categories.id for c_expense
-                'current_category_name': None,  # Will be set after categories are loaded
-                'is_auto_confirmed': is_auto_confirmed,  # Track if auto-confirmed by system
-                # Cached AI category suggestion
-                'custom_category_suggestion': custom_category_suggestion,
-                'custom_category_id': custom_category_id,
-                'custom_category_type': custom_category_type,
-                'custom_category_confidence': custom_category_confidence
-            })
-    
-    # Build category name lookup
-    category_name_lookup = {}
-    for cat in income_categories:
-        category_name_lookup[('income', cat.get('id'))] = cat.get('name')
-        category_name_lookup[('incoming', cat.get('id'))] = cat.get('name')
-    for cat in expense_categories:
-        category_name_lookup[('expense', cat.get('id'))] = cat.get('name')
-        category_name_lookup[('outgoing', cat.get('id'))] = cat.get('name')
-    for cat in c_expense_categories:
-        category_name_lookup[('c_expense', cat.get('id'))] = cat.get('name')
-    
-    # Set current_category_name for each pending transaction
-    for txn in pending_txns:
-        cat_id = txn.get('current_category_id')
-        entry_type = txn.get('imported_entry_type')
-        if cat_id:
-            txn['current_category_name'] = category_name_lookup.get((entry_type, cat_id), '')
-        # Resolve memory suggestions: replace literal 'Memory' with actual category name
-        if txn.get('custom_category_suggestion') == 'Memory' and txn.get('custom_category_id'):
-            sug_type = txn.get('custom_category_type') or entry_type
-            sug_id = txn['custom_category_id']
-            try:
-                sug_name = category_name_lookup.get((sug_type, sug_id)) or category_name_lookup.get((sug_type, int(sug_id)))
-            except (ValueError, TypeError):
-                sug_name = None
-            if sug_name:
-                txn['custom_category_suggestion'] = sug_name
-    
-    # Sort by date (newest first)
-    pending_txns.sort(key=lambda x: x['date'], reverse=True)
-
-    return render_template(
-        'pending_transactions.html',
-        profile_picture=profile_picture,
-        landing_page=landing_page,
-        currency_symbol=currency_symbol,
-        pending_transactions=pending_txns,
-        expense_categories=expense_categories,
-        income_categories=income_categories,
-        c_expense_categories=c_expense_categories
-    )
 
 
 def _canonical_expense_category_id(user_id, c_expense_category_id):
@@ -17549,458 +17479,58 @@ def _canonical_expense_category_id(user_id, c_expense_category_id):
 @app.route('/bank/confirm-transaction', methods=['POST'])
 @login_required
 def confirm_transaction():
-    """Confirm a pending transaction's category"""
-    data = request.get_json()
+    """
+    The person's answer for one bank row in the confirm modal: the guessed
+    category kept, or the entry moved to another. The work is in
+    bank_import.confirm; this is its HTTP face plus the two things that are
+    the app's: the recurring-mismatch check, and the balances matched to the
+    bank once the last row is answered - the second of the day's two
+    reconciles, so the remainders are right the moment the modal closes.
+    """
+    import bank_import
+    data = request.get_json(silent=True) or {}
     transaction_id = data.get('transaction_id')
     entry_id = data.get('entry_id')
     entry_type = data.get('entry_type')
     category_id = data.get('category_id')
-    
-    log_info(app.logger, 'CONFIRM_TXN', f"=== START === txn_id={transaction_id}, entry_id={entry_id}, entry_type={entry_type}, category_id={category_id}, user_id={current_user.id}")
-    
     if not all([transaction_id, entry_id, entry_type, category_id]):
-        log_warning(app.logger, 'CONFIRM_TXN', f"Missing required fields: txn_id={transaction_id}, entry_id={entry_id}, entry_type={entry_type}, category_id={category_id}")
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
-    
     try:
         entry_id = int(entry_id)
         category_id = int(category_id)
-    except ValueError:
-        log_warning(app.logger, 'CONFIRM_TXN', f"Invalid ID format: entry_id={entry_id}, category_id={category_id}")
+    except (TypeError, ValueError):
         return jsonify({'status': 'error', 'message': 'Invalid ID format'}), 400
-    
-    # Determine the Redis key based on entry type
-    table_map = {
-        'income': 'income_entries',
-        'expense': 'expense_entries',
-        'c_expense': 'c_expense_entries'
-    }
-    
-    recurring_table_map = {
-        'income': 'recurring_income',
-        'expense': 'recurring_expense',
-        'c_expense': 'recurring_c_expense'
-    }
-    
-    bucket_table_map = {
-        'income': 'recurring_income_buckets',
-        'expense': 'recurring_expense_buckets',
-        'c_expense': 'recurring_c_expense_buckets'
-    }
-    
-    if entry_type not in table_map:
-        return jsonify({'status': 'error', 'message': 'Invalid entry type'}), 400
-    
-    table_name = table_map[entry_type]
-    redis_key = f"{table_name}:v1:{current_user.id}"
-    
     try:
-        # Get entries from Redis
-        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-        if not cached:
-            log_warning(app.logger, 'CONFIRM_TXN', f"No cached data for key {redis_key}")
-            return jsonify({'status': 'error', 'message': 'No entries found'}), 404
-        
-        entries = json.loads(cached)
-        
-        # Log all pending entries before we modify anything
-        pending_entries = [e for e in entries if e.get('pending') == 1]
-        log_info(app.logger, 'CONFIRM_TXN', f"Total entries in Redis: {len(entries)}, pending entries: {len(pending_entries)}")
-        for pe in pending_entries:
-            log_info(app.logger, 'CONFIRM_TXN', f"Pending entry: id={pe.get('id')} (type={type(pe.get('id')).__name__}), cat={pe.get('category_id')}, amount={pe.get('amount')}, date={pe.get('date')}, auto_confirmed={pe.get('auto_confirmed')}")
-        
-        log_info(app.logger, 'CONFIRM_TXN', f"Looking for entry_id={entry_id} (type={type(entry_id).__name__})")
-        
-        # For c_expense, the incoming category_id is canonical (expense_categories.id).
-        # Translate it to the per-account c_expense_categories.id for THIS entry's
-        # credit account before writing. We derive the account from the entry's
-        # current category_id.
-        if entry_type == 'c_expense':
-            _entry_account_id = None
-            try:
-                _cec_cached = _redis_client.get(f"c_expense_categories:v1:{current_user.id}") if app.config.get('REDIS_OK') else None
-                if _cec_cached:
-                    _cec = json.loads(_cec_cached)
-                    for _entry_row in entries:
-                        if _entry_row.get('id') == entry_id:
-                            _old_cat_id = _entry_row.get('category_id')
-                            for _c in _cec:
-                                if int(_c.get('id', 0)) == int(_old_cat_id or 0):
-                                    _entry_account_id = _c.get('account_id')
-                                    break
-                            break
-            except Exception as _e:
-                log_warning(app.logger, 'CONFIRM_TXN', f"Could not derive entry account_id: {_e}")
-            if _entry_account_id:
-                from redis_crud import resolve_suggestion_for_entry
-                _resolved = resolve_suggestion_for_entry(current_user.id, 'c_expense', _entry_account_id, category_id)
-                if _resolved:
-                    log_info(app.logger, 'CONFIRM_TXN', f"Translated canonical category {category_id} -> c_expense {_resolved} for account {_entry_account_id}")
-                    category_id = _resolved
-                else:
-                    log_warning(app.logger, 'CONFIRM_TXN', f"Could not resolve canonical {category_id} for account {_entry_account_id}; writing as-is (may FK-fail)")
-        
-        # Find and update the entry
-        found = False
-        entry_date = None
-        entry_amount = None
-        old_category_id = None
-        was_auto_confirmed = False
-        
-        match_count = 0
-        for entry in entries:
-            if entry.get('id') == entry_id:
-                match_count += 1
-                log_info(app.logger, 'CONFIRM_TXN', f"MATCH #{match_count}: entry id={entry.get('id')}, cat={entry.get('category_id')}, amount={entry.get('amount')}, pending={entry.get('pending')}")
-                old_category_id = entry.get('category_id')
-                was_auto_confirmed = entry.get('auto_confirmed', 0) == 1
-                entry['category_id'] = category_id
-                entry['pending'] = 0  # Mark as confirmed
-                entry['auto_confirmed'] = 0  # Clear auto-confirmed flag
-                entry['processed'] = 1  # Mark as processed (user reviewed and categorized)
-                entry_date = entry.get('date')
-                entry_amount = float(entry.get('amount', 0))
-                found = True
-                break
-        
-        log_info(app.logger, 'CONFIRM_TXN', f"Match result: found={found}, match_count={match_count}, old_cat={old_category_id}, new_cat={category_id}")
-        
-        if not found:
-            log_warning(app.logger, 'CONFIRM_TXN', f"Entry {entry_id} NOT FOUND in {len(entries)} entries")
-            return jsonify({'status': 'error', 'message': 'Entry not found'}), 404
-        
-        # Log pending entries AFTER the update
-        pending_after = [e for e in entries if e.get('pending') == 1]
-        log_info(app.logger, 'CONFIRM_TXN', f"After update: pending entries remaining: {len(pending_after)}")
-        for pe in pending_after:
-            log_info(app.logger, 'CONFIRM_TXN', f"Still pending: id={pe.get('id')}, cat={pe.get('category_id')}, amount={pe.get('amount')}")
-        
-        # Save back to Redis
-        _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
-        log_info(app.logger, 'CONFIRM_TXN', f"Saved {len(entries)} entries back to Redis key {redis_key}")
-        
-        # Mark as dirty
-        dirty_key = f"dirty_tables:{current_user.id}"
-        _redis_client.sadd(dirty_key, table_name)
-        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-        
-        # Handle bucket reduction for recurring categories
-        try:
-            recurring_table = recurring_table_map.get(entry_type)
-            bucket_table = bucket_table_map.get(entry_type)
-            
-            if recurring_table and entry_date and entry_amount:
-                # If category changed and was auto-confirmed, we need to undo the old bucket reduction
-                if was_auto_confirmed and old_category_id and old_category_id != category_id:
-                    old_recurring_info = _get_recurring_info_from_redis(recurring_table, current_user.id, old_category_id)
-                    if old_recurring_info:
-                        log_info(app.logger, 'CONFIRM_TXN', f"Restoring bucket for old category {old_category_id}")
-                        # Restore bucket (add back the amount)
-                        restore_bucket_for_category_change(
-                            bucket_table, old_category_id, entry_date,
-                            entry_amount, current_user.id, entry_type
-                        )
-                
-                # Reduce bucket for the new category (only if not already reduced by auto-confirm to same category)
-                if not was_auto_confirmed or old_category_id != category_id:
-                    new_recurring_info = _get_recurring_info_from_redis(recurring_table, current_user.id, category_id)
-                    # A bundle category has no recurring record, so gating on one
-                    # skipped bundles entirely - the bucket was never depleted and
-                    # the plan and the purchase both counted. Passing None lets
-                    # process_manual_entry_with_bucket look the wage_bill up,
-                    # which answers 1 for a bundle.
-                    if new_recurring_info or _is_bundle_category_id(current_user.id, table_name, category_id):
-                        log_info(app.logger, 'CONFIRM_TXN', f"Category {category_id} has buckets, processing reduction")
-                        process_manual_entry_with_bucket(
-                            table_name, category_id, entry_date,
-                            entry_amount, current_user.id, new_recurring_info
-                        )
-        except Exception as e:
-            log_error(app.logger, 'CONFIRM_TXN', f"Error processing bucket reduction: {e}")
-            # Continue even if bucket processing fails
-        
-        # Check if all pending transactions are now confirmed and clear notification
-        _clear_pending_transactions_notification_if_none(current_user.id)
-        
-        # --- SAVE CATEGORY MEMORY ---
-        # Remember this user's category choice for this merchant/description.
-        try:
-            from bank_redis import get_linked_transactions
-            from redis_crud import upsert_category_memory
-            linked_txns = get_linked_transactions(user_id=current_user.id)
-            txn_record = next((t for t in linked_txns if t.get('transaction_id') == transaction_id), None)
-            if txn_record:
-                # Memory uses canonical IDs (expense_categories.id / income_categories.id)
-                # and unified types ('outgoing' / 'incoming').
-                if entry_type == 'c_payment':
-                    # Payments to credit cards aren't categorized -- skip memory.
-                    pass
-                else:
-                    if entry_type == 'income':
-                        memory_category_id = category_id
-                        memory_category_type = 'incoming'
-                    elif entry_type == 'expense':
-                        memory_category_id = category_id
-                        memory_category_type = 'outgoing'
-                    elif entry_type == 'c_expense':
-                        # Translate per-account c_expense_categories.id -> canonical
-                        # expense_categories.id by name match.
-                        memory_category_id = _canonical_expense_category_id(current_user.id, category_id)
-                        memory_category_type = 'outgoing'
-                    else:
-                        memory_category_id = None
-                        memory_category_type = None
-
-                    if memory_category_id and memory_category_type:
-                        upsert_category_memory(
-                            user_id=current_user.id,
-                            merchant_id=txn_record.get('enrichment_merchant_id'),
-                            description=txn_record.get('description'),
-                            category_id=memory_category_id,
-                            category_type=memory_category_type,
-                        )
-                        log_info(app.logger, 'CONFIRM_TXN', f"Saved category memory: merchant_id={txn_record.get('enrichment_merchant_id')}, desc={txn_record.get('description', '')[:50]}, cat={memory_category_id}, type={memory_category_type}")
-        except Exception as mem_err:
-            log_warning(app.logger, 'CONFIRM_TXN', f"Failed to save category memory: {mem_err}")
-        # --- END SAVE CATEGORY MEMORY ---
-        
-        # --- RECURRING MISMATCH DETECTION ---
-        try:
-            if txn_record:
-                _detect_recurring_mismatch(txn_record, entry_type, category_id, current_user.id)
-        except Exception as mismatch_err:
-            log_warning(app.logger, 'MISMATCH', f"Mismatch detection failed (non-blocking): {mismatch_err}")
-        # --- END RECURRING MISMATCH DETECTION ---
-        
-        # Recalculate totals, remainders, savings, and credit balances
-        try:
-            if entry_type in ('income', 'expense'):
-                save_totals_remainders_d()
-            if entry_type == 'c_expense':
-                save_ca_daily_balance()
-        except Exception as e:
-            log_error(app.logger, 'CONFIRM_TXN', f"Error recalculating totals/balances: {e}")
-            # Continue even if recalc fails - the entry is already confirmed
-        
-        log_info(app.logger, 'CONFIRM_TXN', f"=== DONE === txn_id={transaction_id}, entry_id={entry_id}, category_id={category_id}")
-        return jsonify({'status': 'success'})
-        
+        ok, message, change = bank_import.confirm(current_user.id, str(transaction_id), entry_id,
+                                                  entry_type, category_id)
     except Exception as e:
-        log_exception(app.logger, 'CONFIRM_TXN', f"Error confirming transaction: {e}")
-        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+        log_exception(app.logger, 'CONFIRM_TXN', f"user {current_user.id}: {e}")
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    if not ok:
+        return jsonify({'status': 'error', 'message': message}), 400
 
-
-@app.route('/bank/confirm-all-transactions', methods=['POST'])
-@login_required
-def confirm_all_transactions():
-    """Confirm multiple pending transactions at once"""
-    data = request.get_json()
-    transactions = data.get('transactions', [])
-    
-    if not transactions:
-        return jsonify({'status': 'error', 'message': 'No transactions provided'}), 400
-    
     try:
-        # Group by entry type
-        by_type = {'income': [], 'expense': [], 'c_expense': []}
-        all_txn_mappings = []  # For category memory
-        for txn in transactions:
-            entry_type = txn.get('entry_type')
-            if entry_type in by_type:
-                by_type[entry_type].append({
-                    'entry_id': int(txn.get('entry_id')),
-                    'category_id': int(txn.get('category_id'))
-                })
-                all_txn_mappings.append({
-                    'transaction_id': txn.get('transaction_id'),
-                    'entry_id': int(txn.get('entry_id')),
-                    'category_id': int(txn.get('category_id')),
-                    'entry_type': entry_type
-                })
-        
-        table_map = {
-            'income': 'income_entries',
-            'expense': 'expense_entries',
-            'c_expense': 'c_expense_entries'
-        }
-        
-        recurring_table_map = {
-            'income': 'recurring_income',
-            'expense': 'recurring_expense',
-            'c_expense': 'recurring_c_expense'
-        }
-        
-        # Process each entry type
-        for entry_type, items in by_type.items():
-            if not items:
-                continue
-            
-            table_name = table_map[entry_type]
-            recurring_table = recurring_table_map[entry_type]
-            redis_key = f"{table_name}:v1:{current_user.id}"
-            
-            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-            if not cached:
-                continue
-            
-            entries = json.loads(cached)
-            
-            # Build lookup of updates
-            updates = {item['entry_id']: item['category_id'] for item in items}
-            
-            # For c_expense, translate canonical expense_categories.id ->
-            # per-account c_expense_categories.id using each entry's existing
-            # category to find the account.
-            if entry_type == 'c_expense':
-                from redis_crud import resolve_suggestion_for_entry
-                _cec_cached = _redis_client.get(f"c_expense_categories:v1:{current_user.id}") if app.config.get('REDIS_OK') else None
-                _cec_by_id = {}
-                if _cec_cached:
-                    for _c in json.loads(_cec_cached):
-                        try:
-                            _cec_by_id[int(_c.get('id', 0))] = _c
-                        except (TypeError, ValueError):
-                            continue
-                _translated = {}
-                for _entry_row in entries:
-                    _eid = _entry_row.get('id')
-                    if _eid not in updates:
-                        continue
-                    _old_cat = _entry_row.get('category_id')
-                    _acct = (_cec_by_id.get(int(_old_cat)) or {}).get('account_id') if _old_cat else None
-                    if _acct:
-                        _resolved = resolve_suggestion_for_entry(current_user.id, 'c_expense', _acct, updates[_eid])
-                        if _resolved:
-                            _translated[_eid] = _resolved
-                # Apply translations to the updates dict and to all_txn_mappings
-                # (so memory storage gets the per-account id, then translates back to canonical).
-                for _eid, _new_cat in _translated.items():
-                    updates[_eid] = _new_cat
-                    for _m in all_txn_mappings:
-                        if _m['entry_type'] == 'c_expense' and _m.get('entry_id') == _eid:
-                            _m['category_id'] = _new_cat
-            
-            # Track entries that need bucket reduction
-            bucket_reductions = []
-            
-            # Apply updates
-            for entry in entries:
-                entry_id = entry.get('id')
-                if entry_id in updates:
-                    new_category_id = updates[entry_id]
-                    entry['category_id'] = new_category_id
-                    entry['pending'] = 0
-                    entry['auto_confirmed'] = 0  # Clear auto-confirmed flag
-                    entry['processed'] = 1  # Mark as processed (user reviewed and categorized)
-                    # Track for bucket reduction
-                    bucket_reductions.append({
-                        'category_id': new_category_id,
-                        'date': entry.get('date'),
-                        'amount': float(entry.get('amount', 0))
-                    })
-            
-            # Save back to Redis
-            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(entries, cls=DecimalEncoder))
-            
-            # Mark as dirty
-            dirty_key = f"dirty_tables:{current_user.id}"
-            _redis_client.sadd(dirty_key, table_name)
-            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-            
-            # Process bucket reductions for recurring categories
-            for reduction in bucket_reductions:
-                try:
-                    recurring_info = _get_recurring_info_from_redis(
-                        recurring_table, current_user.id, reduction['category_id']
-                    )
-                    # As above: a bundle has buckets without having a recurring
-                    # record, and gating on one skipped it.
-                    has_buckets = recurring_info or _is_bundle_category_id(
-                        current_user.id, table_name, reduction['category_id'])
-                    if has_buckets and reduction['date'] and reduction['amount']:
-                        log_info(app.logger, 'CONFIRM_ALL', f"Category {reduction['category_id']} has buckets, processing")
-                        process_manual_entry_with_bucket(
-                            table_name, reduction['category_id'], reduction['date'],
-                            reduction['amount'], current_user.id, recurring_info
-                        )
-                except Exception as e:
-                    log_error(app.logger, 'CONFIRM_ALL', f"Error processing bucket reduction: {e}")
-                    # Continue even if bucket processing fails
-        
-        # --- SAVE CATEGORY MEMORY FOR ALL CONFIRMED TRANSACTIONS ---
+        from bank_redis import get_linked_transactions
+        txn_record = next((t for t in get_linked_transactions(user_id=current_user.id)
+                           if str(t.get('transaction_id')) == str(transaction_id)), None)
+        if txn_record:
+            _detect_recurring_mismatch(txn_record, entry_type, category_id, current_user.id)
+    except Exception as mismatch_err:
+        log_warning(app.logger, 'MISMATCH', f"Mismatch detection failed (non-blocking): {mismatch_err}")
+
+    remaining = bank_import.count_pending(current_user.id)
+    note = ''
+    if remaining == 0:
+        bank_import.clear_notification_if_none(current_user.id)
         try:
-            from bank_redis import get_linked_transactions
-            from redis_crud import upsert_category_memory
-            linked_txns = get_linked_transactions(user_id=current_user.id)
-            txn_lookup = {t.get('transaction_id'): t for t in linked_txns}
-            for mapping in all_txn_mappings:
-                txn_record = txn_lookup.get(mapping['transaction_id'])
-                if not txn_record:
-                    continue
-                _entry_type = mapping['entry_type']
-                _cat_id = mapping['category_id']
-                if _entry_type == 'c_payment':
-                    continue
-                if _entry_type == 'income':
-                    mem_cat_id, mem_cat_type = _cat_id, 'incoming'
-                elif _entry_type == 'expense':
-                    mem_cat_id, mem_cat_type = _cat_id, 'outgoing'
-                elif _entry_type == 'c_expense':
-                    mem_cat_id = _canonical_expense_category_id(current_user.id, _cat_id)
-                    mem_cat_type = 'outgoing'
-                else:
-                    mem_cat_id, mem_cat_type = None, None
-                if mem_cat_id and mem_cat_type:
-                    upsert_category_memory(
-                        user_id=current_user.id,
-                        merchant_id=txn_record.get('enrichment_merchant_id'),
-                        description=txn_record.get('description'),
-                        category_id=mem_cat_id,
-                        category_type=mem_cat_type,
-                    )
-        except Exception as mem_err:
-            log_warning(app.logger, 'CONFIRM_ALL', f"Failed to save category memory: {mem_err}")
-        # --- END SAVE CATEGORY MEMORY ---
-        
-        # --- RECURRING MISMATCH DETECTION (BATCH) ---
-        try:
-            if not txn_lookup:
-                from bank_redis import get_linked_transactions
-                linked_txns = get_linked_transactions(user_id=current_user.id)
-                txn_lookup = {t.get('transaction_id'): t for t in linked_txns}
-            for mapping in all_txn_mappings:
-                txn_record = txn_lookup.get(mapping['transaction_id'])
-                if txn_record:
-                    _detect_recurring_mismatch(txn_record, mapping['entry_type'], mapping['category_id'], current_user.id)
-        except Exception as mismatch_err:
-            log_warning(app.logger, 'MISMATCH', f"Batch mismatch detection failed (non-blocking): {mismatch_err}")
-        # --- END RECURRING MISMATCH DETECTION ---
-        
-        # Check if all pending transactions are now confirmed and clear notification
-        _clear_pending_transactions_notification_if_none(current_user.id)
-        
-        # Recalculate totals, remainders, savings, and credit balances
-        try:
-            has_income_expense = bool(by_type.get('income') or by_type.get('expense'))
-            has_c_expense = bool(by_type.get('c_expense'))
-            if has_income_expense:
-                save_totals_remainders_d()
-            if has_c_expense:
-                save_ca_daily_balance()
+            note = bank_import.reconcile_summary(bank_import.reconcile_from_stored(current_user.id))
         except Exception as e:
-            log_error(app.logger, 'CONFIRM_ALL', f"Error recalculating totals/balances: {e}")
-            # Continue even if recalc fails - entries are already confirmed
-        
-        return jsonify({'status': 'success'})
-        
-    except Exception as e:
-        log_exception(app.logger, 'CONFIRM_TXN', f"Error confirming all transactions: {e}")
-        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+            log_exception(app.logger, 'CONFIRM_TXN',
+                          f"reconcile after the last answer failed for user {current_user.id}: {e}")
+    return jsonify({'status': 'success', 'message': message, 'change': change,
+                    'remaining': remaining, 'note': note})
 
 
-# ============================================================
-# Recurring Mismatch API Endpoints
-# ============================================================
 
 @app.route('/api/recurring-mismatches', methods=['GET'])
 @login_required
@@ -18438,6 +17968,11 @@ def api_buckets_pending():
         # the user says so and at no other time, so simply opening the prompt
         # cannot cost them data.
         items, total = bucket_confirmation.pending_buckets(current_user.id)
+        # The bank's rows share the modal: what the feed brought in, with the
+        # guessed category ready to confirm or change.
+        import bank_import
+        bank_items = bank_import.pending_bank_items(current_user.id)
+        total += len(bank_items)
         prompted = bucket_confirmation.prompt_raised_today(current_user.id)
         overdue = bucket_confirmation.pending_overdue_count(current_user.id)
     except Exception as e:
@@ -18452,6 +17987,7 @@ def api_buckets_pending():
         # has not happened yet.
         'prompted': prompted,
         'items': items,
+        'bank_items': bank_items,
         'total': total,
         # Of that total, how many are already late. The nav count falls back to
         # this before the day's notification has gone out, so entries that went
@@ -18459,7 +17995,7 @@ def api_buckets_pending():
         'overdue': overdue,
         # When the backlog is longer than one prompt should show, say so rather
         # than truncating silently.
-        'shown': len(items),
+        'shown': len(items) + len(bank_items),
         'currency_type': getattr(current_user, 'currency_type', 'USD'),
     })
 
@@ -18503,7 +18039,10 @@ def api_buckets_resolve():
     # Server-side rather than in the browser: dashboard_d has no CA balance
     # function of its own, so leaving it to the page would fix one dashboard and
     # miss the rest.
-    if table == 'c_expense_entries':
+    # The same when the answer was about a payment towards a card (an expense
+    # in the card's mirror category): resolve() moved or resized the card's
+    # copy of it, and says so.
+    if table == 'c_expense_entries' or (change and change.get('card_payment')):
         try:
             save_ca_daily_balance()
         except Exception as e:
@@ -18797,6 +18336,9 @@ def api_autobalance_state():
         'success': True,
         'pending': True,
         'forced': force and not pending,
+        # False when a feed covers the current account: the modal then has no
+        # row for it and asks for nothing there.
+        'cash': bool(allowed['cash']),
         'app_balance': float(balance) if balance is not None else None,
         # None means the user has no savings figure recorded, which is different
         # from zero: the modal leaves the row out rather than inviting them to
@@ -18822,7 +18364,9 @@ def api_autobalance_apply():
     import auto_balance
 
     data = request.get_json(silent=True) or {}
-    if data.get('balance') is None:
+    # No figure for the current account is only an answer when a bank feed
+    # keeps that account; apply() checks the same thing.
+    if data.get('balance') is None and auto_balance.reconcilable(current_user.id)['cash']:
         return jsonify({'success': False, 'error': 'Enter your current balance.'}), 400
 
     # cards arrives as {account_id: balance}; JSON object keys are strings, so
@@ -19255,7 +18799,9 @@ def settings():
         landing_page=landing_page,
         currency_type=currency_type,
         mfa_enabled=mfa_enabled,
-        email_notifications=email_notifications
+        email_notifications=email_notifications,
+        ai=_ai_display(current_user.id),
+        **_bank_page_context(current_user.id)
     )
 
 @app.route('/update_email_notifications', methods=['POST'])
@@ -23152,7 +22698,7 @@ def get_user_device_tokens(user_id, platform=None):
         cursor.close()
         return tokens or []
 
-def add_notification(user_id, message, notification_date=None, kind=None):
+def add_notification(user_id, message, notification_date=None, kind=None, notification_type=None):
     """
     Create a new notification for a user and optionally send via email.
     
@@ -23163,6 +22709,8 @@ def add_notification(user_id, message, notification_date=None, kind=None):
         kind: Which sort of notification this is, from notification_kinds. Only
             the email is affected - the in-app notification is always created,
             because the per-type switches are about what lands in a mailbox.
+        notification_type: what goes in notifications.type, so a later
+            writer can find this notification without matching its text.
     
     Returns:
         The ID of the created notification
@@ -23175,9 +22723,9 @@ def add_notification(user_id, message, notification_date=None, kind=None):
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("""
-            INSERT INTO notifications (user_id, date, message, is_read)
-            VALUES (%s, %s, %s, 0)
-        """, (user_id, notification_date, message))
+            INSERT INTO notifications (user_id, date, message, is_read, type)
+            VALUES (%s, %s, %s, 0, %s)
+        """, (user_id, notification_date, message, notification_type))
         notification_id = cursor.lastrowid
         
         # Check if user has email notifications enabled
@@ -23260,145 +22808,15 @@ def add_notification(user_id, message, notification_date=None, kind=None):
     return notification_id
 
 
-def _create_pending_transactions_notification(user_id, new_count):
-    """
-    Create a notification for pending transactions waiting for categorization.
-    Removes any previous pending transaction notifications before creating new one.
-    
-    Args:
-        user_id: The user ID to create the notification for
-        new_count: Number of new transactions that were auto-imported
-    """
-    # Get total count of pending transactions (entries with pending=1)
-    total_pending = 0
-    
-    try:
-        if app.config.get('REDIS_OK'):
-            # Count pending income entries
-            income_key = f"income_entries:v1:{user_id}"
-            cached = _redis_client.get(income_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-            
-            # Count pending expense entries
-            expense_key = f"expense_entries:v1:{user_id}"
-            cached = _redis_client.get(expense_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-            
-            # Count pending c_expense entries
-            c_expense_key = f"c_expense_entries:v1:{user_id}"
-            cached = _redis_client.get(c_expense_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-    except Exception as e:
-        log_error(app.logger, 'NOTIFICATION', f"Error counting pending transactions: {e}")
-        # Use the new_count as fallback
-        total_pending = new_count
-    
-    if total_pending <= 0:
-        return
-    
-    # Delete any previous pending transaction notifications for this user
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            DELETE FROM notifications
-            WHERE user_id = %s
-            AND message LIKE %s
-        """, (user_id, '%pending transaction%synced from your bank%'))
-        deleted_count = cursor.rowcount
-        conn.commit()
-        cursor.close()
-        if deleted_count > 0:
-            log_info(app.logger, 'NOTIFICATION', f"Deleted {deleted_count} old pending transaction notification(s) for user {user_id}")
-            # Invalidate Redis cache after deleting old notifications
-            if app.config.get('REDIS_OK'):
-                try:
-                    _redis_client.delete(f"notifications:v1:{user_id}")
-                except Exception:
-                    pass
-    
-    # Build message with link to pending transactions page
-    txn_word = "transaction" if total_pending == 1 else "transactions"
-    need_word = "needs" if total_pending == 1 else "need"
-    message = f'You have {total_pending} pending {txn_word} synced from your bank accounts that {need_word} to be categorized. <a href="/pending-transactions">Click here to review</a>.'
-    
-    # Create new notification
-    add_notification(user_id, message, kind='pending_transactions')
-    log_info(app.logger, 'NOTIFICATION', f"Created pending transactions notification for user {user_id}: {total_pending} pending")
+def _create_pending_transactions_notification(user_id, new_count=None):
+    """The bank importer owns this notification now; kept as a name for the routes."""
+    import bank_import
+    bank_import.notify(user_id)
 
 
 def _clear_pending_transactions_notification_if_none(user_id):
-    """
-    Check if there are any remaining pending transactions.
-    If none, delete the pending transactions notification.
-    
-    Args:
-        user_id: The user ID to check
-        
-    Returns:
-        True if notification was deleted, False otherwise
-    """
-    total_pending = 0
-    
-    try:
-        if app.config.get('REDIS_OK'):
-            # Count pending income entries
-            income_key = f"income_entries:v1:{user_id}"
-            cached = _redis_client.get(income_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-            
-            # Count pending expense entries
-            expense_key = f"expense_entries:v1:{user_id}"
-            cached = _redis_client.get(expense_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-            
-            # Count pending c_expense entries
-            c_expense_key = f"c_expense_entries:v1:{user_id}"
-            cached = _redis_client.get(c_expense_key)
-            if cached:
-                entries = json.loads(cached)
-                total_pending += sum(1 for e in entries if e.get('pending') == 1)
-    except Exception as e:
-        log_error(app.logger, 'NOTIFICATION', f"Error counting pending transactions for cleanup: {e}")
-        return False
-    
-    if total_pending > 0:
-        return False
-    
-    # No pending transactions left - delete the notification
-    try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                DELETE FROM notifications
-                WHERE user_id = %s
-                AND message LIKE %s
-            """, (user_id, '%pending transaction%synced from your bank%'))
-            deleted_count = cursor.rowcount
-            conn.commit()
-            cursor.close()
-            if deleted_count > 0:
-                log_info(app.logger, 'NOTIFICATION', f"Cleared pending transaction notification for user {user_id} (no pending left)")
-                # Invalidate Redis cache after deleting notification
-                if app.config.get('REDIS_OK'):
-                    try:
-                        _redis_client.delete(f"notifications:v1:{user_id}")
-                    except Exception:
-                        pass
-                return True
-    except Exception as e:
-        log_error(app.logger, 'NOTIFICATION', f"Error deleting pending transaction notification: {e}")
-    
-    return False
+    import bank_import
+    return bank_import.clear_notification_if_none(user_id)
 
 
 def check_negative_remainders(user_id):
@@ -26037,2164 +25455,6 @@ def bank_get_connections():
         return jsonify({'status': 'error', 'message': _client_error(e)}), 500
 
 
-def _webhook_autobalance(user_id, target_date_str=None, date_to_remainder=None):
-    """
-    Auto-balance checking, savings, and credit accounts after webhook transaction sync.
-    Fetches current bank balances from the bank provider, compares to calculated totals,
-    and creates adjustment entries for any differences.
-    
-    Args:
-        date_to_remainder: Dict of {date: remainder} from the first recalculation.
-            Used by checking adjustment to avoid reading stale MySQL values.
-    
-    Uses the last synced transaction date as the target, falling back to today.
-    """
-    import time
-    
-    try:
-        # Fetch current balances from the configured bank provider.
-        # With no provider configured this returns [] and auto-balance is a
-        # no-op - which is correct: there is no bank figure to reconcile to.
-        balances = get_bank_provider().fetch_account_balances(user_id)
-        if not balances:
-            log_info(app.logger, 'BANK_AUTOBALANCE',
-                     f"No bank balances available for user {user_id}; nothing to auto-balance")
-            return
-
-        # Build account_ref -> current balance map
-        account_balances = {}
-        for _bal_entry in balances:
-            acct_id = _bal_entry.get('account_ref', '')
-            if not acct_id:
-                continue
-            account_balances[acct_id] = abs(float(_bal_entry.get('current_balance') or 0))
-        
-        # Update linked_accounts balances in both MySQL (direct) and Redis
-        # MySQL-direct ensures the balance survives dehydrate/rehydrate cycles
-        if account_balances:
-            try:
-                with get_db_pool().get_connection() as bal_conn:
-                    bal_cursor = bal_conn.cursor()
-                    for acct_id, bal_value in account_balances.items():
-                        bal_cursor.execute(
-                            "UPDATE linked_accounts SET current_balance = %s WHERE user_id = %s AND account_id = %s",
-                            (bal_value, user_id, acct_id)
-                        )
-                    bal_conn.commit()
-                    bal_cursor.close()
-                    log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Updated {len(account_balances)} account balances in MySQL for user {user_id}")
-            except Exception as bal_err:
-                log_exception(app.logger, 'WEBHOOK_AUTOBALANCE', f"Error updating balances in MySQL: {bal_err}")
-            
-            # Also update Redis for immediate reads
-            if app.config.get('REDIS_OK'):
-                redis_key = f"linked_accounts:v1:{user_id}"
-                cached = _redis_client.get(redis_key)
-                if cached:
-                    accounts_list = json.loads(cached)
-                    for acc in accounts_list:
-                        new_bal = account_balances.get(acc.get('account_id'))
-                        if new_bal is not None:
-                            acc['current_balance'] = new_bal
-                    _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(accounts_list, cls=DecimalEncoder))
-                    dirty_key = f"dirty_tables:{user_id}"
-                    _redis_client.sadd(dirty_key, 'linked_accounts')
-                    _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-        
-        # Use provided target date, fall back to today
-        if target_date_str:
-            today = date.fromisoformat(target_date_str[:10])
-        else:
-            today = _user_today_for(user_id)
-        target_date_str = today.strftime('%Y-%m-%d')
-        day_before = today - timedelta(days=1)
-        day_before_str = day_before.strftime('%Y-%m-%d')
-        
-        # Get active bank accounts
-        linked_accounts = get_linked_accounts(user_id) or []
-        
-        for qa in linked_accounts:
-            if not qa.get('is_active') or not qa.get('sync_transactions'):
-                continue
-            
-            linked_account_id = qa.get('account_id')
-            bank_balance = account_balances.get(linked_account_id)
-            if not bank_balance:
-                continue
-            
-            acct_type = (qa.get('account_type') or '').lower()
-            acct_subtype = (qa.get('account_subtype') or '').lower()
-            acct_name = qa.get('account_name', 'Account')
-            
-            if acct_type == 'depository':
-                if 'checking' in acct_name.lower() or acct_subtype == 'checking':
-                    _webhook_checking_adjustment(user_id, bank_balance, target_date_str, acct_name, date_to_remainder=date_to_remainder)
-                elif 'savings' in acct_name.lower() or acct_subtype == 'savings':
-                    _webhook_savings_adjustment(user_id, bank_balance, target_date_str, linked_account_id)
-            elif acct_type == 'credit':
-                _webhook_credit_adjustment(user_id, linked_account_id, bank_balance, target_date_str, day_before_str, acct_name)
-        
-        log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Completed for user {user_id}")
-        
-    except Exception as e:
-        log_exception(app.logger, 'WEBHOOK_AUTOBALANCE', f"Error for user {user_id}: {e}")
-
-
-def _webhook_checking_adjustment(user_id, bank_balance, target_date_str, account_name, date_to_remainder=None):
-    """Create ADDITIVE auto-adjustment entry for a checking account to match bank balance.
-    Compares bank balance directly to current remainder (which already includes any prior adjustments).
-    Does NOT delete existing adjustments — creates a new one for the remaining diff only.
-    Reads remainder from date_to_remainder (first recalc), Redis, or MySQL.
-    Writes adjustment entries directly to MySQL. Caller handles dehydrate/rehydrate."""
-    try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Get auto-adjustment category IDs
-            cursor.execute("SELECT id FROM income_categories WHERE user_id = %s AND is_auto_adjustment = 1 LIMIT 1", (user_id,))
-            row = cursor.fetchone()
-            income_cat_id = row[0] if row else None
-            
-            cursor.execute("SELECT id FROM expense_categories WHERE user_id = %s AND is_auto_adjustment = 1 LIMIT 1", (user_id,))
-            row = cursor.fetchone()
-            expense_cat_id = row[0] if row else None
-            
-            if not income_cat_id or not expense_cat_id:
-                cursor.close()
-                return
-            
-            # Get current remainder — prefer freshly-calculated value from first recalculation
-            current_remainder = None
-            target_date_obj = datetime.strptime(target_date_str, '%Y-%m-%d').date() if isinstance(target_date_str, str) else target_date_str
-            
-            # 1. From first recalculation dict (most accurate — includes all existing adjustments)
-            if date_to_remainder and target_date_obj in date_to_remainder:
-                current_remainder = float(date_to_remainder[target_date_obj])
-            
-            # 2. From Redis (where update_daily_totals wrote)
-            if current_remainder is None:
-                cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id)
-                if cached_daily:
-                    for r in cached_daily:
-                        r_date = datetime.strptime(r['date'], '%Y-%m-%d').date() if isinstance(r['date'], str) else r['date']
-                        if r_date == target_date_obj:
-                            current_remainder = float(r.get('remainder', 0))
-                            break
-            
-            # 3. MySQL fallback
-            if current_remainder is None:
-                cursor.execute("SELECT remainder FROM totals_remainders_d WHERE user_id = %s AND date = %s", (user_id, target_date_str))
-                row = cursor.fetchone()
-                current_remainder = float(row[0]) if row and row[0] is not None else None
-            
-            if current_remainder is None:
-                log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"No remainder for {target_date_str}, skipping checking adjustment")
-                cursor.close()
-                return
-            
-            # ADDITIVE: Compare bank balance directly to current remainder
-            # current_remainder already includes any previously-created auto-adjustments
-            diff = float(bank_balance) - current_remainder
-            
-            log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Checking ({account_name}): Remainder=${current_remainder:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
-            
-            if abs(diff) < 0.01:
-                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"No adjustment needed for {account_name} (delta < $0.01)")
-                cursor.close()
-                return
-            
-            # Insert new ADDITIVE adjustment entry directly into MySQL
-            if diff > 0:
-                cursor.execute(
-                    "INSERT INTO income_entries (category_id, date, amount, processed, is_auto_adjustment) VALUES (%s, %s, %s, 1, 1)",
-                    (income_cat_id, target_date_str, abs(diff))
-                )
-                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Created ADDITIVE income adjustment ${abs(diff):.2f} for {account_name} on {target_date_str}")
-            else:
-                cursor.execute(
-                    "INSERT INTO expense_entries (category_id, date, amount, processed, is_auto_adjustment) VALUES (%s, %s, %s, 1, 1)",
-                    (expense_cat_id, target_date_str, abs(diff))
-                )
-                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Created ADDITIVE expense adjustment ${abs(diff):.2f} for {account_name} on {target_date_str}")
-            
-            conn.commit()
-            cursor.close()
-        
-    except Exception as e:
-        log_exception(app.logger, 'WEBHOOK_AUTOBALANCE', f"Checking adjustment error: {e}")
-
-
-def _webhook_savings_adjustment(user_id, bank_balance, target_date_str, linked_account_id):
-    """Create ADDITIVE savings adjustment to match bank balance.
-    Compares bank balance directly to savings_entries.amount for target date.
-    savings_entries.amount already includes any prior adjustments (from recalculation).
-    Writes adjustment directly to MySQL. Caller handles dehydrate/rehydrate."""
-    try:
-        # Read current savings from Redis first (recalculation just updated it there)
-        current_savings = None
-        savings_from_redis = _get_savings_entries_from_redis(user_id)
-        if savings_from_redis:
-            for entry in savings_from_redis:
-                entry_date = entry.get('date', '')
-                if isinstance(entry_date, str):
-                    if entry_date == target_date_str:
-                        current_savings = float(entry.get('amount', 0))
-                        break
-                elif hasattr(entry_date, 'isoformat') and entry_date.isoformat() == target_date_str:
-                    current_savings = float(entry.get('amount', 0))
-                    break
-        
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Fall back to MySQL if Redis didn't have it
-            if current_savings is None:
-                cursor.execute("SELECT amount FROM savings_entries WHERE user_id = %s AND date = %s", (user_id, target_date_str))
-                row = cursor.fetchone()
-                current_savings = float(row[0]) if row and row[0] is not None else 0.0
-            
-            # ADDITIVE: Compare bank balance directly to current savings
-            # current_savings already includes any prior savings_adjustments from recalculation
-            diff = float(bank_balance) - current_savings
-            
-            log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Savings: Current=${current_savings:.2f}, Bank=${bank_balance:.2f}, Delta=${diff:.2f}")
-            
-            if abs(diff) < 0.01:
-                cursor.close()
-                return
-            
-            # Create new ADDITIVE savings adjustment directly in MySQL
-            cursor.execute(
-                "INSERT INTO savings_adjustments (user_id, date, amount, description, linked_account_id) VALUES (%s, %s, %s, %s, %s)",
-                (user_id, target_date_str, diff, 'Webhook sync from bank', linked_account_id)
-            )
-            
-            conn.commit()
-            cursor.close()
-            log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Created ADDITIVE savings adjustment delta: ${diff:.2f}")
-        
-    except Exception as e:
-        log_exception(app.logger, 'WEBHOOK_AUTOBALANCE', f"Savings adjustment error: {e}")
-
-
-def _webhook_credit_adjustment(user_id, linked_account_id, bank_balance, target_date_str, day_before_str, account_name):
-    """Create auto-adjustment entry for a credit account to match bank balance.
-    MySQL-direct: all reads and writes go to MySQL. Caller handles dehydrate/rehydrate."""
-    from bank_redis import get_credit_account_for_linked_account
-    
-    try:
-        # Find blankee credit account
-        ca = get_credit_account_for_linked_account(user_id, linked_account_id)
-        if not ca:
-            log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"No blankee credit account for {account_name}")
-            return
-        
-        account_id = int(ca['id'])
-        starting_balance = float(ca.get('starting_balance') or 0)
-        
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # Find auto-adjustment category for this credit account
-            cursor.execute("""
-                SELECT id, account_id, is_auto_adjustment FROM c_expense_categories
-                WHERE account_id = %s
-            """, (account_id,))
-            c_cats = cursor.fetchall()
-            
-            auto_adj_cat_id = None
-            account_cat_ids = set()
-            auto_adj_cat_ids = set()
-            for cat in c_cats:
-                account_cat_ids.add(int(cat['id']))
-                if cat.get('is_auto_adjustment'):
-                    auto_adj_cat_id = int(cat['id'])
-                    auto_adj_cat_ids.add(int(cat['id']))
-            
-            if not auto_adj_cat_id:
-                log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"No auto-adjustment category for {account_name}")
-                cursor.close()
-                return
-            
-            # ADDITIVE: Read current balance from c_a_balances_d for target date
-            # This already includes any previously-created auto-adjustments from prior syncs
-            cursor.execute("SELECT balance FROM c_a_balances_d WHERE account_id = %s AND date = %s", (account_id, target_date_str))
-            row = cursor.fetchone()
-            current_balance = float(row['balance']) if row else None
-            
-            if current_balance is None:
-                log_warning(app.logger, 'WEBHOOK_AUTOBALANCE', f"No c_a_balances_d balance for {account_name} on {target_date_str}, skipping")
-                cursor.close()
-                return
-            
-            bank_float = abs(float(bank_balance))
-            diff = bank_float - current_balance
-            
-            log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Credit ({account_name}): Current balance=${current_balance:.2f}, Bank=${bank_float:.2f}, Diff=${diff:.2f}")
-            
-            if abs(diff) < 0.01:
-                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"No adjustment needed for {account_name} (delta < $0.01)")
-                cursor.close()
-                return
-            
-            adjustment_amount = abs(diff)
-            
-            if diff > 0:
-                # Balance needs to go UP → create expense entry
-                cursor.execute("""
-                    INSERT INTO c_expense_entries (category_id, date, amount, processed, is_auto_adjustment)
-                    VALUES (%s, %s, %s, 1, 1)
-                """, (auto_adj_cat_id, target_date_str, adjustment_amount))
-                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Created ADDITIVE expense adjustment +${adjustment_amount:.2f} for {account_name} on {target_date_str}")
-            else:
-                # Balance needs to go DOWN → create payment entry
-                cursor.execute("""
-                    INSERT INTO c_payment_entries (account_id, date, amount, processed, is_auto_adjustment)
-                    VALUES (%s, %s, %s, 1, 1)
-                """, (account_id, target_date_str, adjustment_amount))
-                log_info(app.logger, 'WEBHOOK_AUTOBALANCE', f"Created ADDITIVE payment adjustment -${adjustment_amount:.2f} for {account_name} on {target_date_str}")
-            
-            conn.commit()
-            cursor.close()
-        
-    except Exception as e:
-        log_exception(app.logger, 'WEBHOOK_AUTOBALANCE', f"Credit adjustment error for {account_name}: {e}")
-
-
-def _auto_confirm_pending_entries(user_id):
-    """
-    Auto-confirm all pending entries for a user (Step 0 of webhook sync).
-    
-    Checks linked_transactions.custom_category_id for suggestions (from the enrichment provider or category memory).
-    If a valid suggestion exists, recategorizes the entry; otherwise confirms to Uncategorized.
-    Handles bucket reduction for recurring categories.
-    
-    All writes are MySQL-direct — Step 5 (dehydrate+rehydrate) will sync Redis.
-    
-    Returns: (confirmed_count, fallback_count)
-    """
-    from redis_crud import get_uncategorized_category_id
-    from datetime import date as date_type
-
-    confirmed_count = 0
-    fallback_count = 0
-
-    # Entry table configs: (table, entry_type, category_table, recurring_table, bucket_table, bucket_entry_table)
-    configs = [
-        ('income_entries', 'income', 'income_categories', 'recurring_income', 'recurring_income_buckets'),
-        ('expense_entries', 'expense', 'expense_categories', 'recurring_expense', 'recurring_expense_buckets'),
-        ('c_expense_entries', 'c_expense', 'c_expense_categories', 'recurring_c_expense', 'recurring_c_expense_buckets'),
-    ]
-
-    try:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-            for table_name, entry_type, cat_table, rec_table, bucket_table in configs:
-                # Fetch pending entries for this user
-                if entry_type == 'c_expense':
-                    cursor.execute("""
-                        SELECT cee.id, cee.category_id, cee.date, cee.amount, cec.account_id
-                        FROM c_expense_entries cee
-                        JOIN c_expense_categories cec ON cee.category_id = cec.id
-                        JOIN credit_accounts ca ON cec.account_id = ca.id
-                        WHERE ca.user_id = %s AND cee.pending = 1
-                    """, (user_id,))
-                else:
-                    cursor.execute(f"""
-                        SELECT e.id, e.category_id, e.date, e.amount
-                        FROM {table_name} e
-                        JOIN {cat_table} c ON e.category_id = c.id
-                        WHERE c.user_id = %s AND e.pending = 1
-                    """, (user_id,))
-
-                pending_entries = cursor.fetchall()
-                if not pending_entries:
-                    continue
-
-                log_info(app.logger, 'AUTO_CONFIRM', f"User {user_id}: {len(pending_entries)} pending {entry_type} entries")
-
-                for entry in pending_entries:
-                    entry_id = entry['id']
-                    entry_date = entry['date']
-                    entry_amount = float(entry['amount']) if entry['amount'] else 0
-                    entry_account_id = entry.get('account_id')  # Only set for c_expense
-
-                    # Look up the enrichment provider/memory suggestion from linked_transactions
-                    new_category_id = None
-                    cursor.execute("""
-                        SELECT custom_category_id, custom_category_suggestion
-                        FROM linked_transactions
-                        WHERE user_id = %s AND imported_to_entry_id = %s AND imported_entry_type = %s
-                    """, (user_id, entry_id, entry_type))
-                    suggestion = cursor.fetchone()
-
-                    if suggestion and suggestion.get('custom_category_id'):
-                        suggested_cat_id = suggestion['custom_category_id']
-
-                        # custom_category_id is canonical (expense_categories.id /
-                        # income_categories.id). For c_expense entries, translate
-                        # to the per-account c_expense_categories.id via the
-                        # resolver (falls back to that account's Uncategorized).
-                        if entry_type == 'c_expense':
-                            from redis_crud import resolve_suggestion_for_entry
-                            resolved = resolve_suggestion_for_entry(
-                                user_id, 'c_expense', entry_account_id, suggested_cat_id
-                            )
-                            suggested_cat_id = resolved
-
-                        if suggested_cat_id:
-                            new_category_id = suggested_cat_id
-                            log_info(app.logger, 'AUTO_CONFIRM',  f"Entry {entry_id} ({entry_type}) -> suggested category " f"{new_category_id} ({suggestion.get('custom_category_suggestion', '?')})" )
-                    
-                    if not new_category_id:
-                        # Fall back to Uncategorized (for the correct account)
-                        if entry_type == 'c_expense' and entry_account_id:
-                            uncat_id = get_uncategorized_category_id(user_id, entry_type, account_id=entry_account_id)
-                        else:
-                            uncat_id = get_uncategorized_category_id(user_id, entry_type)
-                        if uncat_id:
-                            new_category_id = uncat_id
-                            fallback_count += 1
-                            log_info(app.logger, 'AUTO_CONFIRM', f"Entry {entry_id} ({entry_type}) -> Uncategorized (no suggestion)")
-                        else:
-                            log_warning(app.logger, 'AUTO_CONFIRM', f"Skipping entry {entry_id} — no Uncategorized category")
-                            continue
-
-                    # Update entry: set category, clear pending, mark auto_confirmed
-                    cursor.execute(f"""
-                        UPDATE {table_name}
-                        SET category_id = %s, pending = 0, auto_confirmed = 1
-                        WHERE id = %s
-                    """, (new_category_id, entry_id))
-
-                    # Check if new category is recurring -> reduce bucket
-                    try:
-                        cursor.execute(f"""
-                            SELECT id, amount, wage_bill
-                            FROM {rec_table}
-                            WHERE user_id = %s AND category_id = %s
-                            LIMIT 1
-                        """, (user_id, new_category_id))
-                        rec_row = cursor.fetchone()
-
-                        if rec_row:
-                            wage_bill = int(rec_row.get('wage_bill', 0) or 0)
-                            today = _user_today_for(user_id)
-
-                            # Parse entry_date
-                            if isinstance(entry_date, str):
-                                entry_date_parsed = date_type.fromisoformat(str(entry_date)[:10])
-                            elif hasattr(entry_date, 'date'):
-                                entry_date_parsed = entry_date.date()
-                            else:
-                                entry_date_parsed = entry_date
-
-                            # Only reduce bucket if entry is not in the future
-                            if entry_date_parsed <= today:
-                                # Find next bucket entry (is_bucket=1, date >= lookback)
-                                # Use 45-day lookback to catch current-period buckets whose date
-                                # has passed (e.g., Rent bucket on 1st, payment on 3rd)
-                                lookback_date = today - timedelta(days=45)
-                                cursor.execute(f"""
-                                    SELECT id, amount, date FROM {table_name}
-                                    WHERE category_id = %s AND is_bucket = 1 AND amount > 0 AND date >= %s
-                                    ORDER BY date ASC LIMIT 1
-                                """, (new_category_id, lookback_date))
-                                bucket_entry = cursor.fetchone()
-
-                                if bucket_entry:
-                                    bucket_id = bucket_entry['id']
-                                    bucket_amount = float(bucket_entry['amount'])
-                                    bucket_date = bucket_entry['date']
-
-                                    # wage_bill: remove entire bucket; variable: subtract entry amount
-                                    subtract = bucket_amount if wage_bill else abs(entry_amount)
-                                    new_amount = bucket_amount - subtract
-
-                                    if new_amount <= 0:
-                                        cursor.execute(f"DELETE FROM {table_name} WHERE id = %s AND is_bucket = 1", (bucket_id,))
-                                    else:
-                                        cursor.execute(f"UPDATE {table_name} SET amount = %s WHERE id = %s AND is_bucket = 1", (new_amount, bucket_id))
-
-                                    # Update bucket record in recurring_*_buckets
-                                    bucket_date_str = str(bucket_date)[:10] if bucket_date else str(entry_date)[:10]
-                                    cursor.execute(f"""
-                                        SELECT id, amount FROM {bucket_table}
-                                        WHERE user_id = %s AND category_id = %s AND bucket_date = %s
-                                    """, (user_id, new_category_id, bucket_date_str))
-                                    b_record = cursor.fetchone()
-                                    if b_record:
-                                        new_rec_amount = 0 if wage_bill else float(b_record['amount']) - abs(entry_amount)
-                                        cursor.execute(f"UPDATE {bucket_table} SET amount = %s WHERE id = %s", (new_rec_amount, b_record['id']))
-
-                                    log_info(app.logger, 'AUTO_CONFIRM',  f"Bucket reduced for entry {entry_id}: " f"bucket {bucket_id} {'removed' if new_amount <= 0 else f'reduced to {new_amount}'}" )
-                                else:
-                                    # No bucket entry found — try reducing bucket record directly
-                                    # (bucket entry may have been cleaned up by nightly sync)
-                                    rec_amount = float(rec_row.get('amount', 0))
-                                    monthly_days_val = rec_row.get('monthly_days')
-                                    cadence_unit_val = rec_row.get('cadence_unit', 'months') if 'cadence_unit' in rec_row else 'months'
-                                    
-                                    # Determine bucket_date for this entry's billing period
-                                    bucket_date_for_record = None
-                                    if cadence_unit_val == 'months' and monthly_days_val:
-                                        try:
-                                            mday = int(str(monthly_days_val).split(',')[0].strip())
-                                            import calendar as _cal
-                                            last_day = _cal.monthrange(entry_date_parsed.year, entry_date_parsed.month)[1]
-                                            bucket_day = min(mday, last_day)
-                                            candidate = date_type(entry_date_parsed.year, entry_date_parsed.month, bucket_day)
-                                            if entry_date_parsed >= candidate:
-                                                bucket_date_for_record = candidate
-                                            else:
-                                                if entry_date_parsed.month == 1:
-                                                    py, pm = entry_date_parsed.year - 1, 12
-                                                else:
-                                                    py, pm = entry_date_parsed.year, entry_date_parsed.month - 1
-                                                pld = _cal.monthrange(py, pm)[1]
-                                                bucket_date_for_record = date_type(py, pm, min(mday, pld))
-                                        except Exception:
-                                            pass
-                                    
-                                    if bucket_date_for_record:
-                                        cursor.execute(f"""
-                                            SELECT id, amount FROM {bucket_table}
-                                            WHERE user_id = %s AND category_id = %s AND bucket_date = %s
-                                        """, (user_id, new_category_id, str(bucket_date_for_record)))
-                                        b_record = cursor.fetchone()
-                                        if b_record and float(b_record['amount']) > 0:
-                                            new_rec_amount = 0 if wage_bill else float(b_record['amount']) - abs(entry_amount)
-                                            cursor.execute(f"UPDATE {bucket_table} SET amount = %s WHERE id = %s", (new_rec_amount, b_record['id']))
-                                            log_info(app.logger, 'AUTO_CONFIRM', f"Bucket record reduced directly for entry {entry_id}: record {b_record['id']} at {bucket_date_for_record} -> {new_rec_amount}")
-                    except Exception as bucket_err:
-                        log_warning(app.logger, 'AUTO_CONFIRM', f"Bucket reduction error for entry {entry_id}: {bucket_err}")
-
-                    confirmed_count += 1
-
-            conn.commit()
-            cursor.close()
-
-    except Exception as e:
-        log_exception(app.logger, 'AUTO_CONFIRM', f"Error for user {user_id}: {e}")
-
-    if confirmed_count > 0:
-        log_info(app.logger, 'AUTO_CONFIRM', f"User {user_id}: confirmed {confirmed_count} entries ({fallback_count} to Uncategorized)")
-
-    return confirmed_count, fallback_count
-
-
-def _sync_bank_transactions_for_user(user_id, start_date=None, end_date=None, specific_account_id=None, skip_auto_import=False):
-    """
-    Internal function to sync transactions for a specific user
-    
-    Args:
-        user_id: The user ID to sync transactions for
-        start_date: Optional start date (YYYY-MM-DD)
-        end_date: Optional end date (YYYY-MM-DD)
-        specific_account_id: Optional linked account_id to sync only that account (e.g., "acct_xxx")
-        skip_auto_import: If True, only store transactions in linked_transactions without
-                          creating income/expense entries (used during initial setup)
-    
-    Returns tuple: (success: bool, synced_count: int, error_message: str)
-    """
-    if specific_account_id:
-        pass
-    try:
-        # A provider must be configured before there is anything to sync.
-        # The null provider reports False here, so this returns cleanly rather
-        # than walking the whole import pipeline with an empty transaction list.
-        provider = get_bank_provider()
-        if not provider.is_configured():
-            log_info(app.logger, 'BANK_SYNC',
-                     f"No bank provider configured; nothing to sync for user {user_id}")
-            return (True, 0, 'No bank provider configured')
-
-        # Get accounts with sync enabled from Redis
-        accounts = get_linked_accounts(user_id)
-        
-        if not accounts:
-            pass
-            return (True, 0, 'No accounts found')
-        
-        # Filter for accounts with sync enabled
-        sync_enabled_accounts = [
-            acc for acc in accounts 
-            if acc.get('sync_transactions') == 1 and acc.get('is_active') == 1
-        ]
-        
-        # If specific_account_id is provided, filter to only that account
-        if specific_account_id:
-            sync_enabled_accounts = [
-                acc for acc in sync_enabled_accounts
-                if acc.get('account_id') == specific_account_id
-            ]
-            if not sync_enabled_accounts:
-                pass
-                return (False, 0, f'Account {specific_account_id} not found or not enabled')
-        
-        
-        if not sync_enabled_accounts:
-            pass
-            return (True, 0, 'No accounts enabled for sync')
-        
-        # Get the default "Uncategorized" category for unmapped transactions
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT id FROM expense_categories 
-                WHERE user_id = %s AND is_auto_adjustment = 1
-                LIMIT 1
-            """, (user_id,))
-            auto_adj_category = cursor.fetchone()
-            default_expense_category_id = auto_adj_category['id'] if auto_adj_category else None
-            cursor.close()
-        
-        
-        if not default_expense_category_id:
-            pass
-            return (False, 0, 'Uncategorized category not found')
-        
-        # Build a mapping of linked account_id → account info for determining account type
-        from bank_redis import get_credit_account_for_linked_account
-        from redis_crud import get_uncategorized_category_id
-        linked_account_map = {acc.get('account_id'): acc for acc in sync_enabled_accounts}
-        
-        # Build account_id → created_at map to enforce account creation date
-        account_created_map = {}
-        for acc in sync_enabled_accounts:
-            created = acc.get('created_at')
-            if created:
-                if isinstance(created, str):
-                    try:
-                        created = datetime.strptime(created[:10], '%Y-%m-%d').date()
-                    except (ValueError, TypeError):
-                        created = None
-                elif hasattr(created, 'date'):
-                    created = created.date()
-            account_created_map[acc.get('account_id')] = created
-        
-        from redis_manager import _dehydrate_user_data, _hydrate_user_data, is_user_hydrated as _is_hydrated_check
-        
-        total_synced = 0
-        total_imported = 0
-        imported_dates = set()  # Track dates of imported transactions for bucket cleanup
-        
-        # Use provided dates or fall back to last_synced_at from connections
-        from datetime import datetime, timedelta
-        if not start_date or not end_date:
-            # Try to determine start_date from earliest last_synced_at across user's connections
-            try:
-                from bank_redis import get_linked_connections
-                connections = get_linked_connections(user_id)
-                if connections:
-                    synced_dates = []
-                    for conn in connections:
-                        ls = conn.get('last_synced_at')
-                        if ls:
-                            if isinstance(ls, str):
-                                try:
-                                    ls = datetime.strptime(ls, '%Y-%m-%d %H:%M:%S')
-                                except (ValueError, TypeError):
-                                    try:
-                                        ls = datetime.strptime(ls[:10], '%Y-%m-%d')
-                                    except (ValueError, TypeError):
-                                        continue
-                            if hasattr(ls, 'strftime'):
-                                synced_dates.append(ls)
-                    if synced_dates:
-                        earliest_sync = min(synced_dates)
-                        start_date = earliest_sync.strftime('%Y-%m-%d')
-                        end_date = datetime.now().strftime('%Y-%m-%d')
-                        log_info(app.logger, 'BANK', f"Using last_synced_at fallback: {start_date} to {end_date}")
-            except Exception as e:
-                log_warning(app.logger, 'BANK', f"Failed to get last_synced_at for date range: {e}")
-            
-            # Ultimate fallback if last_synced_at lookup failed
-            if not start_date or not end_date:
-                start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-                end_date = datetime.now().strftime('%Y-%m-%d')
-                log_info(app.logger, 'BANK', f"No date range or last_synced_at available, using 1-day default: {start_date} to {end_date}")
-        else:
-            log_info(app.logger, 'BANK', f"Using provided date range: {start_date} to {end_date}")
-        
-        # Get existing transactions from Redis to check for duplicates
-        existing_transactions = get_linked_transactions(user_id)
-        existing_txn_ids = {txn.get('transaction_id') for txn in existing_transactions}
-        
-        # IMPORTANT: Capture the set of transaction IDs that existed BEFORE this sync
-        # This is used to determine which transactions are truly NEW vs already synced
-        # Only truly NEW transactions should be auto-imported to budget entries
-        pre_sync_txn_ids = set(existing_txn_ids)  # Copy the set before we modify it
-        log_info(app.logger, 'BANK', f"Pre-sync transaction count: {len(pre_sync_txn_ids)}, skip_auto_import={skip_auto_import}")
-        
-        # Get all account IDs for batch fetch with enrichment data
-        account_ids = [acc['account_id'] for acc in sync_enabled_accounts]
-        
-        # Fetch from the provider in the normalized shape (providers/base.py),
-        # then let the enrichment provider annotate them. Both are no-ops when
-        # nothing is configured.
-        log_info(app.logger, 'BANK_SYNC', f"Fetching transactions for {len(account_ids)} accounts")
-        transactions = provider.fetch_transactions(
-            user_id,
-            start=start_date,
-            end=end_date
-        )
-        if transactions:
-            transactions = get_enrichment_provider().enrich(user_id, transactions)
-
-        if not transactions:
-            log_info(app.logger, 'BANK_SYNC', f"No transactions returned for user {user_id}")
-            return (True, 0, 'No new transactions found')
-
-        log_info(app.logger, 'BANK_SYNC', f"Retrieved {len(transactions)} transactions")
-        
-        # Open a single MySQL connection for all direct writes
-        _sync_conn = get_db_pool().engine.raw_connection()
-        _sync_cursor = _sync_conn.cursor()
-        
-        updated_count = 0
-        for txn in transactions:
-            # Track pending status — we still store pending transactions but don't auto-import them
-            is_pending = (txn.get('status') == 'PENDING')
-            
-            txn_id = txn.get('id')
-            account_obj = txn.get('account', {})
-            account_id = account_obj.get('id')  # linked account_id string
-            amount = abs(float(txn.get('amount', 0)))
-            date = txn.get('date')
-            # Use the bank provider's entryType field: CREDIT = inflow (income), DEBIT = outflow (expense)
-            entry_type_raw = txn.get('entryType', '').upper()
-            is_expense = (entry_type_raw != 'CREDIT')  # DEBIT or empty = expense
-            
-            log_info(app.logger, 'BANK', f"Processing txn {txn_id}: amount={txn.get('amount')}, entryType={entry_type_raw}, is_expense={is_expense}")
-            
-            # Skip transactions dated before the account was connected
-            acct_created = account_created_map.get(account_id)
-            if acct_created and date:
-                txn_date_obj = None
-                try:
-                    txn_date_obj = datetime.strptime(str(date)[:10], '%Y-%m-%d').date() if isinstance(date, str) else date
-                except (ValueError, TypeError):
-                    pass
-                if txn_date_obj and txn_date_obj < acct_created:
-                    log_info(app.logger, 'BANK', f"Skipping {txn_id} - date {txn_date_obj} before account created {acct_created}")
-                    continue
-            
-            # Check if transaction already exists in Redis
-            existing_txn = None
-            needs_import = False
-            if txn_id in existing_txn_ids:
-                # Find the existing transaction to check if it has enrichment data
-                for existing in existing_transactions:
-                    if existing.get('transaction_id') == txn_id:
-                        existing_txn = existing
-                        break
-                
-                # If transaction exists and already has enrichment data, check if anything material changed
-                enriched_at_value = existing_txn.get('enriched_at') if existing_txn else None
-                if existing_txn and enriched_at_value:
-                    # Check if amount, pending status, or date changed
-                    existing_amount = float(existing_txn.get('amount', 0))
-                    existing_pending = int(existing_txn.get('pending', 0))
-                    existing_date = str(existing_txn.get('date', ''))[:10]
-                    new_pending = 1 if is_pending else 0
-                    new_date = str(date)[:10] if date else ''
-                    
-                    # Check if this transaction still needs auto-import (was synced but never imported to an entry)
-                    needs_import = not existing_txn.get('imported_to_entry_id') and not skip_auto_import and not is_pending
-                    
-                    if (abs(existing_amount - amount) < 0.01 and 
-                        existing_pending == new_pending and
-                        existing_date == new_date and
-                        not needs_import):
-                        log_info(app.logger, 'BANK', f"Skipping {txn_id} - already enriched, no material changes")
-                        continue
-                    
-                    if needs_import:
-                        log_info(app.logger, 'BANK', f"Re-processing {txn_id} - needs auto-import (no linked entry)")
-                    
-                    log_info(app.logger, 'BANK', f"Updating enriched txn {txn_id} - changes detected: amount {existing_amount}->{amount}, pending {existing_pending}->{new_pending}, date {existing_date}->{new_date}")
-                    updated_count += 1
-            else:
-                # Brand new transaction
-                log_info(app.logger, 'BANK', f"New transaction {txn_id}")
-                existing_txn_ids.add(txn_id)
-            
-            # Process both income and expense transactions
-            # (Removed the expense-only filter)
-            
-            # Extract provider enrichment data
-            enrichment_data = {}
-            remote_data = txn.get('remoteData', {})
-            if remote_data:
-                enrichment = remote_data.get('enrichment', {})
-                if enrichment:
-                    enrichment = enrichment.get('enrichment', {})
-                    if enrichment:
-                        response = enrichment.get('response', {})
-                        if response:
-                            # Extract categories (the bank provider schema: categories.general, categories.accounting)
-                            categories = response.get('categories')
-                            if categories and isinstance(categories, dict):
-                                # Store general category as labels (JSON array for compatibility)
-                                general = categories.get('general')
-                                if general:
-                                    enrichment_data['enrichment_labels'] = json.dumps([general])
-                            
-                            # Extract counterparty/merchant info (the bank provider schema: entities.counterparty)
-                            entities = response.get('entities')
-                            if entities and isinstance(entities, dict):
-                                counterparty = entities.get('counterparty')
-                                if counterparty and isinstance(counterparty, dict):
-                                    enrichment_data['enrichment_merchant_name'] = counterparty.get('name')
-                                    enrichment_data['enrichment_merchant_id'] = counterparty.get('id')
-                                    enrichment_data['enrichment_logo'] = counterparty.get('logo')
-                                    enrichment_data['enrichment_website'] = counterparty.get('website')
-                                    enrichment_data['enrichment_transaction_type'] = counterparty.get('type')
-                                    # Extract MCCs (merchant category codes)
-                                    mccs = counterparty.get('mccs')
-                                    if mccs:
-                                        enrichment_data['enrichment_mcc'] = json.dumps(mccs)
-                            
-                            # Extract location info (the bank provider schema: location is RemoteDatathe enrichment providerLocation object)
-                            location = response.get('location')
-                            if location and isinstance(location, dict):
-                                raw_address = location.get('rawAddress')
-                                if raw_address:
-                                    enrichment_data['enrichment_location'] = raw_address
-                                structured = location.get('structured')
-                                if structured and isinstance(structured, dict):
-                                    enrichment_data['enrichment_location_city'] = structured.get('city')
-                                    enrichment_data['enrichment_location_state'] = structured.get('state')
-                                    enrichment_data['enrichment_location_country'] = structured.get('country')
-                            elif location and isinstance(location, str):
-                                # Fallback: treat as plain string if API returns scalar
-                                enrichment_data['enrichment_location'] = location
-                            
-                            # Mark as enriched
-                            enrichment_data['enriched_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            # Extract Finicity data (createdDate + categorization fallback)
-            provider_created_date = None
-            if remote_data:
-                provider_meta = remote_data.get('provider_meta', {})
-                if provider_meta:
-                    fin_txn = provider_meta.get('transaction', {})
-                    if fin_txn:
-                        fin_response = fin_txn.get('response', {})
-                        if fin_response:
-                            epoch = fin_response.get('createdDate')
-                            if epoch:
-                                try:
-                                    provider_created_date = datetime.utcfromtimestamp(int(epoch)).strftime('%Y-%m-%d %H:%M:%S')
-                                except (ValueError, TypeError, OSError):
-                                    provider_created_date = None
-                            # Use Finicity categorization as fallback for merchant/category
-                            categorization = fin_response.get('categorization', {})
-                            if categorization and isinstance(categorization, dict):
-                                if not enrichment_data.get('enrichment_merchant_name'):
-                                    payee = categorization.get('normalizedPayeeName')
-                                    if payee:
-                                        enrichment_data['enrichment_merchant_name'] = payee
-                                if not enrichment_data.get('enrichment_labels'):
-                                    fin_category = categorization.get('category')
-                                    if fin_category:
-                                        enrichment_data['enrichment_labels'] = json.dumps([fin_category])
-                                if not enrichment_data.get('enrichment_location_city'):
-                                    enrichment_data['enrichment_location_city'] = categorization.get('city') or None
-                                    enrichment_data['enrichment_location_state'] = categorization.get('state') or None
-                                    enrichment_data['enrichment_location_country'] = categorization.get('country') or None
-            
-            # Store transaction in Redis with provider enrichment data
-            # Preserve existing import link if transaction was already imported
-            # (prevents re-sync from stomping imported_to_entry_id back to None)
-            existing_import_id = existing_txn.get('imported_to_entry_id') if existing_txn else None
-            existing_import_type = existing_txn.get('imported_entry_type') if existing_txn else None
-            transaction_data = {
-                'transaction_id': txn_id,
-                'account_id': account_id,
-                'amount': amount,
-                'date': date,
-                'description': txn.get('description', ''),
-                'merchant_name': enrichment_data.get('enrichment_merchant_name') or txn.get('description', ''),
-                'category': txn.get('kind', ''),
-                'pending': 1 if is_pending else 0,
-                'transaction_type': 'expense' if is_expense else 'income',
-                'imported_to_entry_id': existing_import_id,
-                'imported_entry_type': existing_import_type,
-                'expense_category_id': default_expense_category_id,
-                'imported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'provider_created_date': provider_created_date,
-                **enrichment_data  # Include all the enrichment provider fields
-            }
-            
-            # --- CATEGORY MEMORY LOOKUP ---
-            # Check if the user has previously confirmed a category for this merchant/description.
-            # If so, use that instead of calling the enrichment provider.
-            memory_match = None
-            try:
-                from redis_crud import lookup_category_memory
-                txn_merchant_id = enrichment_data.get('enrichment_merchant_id')
-                txn_description = txn.get('description', '')
-
-                # Memory is unified: 'outgoing' / 'incoming'.
-                # Per-account c_expense resolution happens at apply time.
-                linked_account_info = linked_account_map.get(account_id, {})
-                acct_type = linked_account_info.get('account_type', '').upper()
-
-                # Skip memory lookup for CREDIT incoming (payments to credit cards
-                # have no category and shouldn't pick up incoming-side memory).
-                if acct_type == 'CREDIT' and not is_expense:
-                    memory_match = None
-                else:
-                    memory_category_type = 'outgoing' if is_expense else 'incoming'
-                    memory_match = lookup_category_memory(
-                        user_id, merchant_id=txn_merchant_id,
-                        description=txn_description, category_type=memory_category_type,
-                        account_type=acct_type
-                    )
-                if memory_match:
-                    # Look up category name from CANONICAL table
-                    memory_cat_name = 'Memory'
-                    try:
-                        mem_cat_type = memory_match['category_type']
-                        mem_cat_id = memory_match['category_id']
-                        # Map both new (outgoing/incoming) and legacy types to canonical tables.
-                        table_map = {
-                            'outgoing': 'expense_categories',
-                            'incoming': 'income_categories',
-                            'income': 'income_categories',
-                            'expense': 'expense_categories',
-                            'c_expense': 'c_expense_categories',
-                        }
-                        cat_table = table_map.get(mem_cat_type)
-                        if cat_table:
-                            cat_redis_key = f"{cat_table}:v1:{user_id}"
-                            cat_cached = _redis_client.get(cat_redis_key) if app.config.get('REDIS_OK') else None
-                            if cat_cached:
-                                for cat in json.loads(cat_cached):
-                                    if int(cat.get('id', 0)) == int(mem_cat_id):
-                                        memory_cat_name = cat.get('name', 'Memory')
-                                        break
-                    except Exception:
-                        pass
-                    transaction_data['custom_category_suggestion'] = memory_cat_name
-                    transaction_data['custom_category_id'] = memory_match['category_id']
-                    transaction_data['custom_category_type'] = memory_match['category_type']
-                    transaction_data['custom_category_confidence'] = 'memory'
-                    transaction_data['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    log_info(app.logger, 'CATEGORIES', f"Category memory match for {txn_id}: {memory_cat_name} (category_id={memory_match['category_id']}, confirmed {memory_match.get('times_confirmed', 1)}x)")
-            except Exception as mem_err:
-                log_warning(app.logger, 'CATEGORIES', f"Category memory lookup failed for {txn_id}: {mem_err}")
-            # --- END CATEGORY MEMORY LOOKUP ---
-
-            # --- CATEGORY SUGGESTION + MERCHANT ENRICHMENT ---
-            # The enrichment provider annotates merchant/entity data always, but
-            # its category suggestion only wins when the user's own category
-            # memory had nothing to say - taught intent beats inference.
-            try:
-                linked_account_info = linked_account_map.get(account_id, {})
-                acct_type = linked_account_info.get('account_type', '').upper()
-                provider_account_type = 'CREDIT' if acct_type == 'CREDIT' else 'DEPOSITORY'
-
-                suggestion = get_enrichment_provider().suggest_category(
-                    user_id,
-                    {
-                        'provider_txn_id': txn_id,
-                        'description': txn.get('description', ''),
-                        'amount': amount,
-                        'date': date,
-                        'transaction_type': 'expense' if is_expense else 'income'
-                    },
-                    account_type=provider_account_type,
-                )
-                if suggestion:
-                    if suggestion.get('enrichment_merchant_id'):
-                        transaction_data['enrichment_merchant_id'] = suggestion['enrichment_merchant_id']
-
-                    if not memory_match and suggestion.get('category_name'):
-                        transaction_data['custom_category_suggestion'] = suggestion.get('category_name')
-                        transaction_data['custom_category_id'] = suggestion.get('category_id')
-                        transaction_data['custom_category_type'] = suggestion.get('category_type')
-                        transaction_data['custom_category_confidence'] = suggestion.get('confidence')
-                        transaction_data['custom_suggestion_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-                    log_info(app.logger, 'CATEGORIES', f"Enrichment for {txn_id}: category={suggestion.get('category_name')}, memory_match={'yes' if memory_match else 'no'}")
-            except Exception as suggest_err:
-                log_warning(app.logger, 'ENRICHMENT', f"Failed to enrich {txn_id}: {suggest_err}")
-            # --- END CATEGORY SUGGESTION + MERCHANT ENRICHMENT ---
-            
-
-            # MySQL-direct upsert (bypasses Redis for consistency)
-            try:
-                _sync_cursor.execute("""
-                    INSERT INTO linked_transactions
-                    (user_id, account_id, transaction_id, date, description, amount, category, pending, merchant_name,
-                     transaction_type, imported_to_entry_id, imported_entry_type, imported_at,
-                     enrichment_labels, enrichment_merchant_id, enrichment_logo, enrichment_website, enrichment_mcc,
-                     enrichment_location, enrichment_location_city, enrichment_location_state, enrichment_location_country,
-                     enrichment_recurrence, enrichment_recurrence_group_id, enrichment_periodicity, enrichment_periodicity_days,
-                     enrichment_avg_amount, enrichment_first_payment_date, enrichment_last_payment_date,
-                     enrichment_person, enrichment_transaction_type, enriched_at,
-                     custom_category_suggestion, custom_category_id, custom_category_type, custom_category_confidence, custom_suggestion_at,
-                     provider_created_date)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        description = VALUES(description),
-                        amount = VALUES(amount),
-                        category = VALUES(category),
-                        pending = VALUES(pending),
-                        merchant_name = VALUES(merchant_name),
-                        transaction_type = VALUES(transaction_type),
-                        imported_to_entry_id = COALESCE(VALUES(imported_to_entry_id), imported_to_entry_id),
-                        imported_entry_type = COALESCE(VALUES(imported_entry_type), imported_entry_type),
-                        imported_at = VALUES(imported_at),
-                        enrichment_labels = VALUES(enrichment_labels),
-                        enrichment_merchant_id = VALUES(enrichment_merchant_id),
-                        enrichment_logo = VALUES(enrichment_logo),
-                        enrichment_website = VALUES(enrichment_website),
-                        enrichment_mcc = VALUES(enrichment_mcc),
-                        enrichment_location = VALUES(enrichment_location),
-                        enrichment_location_city = VALUES(enrichment_location_city),
-                        enrichment_location_state = VALUES(enrichment_location_state),
-                        enrichment_location_country = VALUES(enrichment_location_country),
-                        enrichment_recurrence = VALUES(enrichment_recurrence),
-                        enrichment_recurrence_group_id = VALUES(enrichment_recurrence_group_id),
-                        enrichment_periodicity = VALUES(enrichment_periodicity),
-                        enrichment_periodicity_days = VALUES(enrichment_periodicity_days),
-                        enrichment_avg_amount = VALUES(enrichment_avg_amount),
-                        enrichment_first_payment_date = VALUES(enrichment_first_payment_date),
-                        enrichment_last_payment_date = VALUES(enrichment_last_payment_date),
-                        enrichment_person = VALUES(enrichment_person),
-                        enrichment_transaction_type = VALUES(enrichment_transaction_type),
-                        enriched_at = VALUES(enriched_at),
-                        custom_category_suggestion = VALUES(custom_category_suggestion),
-                        custom_category_id = VALUES(custom_category_id),
-                        custom_category_type = VALUES(custom_category_type),
-                        custom_category_confidence = VALUES(custom_category_confidence),
-                        custom_suggestion_at = VALUES(custom_suggestion_at),
-                        provider_created_date = VALUES(provider_created_date)
-                """, (
-                    user_id,
-                    transaction_data.get('account_id'),
-                    transaction_data.get('transaction_id'),
-                    transaction_data.get('date'),
-                    transaction_data.get('description', ''),
-                    float(transaction_data.get('amount', 0)),
-                    transaction_data.get('category', ''),
-                    int(transaction_data.get('pending', 0)),
-                    transaction_data.get('merchant_name'),
-                    transaction_data.get('transaction_type'),
-                    transaction_data.get('imported_to_entry_id'),
-                    transaction_data.get('imported_entry_type'),
-                    transaction_data.get('imported_at'),
-                    transaction_data.get('enrichment_labels'),
-                    transaction_data.get('enrichment_merchant_id'),
-                    transaction_data.get('enrichment_logo'),
-                    transaction_data.get('enrichment_website'),
-                    transaction_data.get('enrichment_mcc'),
-                    transaction_data.get('enrichment_location'),
-                    transaction_data.get('enrichment_location_city'),
-                    transaction_data.get('enrichment_location_state'),
-                    transaction_data.get('enrichment_location_country'),
-                    transaction_data.get('enrichment_recurrence'),
-                    transaction_data.get('enrichment_recurrence_group_id'),
-                    transaction_data.get('enrichment_periodicity'),
-                    transaction_data.get('enrichment_periodicity_days'),
-                    transaction_data.get('enrichment_avg_amount'),
-                    transaction_data.get('enrichment_first_payment_date'),
-                    transaction_data.get('enrichment_last_payment_date'),
-                    transaction_data.get('enrichment_person'),
-                    transaction_data.get('enrichment_transaction_type'),
-                    transaction_data.get('enriched_at'),
-                    transaction_data.get('custom_category_suggestion'),
-                    transaction_data.get('custom_category_id'),
-                    transaction_data.get('custom_category_type'),
-                    transaction_data.get('custom_category_confidence'),
-                    transaction_data.get('custom_suggestion_at'),
-                    transaction_data.get('provider_created_date')
-                ))
-                _sync_conn.commit()
-                txn_db_id = True
-            except Exception as upsert_err:
-                log_exception(app.logger, 'TXN_SYNC', f"MySQL upsert failed for {txn_id}: {upsert_err}")
-                _sync_conn.rollback()
-                txn_db_id = None
-            
-            if txn_db_id:
-                total_synced += 1
-                log_info(app.logger, 'TXN_SYNC', f"Successfully stored {txn_id}")
-                
-                # --- AUTO-IMPORT TO BUDGET ENTRIES (Phase 2.2) ---
-                # Only auto-import if:
-                # 1. skip_auto_import is False (not during explicit setup flows like initial connection)
-                # 2. Transaction is TRULY NEW (not in pre_sync_txn_ids - the set before this sync)
-                # 3. Transaction is not PENDING (only auto-import POSTED transactions)
-                # 
-                # This ensures:
-                # - Initial bank connection: skip_auto_import=True (via connection age check)
-                # - Historical transactions from initial sync: in pre_sync_txn_ids, won't be imported
-                # - Truly new transactions from daily sync: not in pre_sync_txn_ids, will be imported
-                # - Pending transactions: stored for tracking but not auto-imported until posted
-                is_new_transaction = txn_id not in pre_sync_txn_ids
-                
-                # Check if a previously-pending transaction has now posted
-                was_pending = False
-                if existing_txn and existing_txn.get('pending') == 1 and not is_pending:
-                    was_pending = True
-                    log_info(app.logger, 'TXN_SYNC', f"Transaction {txn_id} changed from PENDING to POSTED")
-                
-                if not skip_auto_import and not is_pending and (is_new_transaction or was_pending or needs_import):
-                    import_reason = 'NEEDS-IMPORT (previously skipped)' if needs_import else ('POSTED (was pending)' if was_pending else 'NEW')
-                    log_info(app.logger, 'TXN_SYNC', f"Auto-importing {import_reason} transaction {txn_id}")
-                    try:
-                        # Determine account type and route to correct table
-                        linked_account_info = linked_account_map.get(account_id, {})
-                        account_type = linked_account_info.get('account_type', '').upper()
-                        
-                        entry_type = None
-                        category_id = None
-                        blankee_credit_account_id = None
-                        
-                        if account_type == 'CREDIT':
-                            # Credit account - find the corresponding Blankee credit account
-                            blankee_account = get_credit_account_for_linked_account(user_id, account_id)
-                            if blankee_account:
-                                blankee_credit_account_id = blankee_account.get('id')
-                                if is_expense:
-                                    # Negative amount on credit = expense charged to card
-                                    entry_type = 'c_expense'
-                                    category_id = get_uncategorized_category_id(user_id, 'c_expense', account_id=blankee_credit_account_id)
-                                else:
-                                    # Positive amount on credit = payment to card
-                                    entry_type = 'c_payment'
-                                    # c_payment uses account_id, not category_id
-                                    category_id = blankee_credit_account_id
-                            else:
-                                log_warning(app.logger, 'BANK', f"No Blankee credit account found for linked account {account_id}, skipping auto-import")
-                        else:
-                            # Depository account (checking/savings)
-                            if is_expense:
-                                entry_type = 'expense'
-                                category_id = get_uncategorized_category_id(user_id, 'expense')
-                            else:
-                                entry_type = 'income'
-                                category_id = get_uncategorized_category_id(user_id, 'income')
-                        
-                        if entry_type and category_id:
-                            # MySQL-direct entry creation
-                            entry_id = None
-                            try:
-                                if entry_type == 'income':
-                                    _sync_cursor.execute("""
-                                        INSERT INTO income_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed)
-                                        VALUES (%s, %s, %s, NULL, 0, NULL, 1, 1, 0)
-                                    """, (category_id, date, amount))
-                                elif entry_type == 'expense':
-                                    _sync_cursor.execute("""
-                                        INSERT INTO expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, bundle_item_id)
-                                        VALUES (%s, %s, %s, NULL, 0, NULL, 1, 1, 0, NULL)
-                                    """, (category_id, date, amount))
-                                elif entry_type == 'c_expense':
-                                    _sync_cursor.execute("""
-                                        INSERT INTO c_expense_entries (category_id, date, amount, recurring_id, is_bucket, original_amount, processed, pending, auto_confirmed, bundle_item_id)
-                                        VALUES (%s, %s, %s, NULL, 0, NULL, 1, 1, 0, NULL)
-                                    """, (category_id, date, amount))
-                                elif entry_type == 'c_payment':
-                                    _sync_cursor.execute("""
-                                        INSERT INTO c_payment_entries (account_id, date, amount, recurring_id, processed)
-                                        VALUES (%s, %s, %s, NULL, 1)
-                                    """, (blankee_credit_account_id, date, amount))
-                                _sync_conn.commit()
-                                entry_id = _sync_cursor.lastrowid
-                                log_info(app.logger, 'TXN_SYNC', f"Created {entry_type} entry {entry_id} for transaction {txn_id} (MySQL-direct)")
-                            except Exception as entry_err:
-                                log_exception(app.logger, 'TXN_SYNC', f"MySQL entry creation failed for {txn_id}: {entry_err}")
-                                _sync_conn.rollback()
-                            
-                            if entry_id:
-                                # Update bank_transaction with import link (MySQL-direct)
-                                try:
-                                    _sync_cursor.execute("""
-                                        UPDATE linked_transactions
-                                        SET imported_to_entry_id = %s, imported_entry_type = %s
-                                        WHERE user_id = %s AND transaction_id = %s
-                                    """, (entry_id, entry_type, user_id, txn_id))
-                                    _sync_conn.commit()
-                                except Exception as link_err:
-                                    log_exception(app.logger, 'TXN_SYNC', f"MySQL import link update failed for {txn_id}: {link_err}")
-                                    _sync_conn.rollback()
-                                total_imported += 1
-                                imported_dates.add(str(date)[:10])
-                                log_info(app.logger, 'TXN_SYNC', f"Auto-imported {txn_id} to {entry_type} entry {entry_id}")
-                            else:
-                                log_error(app.logger, 'TXN_SYNC', f"Failed to auto-import {txn_id} to {entry_type}")
-                        else:
-                            log_warning(app.logger, 'CATEGORIES', f"Skipping auto-import for {txn_id}: entry_type={entry_type}, category_id={category_id}")
-                    
-                    except Exception as import_err:
-                        log_exception(app.logger, 'TXN_SYNC', f"Error auto-importing transaction {txn_id}: {import_err}")
-                        # Don't fail the whole sync if auto-import fails
-                # --- END AUTO-IMPORT ---
-            else:
-                log_error(app.logger, 'TXN_SYNC', f"Failed to store transaction {txn_id} in MySQL")
-        
-        message = f'Synced {total_synced} transactions'
-        if updated_count > 0:
-            message += f' ({updated_count} updated with provider enrichment)'
-        if total_imported > 0:
-            message += f', {total_imported} auto-imported to budget'
-        
-        # --- PUSH FORWARD BUCKET ENTRIES (MySQL-direct) ---
-        # Instead of deleting bucket placeholders, push them forward to today.
-        # This keeps them visible on the dashboard with a "X days late" indicator.
-        # A bucket may never be pushed more than 5 days past its original_date —
-        # buckets that would exceed that cap are deleted (they're stale recurring placeholders).
-        # Non-the bank provider credit buckets are converted to regular entries (no bank feed to replace them).
-        earliest_bucket_date = None  # Track earliest date affected by bucket push for recalc
-        if total_imported > 0:
-            try:
-                # Cap: a bucket may never be pushed more than 5 days past its original_date.
-                # Use push_to_date as the reference so the cap is independent of when the
-                # webhook fires relative to the latest transaction date.
-                # Use the latest imported transaction date as the boundary
-                last_txn_date_str = max(imported_dates) if imported_dates else None
-                # Push buckets to the day AFTER the latest transaction
-                if last_txn_date_str:
-                    push_to_date = (datetime.strptime(last_txn_date_str, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
-                    # Buckets whose original_date is more than 5 days BEFORE push_to_date
-                    # would be pushed >5 days from their origin → delete instead.
-                    max_push_cutoff_str = (datetime.strptime(push_to_date, '%Y-%m-%d') - timedelta(days=5)).strftime('%Y-%m-%d')
-                
-                if last_txn_date_str:
-                    cleanup_count = 0
-                    has_bank_depository = any(
-                        str(a.get('account_type', '')).upper() == 'DEPOSITORY'
-                        for a in linked_account_map.values()
-                    )
-                    log_info(app.logger, 'BUCKET_PUSH', f"Starting for user {user_id}: last_txn_date={last_txn_date_str}, push_to_date={push_to_date}, has_depository={has_bank_depository}")
-                    
-                    if has_bank_depository:
-                        # Find earliest bucket date that will be affected by push/delete
-                        # so we can recalculate totals from that date onward
-                        _sync_cursor.execute("""
-                            SELECT MIN(ie.date) as min_date FROM income_entries ie
-                            JOIN income_categories ic ON ie.category_id = ic.id
-                            WHERE ic.user_id = %s AND ie.is_bucket = 1 AND ie.date <= %s
-                        """, (user_id, last_txn_date_str))
-                        row = _sync_cursor.fetchone()
-                        if row and row[0]:
-                            earliest_bucket_date = row[0] if isinstance(row[0], datetime_date) else datetime.strptime(str(row[0]), '%Y-%m-%d').date()
-                        
-                        _sync_cursor.execute("""
-                            SELECT MIN(ee.date) as min_date FROM expense_entries ee
-                            JOIN expense_categories ec ON ee.category_id = ec.id
-                            WHERE ec.user_id = %s AND ee.is_bucket = 1 AND ee.date <= %s
-                        """, (user_id, last_txn_date_str))
-                        row = _sync_cursor.fetchone()
-                        if row and row[0]:
-                            exp_min = row[0] if isinstance(row[0], datetime_date) else datetime.strptime(str(row[0]), '%Y-%m-%d').date()
-                            if earliest_bucket_date is None or exp_min < earliest_bucket_date:
-                                earliest_bucket_date = exp_min
-                        
-                        if earliest_bucket_date:
-                            log_info(app.logger, 'BUCKET_PUSH', f"Earliest affected bucket date: {earliest_bucket_date} for user {user_id}")
-                        
-                        # --- income_entries ---
-                        # Delete buckets whose original_date is more than 5 days before push_to_date
-                        # (i.e. pushing them would exceed the 5-day cap).
-                        _sync_cursor.execute("""
-                            DELETE ie FROM income_entries ie
-                            JOIN income_categories ic ON ie.category_id = ic.id
-                            WHERE ic.user_id = %s AND ie.is_bucket = 1 AND ie.date <= %s
-                              AND ie.original_date IS NOT NULL AND ie.original_date < %s
-                        """, (user_id, last_txn_date_str, max_push_cutoff_str))
-                        deleted_inc = _sync_cursor.rowcount
-                        if deleted_inc > 0:
-                            log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_inc} income buckets exceeding 5-day push cap for user {user_id}")
-                        cleanup_count += deleted_inc
-                        
-                        # Push remaining income buckets to day after last transaction
-                        _sync_cursor.execute("""
-                            UPDATE income_entries ie
-                            JOIN income_categories ic ON ie.category_id = ic.id
-                            SET ie.original_date = COALESCE(ie.original_date, ie.date),
-                                ie.date = %s
-                            WHERE ic.user_id = %s AND ie.is_bucket = 1 AND ie.date <= %s
-                        """, (push_to_date, user_id, last_txn_date_str))
-                        pushed_inc = _sync_cursor.rowcount
-                        if pushed_inc > 0:
-                            log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_inc} income buckets to {push_to_date} for user {user_id}")
-                            # Also push corresponding bucket records to keep dates in sync
-                            # Only push records whose category+date match a pushed bucket entry
-                            _sync_cursor.execute("""
-                                UPDATE recurring_income_buckets rib
-                                INNER JOIN (
-                                    SELECT DISTINCT ie.category_id, ie.original_date
-                                    FROM income_entries ie
-                                    JOIN income_categories ic ON ie.category_id = ic.id
-                                    WHERE ic.user_id = %s AND ie.is_bucket = 1 AND ie.date = %s
-                                      AND ie.original_date IS NOT NULL
-                                ) pushed ON rib.category_id = pushed.category_id AND rib.bucket_date = pushed.original_date
-                                SET rib.bucket_date = %s
-                                WHERE rib.user_id = %s
-                            """, (user_id, push_to_date, push_to_date, user_id))
-                            pushed_inc_records = _sync_cursor.rowcount
-                            if pushed_inc_records > 0:
-                                log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_inc_records} income bucket records to {push_to_date} for user {user_id}")
-                        cleanup_count += pushed_inc
-                        
-                        # --- expense_entries ---
-                        # Delete buckets whose original_date is more than 5 days before push_to_date.
-                        _sync_cursor.execute("""
-                            DELETE ee FROM expense_entries ee
-                            JOIN expense_categories ec ON ee.category_id = ec.id
-                            WHERE ec.user_id = %s AND ee.is_bucket = 1 AND ee.date <= %s
-                              AND ee.original_date IS NOT NULL AND ee.original_date < %s
-                        """, (user_id, last_txn_date_str, max_push_cutoff_str))
-                        deleted_exp = _sync_cursor.rowcount
-                        if deleted_exp > 0:
-                            log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_exp} expense buckets exceeding 5-day push cap for user {user_id}")
-                        cleanup_count += deleted_exp
-                        
-                        # Push remaining expense buckets to day after last transaction
-                        _sync_cursor.execute("""
-                            UPDATE expense_entries ee
-                            JOIN expense_categories ec ON ee.category_id = ec.id
-                            SET ee.original_date = COALESCE(ee.original_date, ee.date),
-                                ee.date = %s
-                            WHERE ec.user_id = %s AND ee.is_bucket = 1 AND ee.date <= %s
-                        """, (push_to_date, user_id, last_txn_date_str))
-                        pushed_exp = _sync_cursor.rowcount
-                        if pushed_exp > 0:
-                            log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_exp} expense buckets to {push_to_date} for user {user_id}")
-                            # Also push corresponding bucket records to keep dates in sync
-                            # Only push records whose category+date match a pushed bucket entry
-                            _sync_cursor.execute("""
-                                UPDATE recurring_expense_buckets reb
-                                INNER JOIN (
-                                    SELECT DISTINCT ee.category_id, ee.original_date
-                                    FROM expense_entries ee
-                                    JOIN expense_categories ec ON ee.category_id = ec.id
-                                    WHERE ec.user_id = %s AND ee.is_bucket = 1 AND ee.date = %s
-                                      AND ee.original_date IS NOT NULL
-                                ) pushed ON reb.category_id = pushed.category_id AND reb.bucket_date = pushed.original_date
-                                SET reb.bucket_date = %s
-                                WHERE reb.user_id = %s
-                            """, (user_id, push_to_date, push_to_date, user_id))
-                            pushed_exp_records = _sync_cursor.rowcount
-                            if pushed_exp_records > 0:
-                                log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_exp_records} expense bucket records to {push_to_date} for user {user_id}")
-                        cleanup_count += pushed_exp
-                    
-                    # --- c_expense_entries (bank-linked credit accounts) ---
-                    # Delete the bank provider credit buckets whose original_date is more than 5 days before push_to_date.
-                    _sync_cursor.execute("""
-                        DELETE ce FROM c_expense_entries ce
-                        JOIN c_expense_categories cec ON ce.category_id = cec.id
-                        JOIN credit_accounts ca ON cec.account_id = ca.id
-                        WHERE ca.user_id = %s AND ce.is_bucket = 1 AND ce.date <= %s AND ca.is_linked = 1
-                          AND ce.original_date IS NOT NULL AND ce.original_date < %s
-                    """, (user_id, last_txn_date_str, max_push_cutoff_str))
-                    deleted_ce = _sync_cursor.rowcount
-                    if deleted_ce > 0:
-                        log_info(app.logger, 'BUCKET_PUSH', f"Deleted {deleted_ce} credit buckets exceeding 5-day push cap for user {user_id}")
-                    cleanup_count += deleted_ce
-                    
-                    # Push remaining the bank provider credit buckets to day after last transaction
-                    _sync_cursor.execute("""
-                        UPDATE c_expense_entries ce
-                        JOIN c_expense_categories cec ON ce.category_id = cec.id
-                        JOIN credit_accounts ca ON cec.account_id = ca.id
-                        SET ce.original_date = COALESCE(ce.original_date, ce.date),
-                            ce.date = %s
-                        WHERE ca.user_id = %s AND ce.is_bucket = 1 AND ce.date <= %s AND ca.is_linked = 1
-                    """, (push_to_date, user_id, last_txn_date_str))
-                    pushed_ce = _sync_cursor.rowcount
-                    if pushed_ce > 0:
-                        log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_ce} credit buckets to {push_to_date} for user {user_id}")
-                        # Also push corresponding bucket records to keep dates in sync
-                        # Only push records whose category+date match a pushed bucket entry
-                        _sync_cursor.execute("""
-                            UPDATE recurring_c_expense_buckets rcb
-                            INNER JOIN (
-                                SELECT DISTINCT ce.category_id, ce.original_date
-                                FROM c_expense_entries ce
-                                JOIN c_expense_categories cec ON ce.category_id = cec.id
-                                JOIN credit_accounts ca ON cec.account_id = ca.id
-                                WHERE ca.user_id = %s AND ce.is_bucket = 1 AND ce.date = %s
-                                  AND ce.original_date IS NOT NULL AND ca.is_linked = 1
-                            ) pushed ON rcb.category_id = pushed.category_id AND rcb.bucket_date = pushed.original_date
-                            SET rcb.bucket_date = %s
-                            WHERE rcb.user_id = %s
-                        """, (user_id, push_to_date, push_to_date, user_id))
-                        pushed_ce_records = _sync_cursor.rowcount
-                        if pushed_ce_records > 0:
-                            log_info(app.logger, 'BUCKET_PUSH', f"Pushed {pushed_ce_records} credit bucket records to {push_to_date} for user {user_id}")
-                    cleanup_count += pushed_ce
-                    
-                    # Convert non-the bank provider credit expense buckets to regular entries (unchanged)
-                    _sync_cursor.execute("""
-                        UPDATE c_expense_entries ce
-                        JOIN c_expense_categories cec ON ce.category_id = cec.id
-                        JOIN credit_accounts ca ON cec.account_id = ca.id
-                        SET ce.is_bucket = 0
-                        WHERE ca.user_id = %s AND ce.is_bucket = 1 AND ce.date <= %s AND ca.is_linked = 0
-                    """, (user_id, last_txn_date_str))
-                    cleanup_count += _sync_cursor.rowcount
-                    
-                    _sync_conn.commit()
-                    if cleanup_count > 0:
-                        log_info(app.logger, 'WEBHOOK_SYNC', f"Bucket push/cleanup: {cleanup_count} entries processed for user {user_id}")
-            except Exception as bucket_err:
-                log_exception(app.logger, 'WEBHOOK_SYNC', f"Error in bucket push/cleanup: {bucket_err}")
-                try:
-                    _sync_conn.rollback()
-                except Exception:
-                    pass
-        # --- END PUSH FORWARD BUCKET ENTRIES ---
-        
-        # Close the MySQL connection used for direct writes
-        try:
-            _sync_cursor.close()
-            _sync_conn.close()
-        except Exception:
-            pass
-        
-        # --- DEHYDRATE + REHYDRATE (Step 5) ---
-        # Now that all MySQL-direct writes are done (transactions, entries, buckets),
-        # dehydrate + rehydrate to sync Redis with MySQL state.
-        if _is_hydrated_check(user_id):
-            _dehydrate_user_data(user_id)
-        _hydrate_user_data(user_id)
-        log_info(app.logger, 'WEBHOOK_SYNC', f"Step 5: Dehydrated + rehydrated user {user_id} after MySQL-direct writes")
-        
-        # --- CREATE NOTIFICATION FOR PENDING TRANSACTIONS (Step 4) ---
-        # Must happen after rehydrate so Redis has the new pending entries for accurate count
-        if total_imported > 0:
-            try:
-                _create_pending_transactions_notification(user_id, total_imported)
-            except Exception as notif_err:
-                log_error(app.logger, 'TXN_SYNC', f"Error creating pending transactions notification: {notif_err}")
-        # --- END NOTIFICATION ---
-        
-        # --- FIRST RECALCULATION + AUTOBALANCE + SECOND RECALCULATION (Steps 6-10) ---
-        try:
-            log_info(app.logger, 'WEBHOOK_SYNC', f"Starting recalculation pipeline for user {user_id} (total_imported={total_imported}, total_synced={total_synced})")
-            
-            # Read goofy_week_mode (Redis first, MySQL fallback)
-            gwm = None
-            if app.config.get('REDIS_OK'):
-                try:
-                    cached_user = _redis_client.get(f"users:v1:{user_id}")
-                    if cached_user:
-                        user_data = json.loads(cached_user)
-                        if 'goofy_week_mode' in user_data:
-                            gwm = bool(int(user_data['goofy_week_mode']))
-                except Exception:
-                    pass
-            if gwm is None:
-                with get_db_pool().get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT goofy_week_mode FROM users WHERE id = %s", (user_id,))
-                    row = cursor.fetchone()
-                    gwm = bool(row[0]) if row else False
-                    cursor.close()
-            
-            # Determine recalc_start: earliest of new txn dates and bucket push dates
-            recalc_start = None
-            if imported_dates:
-                try:
-                    earliest_imported = min(imported_dates)
-                    recalc_start = datetime.strptime(earliest_imported, '%Y-%m-%d').date() if isinstance(earliest_imported, str) else earliest_imported
-                except Exception:
-                    pass
-            if start_date and not recalc_start:
-                try:
-                    recalc_start = datetime.strptime(start_date, '%Y-%m-%d').date() if isinstance(start_date, str) else start_date
-                except Exception:
-                    pass
-            if not recalc_start:
-                recalc_start = (datetime.now() - timedelta(days=1)).date()
-            
-            # If buckets were pushed from earlier dates, recalc must cover those dates too
-            if earliest_bucket_date and earliest_bucket_date < recalc_start:
-                log_info(app.logger, 'WEBHOOK_SYNC', f"Extending recalc_start from {recalc_start} to {earliest_bucket_date} (bucket push affected earlier dates)")
-                recalc_start = earliest_bucket_date
-            
-            # --- STEP 6: First recalculation — accurate totals for autobalance comparison ---
-            date_to_remainder = {}
-            daily_date_to_remainder = {}  # Separate dict for daily remainders only (not overwritten by weekly/monthly)
-            update_daily_totals(user_id, recalc_start, gwm, date_to_remainder)
-            daily_date_to_remainder.update(date_to_remainder)  # Snapshot daily values before weekly/monthly overwrite
-            update_daily_savings_for_savings_category(user_id, recalc_start)
-            update_weekly_totals(user_id, recalc_start, gwm, date_to_remainder)
-            update_monthly_totals(user_id, recalc_start, date_to_remainder)
-            update_daily_ca_totals(user_id, recalc_start)
-            update_weekly_ca_totals(user_id, recalc_start, gwm)
-            update_monthly_ca_totals(user_id, recalc_start)
-            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 6: First recalculation complete")
-            
-            # Force flush after first recalculation (Redis → MySQL)
-            from redis_manager import flush_dirty_tables_for_user
-            flush_dirty_tables_for_user(user_id)
-            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 6: Force flush complete")
-            
-            # --- STEP 7+8: Fetch bank balances + auto-adjustments ---
-            # _webhook_autobalance handles both: fetches balances (Step 7) and creates adjustments (Step 8)
-            # Pass daily_date_to_remainder (not shared dict) so checking adjustment reads the true daily value
-            if app.config.get('REDIS_OK'):
-                _redis_client.delete(f"bank_last_txn_date:v1:{user_id}")
-            last_txn_date_for_autobalance = get_last_linked_transaction_date(user_id)
-            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 7+8: Autobalance target date: {last_txn_date_for_autobalance} for user {user_id}")
-            _webhook_autobalance(user_id, target_date_str=last_txn_date_for_autobalance, date_to_remainder=daily_date_to_remainder)
-            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 8: Auto-adjustments complete")
-            
-            # --- STEP 9: Dehydrate + Rehydrate (again) ---
-            # Autobalance wrote adjustments directly to MySQL, sync Redis
-            if _is_hydrated_check(user_id):
-                _dehydrate_user_data(user_id)
-            _hydrate_user_data(user_id)
-            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 9: Rehydrated after autobalance MySQL writes")
-            
-            # --- STEP 10: Second recalculation — incorporate adjustment entries into totals ---
-            date_to_remainder = {}
-            update_daily_totals(user_id, recalc_start, gwm, date_to_remainder)
-            update_daily_savings_for_savings_category(user_id, recalc_start)
-            update_weekly_totals(user_id, recalc_start, gwm, date_to_remainder)
-            update_monthly_totals(user_id, recalc_start, date_to_remainder)
-            update_daily_ca_totals(user_id, recalc_start)
-            update_weekly_ca_totals(user_id, recalc_start, gwm)
-            update_monthly_ca_totals(user_id, recalc_start)
-            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 10: Second recalculation complete")
-            
-            # Force flush after second recalculation (Redis → MySQL)
-            flush_dirty_tables_for_user(user_id)
-            log_info(app.logger, 'WEBHOOK_SYNC', f"Step 10: Force flush complete")
-            
-        except Exception as recalc_err:
-            log_exception(app.logger, 'WEBHOOK_SYNC', f"Error in recalculation pipeline for user {user_id}: {recalc_err}")
-        # --- END RECALCULATE + AUTOBALANCE ---
-        
-        # --- UPDATE RECURRENCE DATA FROM THE ENRICHMENT PROVIDER ---
-        # Write directly to MySQL (consistent with rest of sync function)
-        # then update Redis cache. Avoids dependency on flush worker timing.
-        if total_synced > 0:
-            try:
-                # Keyed on Blankee's user_id, not a bank-provider profile id -
-                # that coupling is what made the old two vendors inseparable.
-                recurrence_map = get_enrichment_provider().recurrence_map(user_id)
-                if recurrence_map:
-                    with get_db_pool().get_connection() as rec_conn:
-                        rec_cursor = rec_conn.cursor()
-                        rec_updated = 0
-                        try:
-                            # Update recurring transactions
-                            for txn_id, rec_data in recurrence_map.items():
-                                rec_cursor.execute("""
-                                    UPDATE linked_transactions SET
-                                        enrichment_recurrence = %s,
-                                        enrichment_recurrence_group_id = %s,
-                                        enrichment_periodicity = %s,
-                                        enrichment_periodicity_days = %s,
-                                        enrichment_avg_amount = %s,
-                                        enrichment_first_payment_date = %s,
-                                        enrichment_last_payment_date = %s,
-                                        enrichment_merchant_id = COALESCE(%s, enrichment_merchant_id),
-                                        enrichment_logo = COALESCE(%s, enrichment_logo),
-                                        enrichment_website = COALESCE(%s, enrichment_website)
-                                    WHERE user_id = %s AND transaction_id = %s
-                                """, (
-                                    rec_data.get('enrichment_recurrence'),
-                                    rec_data.get('enrichment_recurrence_group_id'),
-                                    rec_data.get('enrichment_periodicity'),
-                                    rec_data.get('enrichment_periodicity_days'),
-                                    rec_data.get('enrichment_avg_amount'),
-                                    rec_data.get('enrichment_first_payment_date'),
-                                    rec_data.get('enrichment_last_payment_date'),
-                                    rec_data.get('enrichment_merchant_id'),
-                                    rec_data.get('enrichment_logo'),
-                                    rec_data.get('enrichment_website'),
-                                    user_id, txn_id
-                                ))
-                                if rec_cursor.rowcount > 0:
-                                    rec_updated += 1
-                            
-                            # Mark non-recurring transactions as "one off"
-                            recurring_ids = list(recurrence_map.keys())
-                            placeholders = ','.join(['%s'] * len(recurring_ids))
-                            rec_cursor.execute(f"""
-                                UPDATE linked_transactions
-                                SET enrichment_recurrence = 'one off'
-                                WHERE user_id = %s AND enrichment_recurrence IS NULL
-                                  AND transaction_id NOT IN ({placeholders})
-                            """, [user_id] + recurring_ids)
-                            
-                            rec_conn.commit()
-                            log_info(app.logger, 'RECURRENCE', f"Updated {rec_updated} transactions via MySQL-direct for user {user_id}")
-                        except Exception as rec_sql_err:
-                            rec_conn.rollback()
-                            log_exception(app.logger, 'RECURRENCE', f"MySQL error: {rec_sql_err}")
-                        finally:
-                            rec_cursor.close()
-                    
-                    # Refresh Redis cache to include recurrence data
-                    if rec_updated > 0 and app.config.get('REDIS_OK'):
-                        _redis_client.delete(f"linked_transactions:v1:{user_id}")
-            except Exception as rec_err:
-                log_exception(app.logger, 'RECURRENCE', f"Error updating recurrence for user {user_id}: {rec_err}")
-        # --- END UPDATE RECURRENCE ---
-        
-        # Update cached last transaction date and signal UI refresh
-        try:
-            update_last_linked_transaction_date(user_id)
-            if app.config.get('REDIS_OK'):
-                _redis_client.setex(f"force_refresh:{user_id}", 60, "1")
-        except Exception:
-            pass
-        
-        return (True, total_synced, message)
-        
-    except Exception as e:
-        # Clean up MySQL connection if it was opened
-        try:
-            _sync_cursor.close()
-            _sync_conn.close()
-        except Exception:
-            pass
-        log_error(app.logger, 'BANK', f"Error syncing linked transactions for user {user_id}: {e}")
-        return (False, 0, str(e))
-
-
-def _create_auto_adjustment_for_bank_balance(user_id, bank_balance, account_name_lower=''):
-    """
-    Create an auto-adjustment entry to match Blankee remainder with bank balance.
-    Called when a checking account is connected or enabled.
-    Uses YESTERDAY's date so the adjustment doesn't interfere with today's entries.
-    
-    Returns: (success: bool, message: str)
-    """
-    try:
-        from datetime import date as date_class, timedelta as td
-        yesterday = date_class.today() - td(days=1)
-        today_str = yesterday.strftime('%Y-%m-%d')
-        
-        # Get yesterday's remainder from Redis or MySQL
-        today_remainder = None
-        
-        # Try Redis first
-        cached_daily = _get_totals_remainders_from_redis('totals_remainders_d', user_id)
-        if cached_daily:
-            for row in cached_daily:
-                row_date = datetime.strptime(row['date'], '%Y-%m-%d').date() if isinstance(row['date'], str) else row['date']
-                if row_date == yesterday:
-                    today_remainder = float(row.get('remainder', 0))
-                    break
-        
-        # Fallback to MySQL if not in Redis
-        if today_remainder is None:
-            pass
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT remainder FROM totals_remainders_d
-                    WHERE user_id = %s AND date = %s
-                    LIMIT 1
-                """, (user_id, today_str))
-                result = cursor.fetchone()
-                cursor.close()
-                
-                if result:
-                    today_remainder = float(result['remainder'])
-                else:
-                    pass
-                    return False, "No remainder data found for yesterday"
-        
-        bank_balance_float = float(bank_balance)
-        
-        # Calculate difference
-        diff = bank_balance_float - today_remainder
-        
-        # Skip if difference is negligible (less than 1 cent)
-        if abs(diff) < 0.01:
-            pass
-            return True, f"No adjustment needed - balance already matches (${bank_balance_float:.2f})"
-        
-        # Determine if we need income or expense adjustment
-        entry_type = 'income' if diff > 0 else 'expense'
-        table_name = 'income_entries' if diff > 0 else 'expense_entries'
-        
-        # Find Uncategorized category
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            if entry_type == 'income':
-                cursor.execute("""
-                    SELECT id, name FROM income_categories 
-                    WHERE user_id = %s AND is_auto_adjustment = 1 
-                    LIMIT 1
-                """, (user_id,))
-            else:
-                cursor.execute("""
-                    SELECT id, name FROM expense_categories 
-                    WHERE user_id = %s AND is_auto_adjustment = 1 
-                    LIMIT 1
-                """, (user_id,))
-            
-            auto_cat = cursor.fetchone()
-            cursor.close()
-        
-        if not auto_cat:
-            log_error(app.logger, 'AUTO_ADJUSTMENT', f"User {user_id}: No Uncategorized category found for {entry_type}")
-            return False, f"No Uncategorized category found for {entry_type}"
-        
-        category_id = auto_cat['id']
-        adjustment_amount = abs(diff)
-        
-        # Add adjustment entry to Redis (will be flushed to MySQL)
-        existing_data = _get_entries_from_redis(table_name, user_id)
-        
-        # If not in Redis, load from MySQL first
-        if existing_data is None:
-            existing_data = []
-            with get_db_pool().get_connection() as conn:
-                cursor2 = conn.cursor(pymysql.cursors.DictCursor)
-                if entry_type == 'income':
-                    cursor2.execute("""
-                        SELECT ie.* FROM income_entries ie
-                        JOIN income_categories ic ON ie.category_id = ic.id
-                        WHERE ic.user_id = %s
-                    """, (user_id,))
-                else:
-                    cursor2.execute("""
-                        SELECT ee.* FROM expense_entries ee
-                        JOIN expense_categories ec ON ee.category_id = ec.id
-                        WHERE ec.user_id = %s
-                    """, (user_id,))
-                existing_data = list(cursor2.fetchall())
-                cursor2.close()
-            existing_data = _filter_pending_deletions(table_name, user_id, existing_data)
-        
-        # Check if auto-adjustment entry already exists for today
-        existing_entry = None
-        if existing_data:
-            for entry in existing_data:
-                if str(entry.get('category_id')) == str(category_id) and str(entry.get('date')) == today_str:
-                    existing_entry = entry
-                    break
-        
-        if existing_entry:
-            # Update existing entry
-            new_amount = Decimal(existing_entry.get('amount', 0)) + Decimal(adjustment_amount)
-            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(new_amount), processed=1, is_auto_adjustment=True)
-        else:
-            # Create new entry
-            _update_entry_in_redis(table_name, user_id, category_id, today_str, float(adjustment_amount), processed=1, is_auto_adjustment=True)
-        
-        return True, f"Auto-adjustment created: {entry_type} of ${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
-        
-    except Exception as e:
-        log_exception(app.logger, 'AUTO_ADJUSTMENT', f"Error for user {user_id}: {e}")
-        return False, f"Error creating auto-adjustment: {str(e)}"
-
-
-def _update_savings_balance_from_bank(user_id, bank_savings_balance, linked_account_id=None):
-    """
-    Create a savings adjustment entry to reconcile with the bank balance.
-    The adjustment stores the DELTA (difference) between bank balance and calculated balance.
-    This delta persists through recalculations and is ADDED to the calculated value.
-    Uses YESTERDAY's date so the adjustment doesn't interfere with today's entries.
-    
-    Args:
-        user_id: User ID
-        bank_savings_balance: Current savings balance from the bank
-        linked_account_id: Optional linked account ID for reference
-        
-    Returns: (success: bool, message: str)
-    """
-    try:
-        from datetime import date as date_class, timedelta as td
-        yesterday = date_class.today() - td(days=1)
-        today_str = yesterday.strftime('%Y-%m-%d')
-        
-        log_info(app.logger, 'SAVINGS_ADJUST', f"Creating adjustment for user {user_id}: bank balance ${bank_savings_balance}")
-        
-        # Get current calculated savings for today (before adjustment)
-        current_calculated_savings = 0.0
-        savings_entries = _get_savings_entries_from_redis(user_id)
-        
-        if savings_entries:
-            for entry in savings_entries:
-                entry_date = entry.get('date')
-                if isinstance(entry_date, str):
-                    if entry_date == today_str:
-                        current_calculated_savings = float(entry.get('amount', 0))
-                        break
-                elif entry_date == yesterday:
-                    current_calculated_savings = float(entry.get('amount', 0))
-                    break
-        
-        if current_calculated_savings == 0.0:
-            # Fallback to MySQL
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT amount FROM savings_entries
-                    WHERE user_id = %s AND date = %s
-                """, (user_id, today_str))
-                result = cursor.fetchone()
-                if result:
-                    current_calculated_savings = float(result['amount'])
-                cursor.close()
-        
-        # Calculate the delta (what we need to add to match bank balance)
-        bank_balance_float = float(bank_savings_balance)
-        adjustment_delta = bank_balance_float - current_calculated_savings
-        
-        log_info(app.logger, 'SAVINGS_ADJUST', f"Calculated savings: ${current_calculated_savings}, Bank: ${bank_balance_float}, Delta: ${adjustment_delta}")
-        
-        # Get current savings adjustments from Redis
-        adjustments = _get_savings_adjustments_from_redis(user_id)
-        
-        if adjustments is None:
-            # Load from MySQL if not in Redis
-            adjustments = []
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT id, user_id, date, amount, description, linked_account_id
-                    FROM savings_adjustments
-                    WHERE user_id = %s
-                    ORDER BY date
-                """, (user_id,))
-                for row in cursor.fetchall():
-                    adjustments.append({
-                        'id': row['id'],
-                        'user_id': row['user_id'],
-                        'date': row['date'].isoformat() if isinstance(row['date'], date_class) else row['date'],
-                        'amount': float(row['amount']) if row['amount'] else 0,
-                        'description': row['description'],
-                        'linked_account_id': row['linked_account_id']
-                    })
-                cursor.close()
-        
-        # Always create a new "Bank balance sync" adjustment
-        # (Don't touch any existing adjustments - those stay as historical records)
-        existing_ids = [int(a.get('id', 0)) for a in adjustments if a.get('id')]
-        min_id = min(existing_ids) if existing_ids else 0
-        temp_id = min_id - 1 if min_id <= 0 else -1
-        
-        adjustments.append({
-            'id': temp_id,
-            'user_id': user_id,
-            'date': today_str,
-            'amount': float(adjustment_delta),
-            'description': 'Bank balance sync',
-            'linked_account_id': linked_account_id
-        })
-        # Sort by date
-        adjustments.sort(key=lambda x: x['date'])
-        log_info(app.logger, 'SAVINGS_ADJUST', f"Created new bank sync adjustment for {today_str}: ${adjustment_delta}")
-        
-        # Save to Redis
-        _set_savings_adjustments_to_redis(user_id, adjustments)
-        
-        # Note: We don't call update_daily_savings_for_savings_category here because
-        # the calling code (bank_auto_adjust_checking) already calls save_totals_remainders_d()
-        # which will apply the adjustment. Calling it here would double-apply the delta.
-        
-        return True, f"Savings adjustment created: delta ${adjustment_delta:.2f} (bank ${bank_balance_float:.2f})"
-        
-    except Exception as e:
-        log_exception(app.logger, 'SAVINGS_ADJUST', f"Error for user {user_id}: {e}")
-        return False, f"Error creating savings adjustment: {str(e)}"
-
-
-def _create_credit_account_auto_adjustment(user_id, linked_account_id, bank_balance, account_mask):
-    """
-    Create an auto-adjustment entry for a credit account to match the bank balance.
-    Called when a credit account is connected/enabled via the bank provider.
-    
-    Args:
-        user_id: User ID
-        linked_account_id: linked account ID (used as primary lookup)
-        bank_balance: Current balance from the bank
-        account_mask: Account mask (fallback for matching)
-        
-    Returns: (success: bool, message: str)
-    """
-    try:
-        from datetime import date as date_class, timedelta as td
-        yesterday = date_class.today() - td(days=1)
-        today_str = yesterday.strftime('%Y-%m-%d')
-        
-        log_info(app.logger, 'CA_AUTO_ADJUST', f"Creating adjustment for user {user_id}, provider_id {linked_account_id}, mask {account_mask}: bank balance ${bank_balance}")
-        
-        # Find the credit account - first by linked_account_id, then by mask
-        credit_accounts = None
-        redis_key = f"credit_accounts:v1:{user_id}"
-        if app.config.get('REDIS_OK'):
-            try:
-                cached = _redis_client.get(redis_key)
-                if cached:
-                    credit_accounts = json.loads(cached)
-            except Exception as e:
-                log_error(app.logger, 'CA_AUTO_ADJUST', f"Redis error: {e}")
-        
-        if credit_accounts is None:
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order DESC", (user_id,))
-                credit_accounts = list(cursor.fetchall())
-                cursor.close()
-        
-        # Find the matching credit account - linked_account_id first, then mask
-        target_account = None
-        for ca in credit_accounts:
-            # Primary: match by linked_account_id
-            if ca.get('linked_account_id') == linked_account_id:
-                target_account = ca
-                log_info(app.logger, 'CA_AUTO_ADJUST', f"Found credit account by linked_account_id {linked_account_id}")
-                break
-            # Fallback: match by mask
-            elif ca.get('mask') == account_mask and not target_account:
-                target_account = ca
-                log_info(app.logger, 'CA_AUTO_ADJUST', f"Found credit account by mask {account_mask}")
-        
-        if not target_account:
-            log_warning(app.logger, 'CA_AUTO_ADJUST', f"No credit account found for provider_id {linked_account_id} or mask {account_mask}")
-            return False, f"No credit account found for provider_id {linked_account_id} or mask {account_mask}"
-        
-        account_id = target_account.get('id')
-        starting_balance = float(target_account.get('starting_balance', 0))
-        
-        # NOTE: We do NOT skip auto-adjustment based on Starting Balance entry existence.
-        # The callers handle the "just created" case:
-        #   - toggle-sync uses credit_account_was_created flag to skip calling this function
-        #   - sync-profile only calls this for existing accounts (not newly created ones)
-        # If an existing account has a Starting Balance entry but the bank balance differs,
-        # the auto-adjustment should still run to reconcile the difference.
-        
-        # Get current calculated balance for this credit account
-        # The balance = starting_balance + expenses - payments
-        # We need to find the current calculated balance and adjust to match bank
-        
-        c_a_balances = None
-        balance_key = f"c_a_balances_d:v1:{user_id}"
-        if app.config.get('REDIS_OK'):
-            try:
-                cached = _redis_client.get(balance_key)
-                if cached:
-                    c_a_balances = json.loads(cached)
-            except Exception as e:
-                log_error(app.logger, 'CA_AUTO_ADJUST', f"Redis error getting balances: {e}")
-        
-        current_calculated_balance = starting_balance  # Default to starting balance
-        
-        if c_a_balances:
-            for bal in c_a_balances:
-                if str(bal.get('account_id')) == str(account_id) and str(bal.get('date')) == today_str:
-                    current_calculated_balance = float(bal.get('balance', starting_balance))
-                    break
-        
-        if current_calculated_balance == starting_balance:
-            # Try MySQL
-            with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT balance FROM c_a_balances_d
-                    WHERE account_id = %s AND date = %s
-                """, (account_id, today_str))
-                result = cursor.fetchone()
-                if result:
-                    current_calculated_balance = float(result['balance'])
-                cursor.close()
-        
-        bank_balance_float = float(bank_balance)
-        
-        # Calculate difference (how much we need to add as expense to match bank balance)
-        # Bank shows what we owe, calculated balance shows what we think we owe
-        diff = bank_balance_float - current_calculated_balance
-        
-        log_info(app.logger, 'CA_AUTO_ADJUST', f"Calculated balance: ${current_calculated_balance}, Bank: ${bank_balance_float}, Diff: ${diff}")
-        
-        # Skip if difference is negligible
-        if abs(diff) < 0.01:
-            return True, f"No adjustment needed - balance already matches (${bank_balance_float:.2f})"
-        
-        adjustment_amount = abs(diff)
-        
-        if diff > 0:
-            # Balance needs to go UP (bank balance higher than calculated)
-            # Create a c_expense_entries record
-            
-            # Get categories for this credit account
-            c_expense_categories = None
-            cat_key = f"c_expense_categories:v1:{user_id}"
-            if app.config.get('REDIS_OK'):
-                try:
-                    cached = _redis_client.get(cat_key)
-                    if cached:
-                        c_expense_categories = json.loads(cached)
-                except Exception as e:
-                    log_error(app.logger, 'CA_AUTO_ADJUST', f"Redis error getting categories: {e}")
-            
-            if c_expense_categories is None:
-                with get_db_pool().get_connection() as conn:
-                    cursor = conn.cursor(pymysql.cursors.DictCursor)
-                    cursor.execute("""
-                        SELECT * FROM c_expense_categories WHERE account_id = %s
-                    """, (account_id,))
-                    c_expense_categories = list(cursor.fetchall())
-                    cursor.close()
-            
-            # Prefer Starting Balance category over Uncategorized for the adjustment.
-            # This makes the balance reconciliation more transparent to the user.
-            target_cat = None
-            
-            # First look for Starting Balance category for this account
-            for cat in (c_expense_categories or []):
-                if (str(cat.get('account_id')) == str(account_id) and 
-                    cat.get('name') == 'Starting Balance' and 
-                    not cat.get('is_auto_adjustment')):
-                    target_cat = cat
-                    log_info(app.logger, 'CA_AUTO_ADJUST', f"Using Starting Balance category (id={cat.get('id')}) for adjustment")
-                    break
-            
-            # Fall back to Uncategorized (auto-adjustment) category
-            if not target_cat:
-                for cat in (c_expense_categories or []):
-                    if str(cat.get('account_id')) == str(account_id) and cat.get('is_auto_adjustment') == 1:
-                        target_cat = cat
-                        log_info(app.logger, 'CA_AUTO_ADJUST', f"No Starting Balance category found, using Uncategorized (id={cat.get('id')})")
-                        break
-            
-            if not target_cat:
-                # Create the Uncategorized category if nothing exists
-                log_info(app.logger, 'CA_AUTO_ADJUST', f"Creating missing Uncategorized category for account {account_id}")
-                new_cat_id = _add_category_to_redis('c_expense_categories', user_id, {
-                    'account_id': account_id,
-                    'name': 'Uncategorized',
-                    'display_order': 0.0001,
-                    'group_id': None,
-                    'is_recurring': 0,
-                    'no_end_date': 0,
-                    'hidden': 0,
-                    'is_bundle': 0,
-                    'is_interest': 0,
-                    'is_auto_adjustment': 1,
-                    'is_system': 1
-                })
-                
-                if new_cat_id:
-                    log_info(app.logger, 'CA_AUTO_ADJUST', f"Created Uncategorized category with ID {new_cat_id}")
-                    target_cat = {'id': new_cat_id, 'account_id': account_id, 'is_auto_adjustment': 1}
-                else:
-                    log_error(app.logger, 'CA_AUTO_ADJUST', f"Failed to create Uncategorized category for account {account_id}")
-                    return False, f"Failed to create category for credit account adjustment"
-            
-            category_id = target_cat.get('id')
-            
-            # Check if a Starting Balance entry already exists — if so, UPDATE it instead of creating a new entry
-            is_starting_balance = (target_cat.get('name') == 'Starting Balance')
-            if is_starting_balance:
-                c_expense_entries = _get_entries_from_redis('c_expense_entries', user_id)
-                if c_expense_entries is None:
-                    c_expense_entries = []
-                
-                existing_sb_entry = None
-                for entry in c_expense_entries:
-                    if int(entry.get('category_id', 0)) == int(category_id):
-                        existing_sb_entry = entry
-                        break
-                
-                if existing_sb_entry:
-                    # Update existing Starting Balance entry to match bank balance
-                    old_amount = float(existing_sb_entry.get('amount', 0))
-                    new_amount = old_amount + adjustment_amount
-                    existing_sb_entry['amount'] = new_amount
-                    existing_sb_entry['original_amount'] = new_amount
-                    
-                    # Save back to Redis
-                    redis_key_entries = f"c_expense_entries:v1:{user_id}"
-                    _redis_client.setex(
-                        redis_key_entries,
-                        PERSISTENT_CACHE_TTL,
-                        json.dumps(c_expense_entries, cls=DecimalEncoder)
-                    )
-                    dirty_key = f"dirty_tables:{user_id}"
-                    _redis_client.sadd(dirty_key, 'c_expense_entries')
-                    _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-                    
-                    log_info(app.logger, 'CA_AUTO_ADJUST', f"Updated Starting Balance entry from ${old_amount} to ${new_amount}")
-                    return True, f"Starting Balance updated: ${old_amount:.2f} → ${new_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
-            
-            # Create new expense entry to increase balance
-            _update_entry_in_redis('c_expense_entries', user_id, category_id, today_str, float(adjustment_amount), processed=1, is_auto_adjustment=True)
-            log_info(app.logger, 'CA_AUTO_ADJUST', f"Created {'Starting Balance' if is_starting_balance else 'expense'} entry for ${adjustment_amount} to increase balance")
-            
-            return True, f"Credit account expense adjustment: +${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
-        
-        else:
-            # Balance needs to go DOWN (bank balance lower than calculated)
-            # Create a c_payment_entries record
-            
-            # Get existing c_payment_entries
-            c_payment_entries = _get_entries_from_redis('c_payment_entries', user_id)
-            
-            if c_payment_entries is None:
-                with get_db_pool().get_connection() as conn:
-                    cursor = conn.cursor(pymysql.cursors.DictCursor)
-                    cursor.execute("""
-                        SELECT * FROM c_payment_entries WHERE account_id = %s
-                    """, (account_id,))
-                    c_payment_entries = list(cursor.fetchall())
-                    cursor.close()
-            
-            # Create payment entry to decrease balance
-            # Use _update_ca_payment_entry_in_redis or similar helper
-            # Get existing entries for this account
-            if c_payment_entries is None:
-                c_payment_entries = []
-            
-            # Generate temp ID for new entry
-            existing_ids = [int(e.get('id', 0)) for e in c_payment_entries if e.get('id')]
-            min_id = min(existing_ids) if existing_ids else 0
-            temp_id = min_id - 1 if min_id <= 0 else -1
-            
-            # Add new payment entry
-            new_entry = {
-                'id': temp_id,
-                'account_id': account_id,
-                'date': today_str,
-                'amount': float(adjustment_amount),
-                'recurring_id': None,
-                'processed': 1
-            }
-            c_payment_entries.append(new_entry)
-            
-            # Save to Redis
-            redis_key = f"c_payment_entries:v1:{user_id}"
-            if app.config.get('REDIS_OK'):
-                _redis_client.setex(
-                    redis_key,
-                    PERSISTENT_CACHE_TTL,
-                    json.dumps(c_payment_entries, cls=DecimalEncoder)
-                )
-                # Mark as dirty
-                dirty_key = f"dirty_tables:{user_id}"
-                _redis_client.sadd(dirty_key, 'c_payment_entries')
-                _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-            
-            log_info(app.logger, 'CA_AUTO_ADJUST', f"Created payment entry for ${adjustment_amount} to decrease balance")
-            
-            return True, f"Credit account payment adjustment: -${adjustment_amount:.2f} to match bank balance ${bank_balance_float:.2f}"
-        
-    except Exception as e:
-        log_exception(app.logger, 'CA_AUTO_ADJUST', f"Error for user {user_id}: {e}")
-        return False, f"Error creating credit account auto-adjustment: {str(e)}"
-
-
 @app.route('/bank/analyze-transactions-for-categories', methods=['POST'])
 @login_required
 def bank_analyze_transactions_for_categories():
@@ -28508,105 +25768,6 @@ def _calculate_end_date_from_occurrences(start_date_str, cadence_interval, caden
     return end_date.strftime('%Y-%m-%d')
 
 
-@app.route('/bank/auto-adjust-checking', methods=['POST'])
-@login_required
-def bank_auto_adjust_checking():
-    """
-    Create auto-adjustment entries for all active checking accounts.
-    Called after initial setup or when user enables checking accounts.
-    """
-    try:
-        # Get all active accounts for this user
-        accounts = get_linked_accounts(current_user.id)
-        
-        log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"User {current_user.id}: Found {len(accounts) if accounts else 0} accounts")
-        
-        if not accounts:
-            log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"User {current_user.id}: No accounts found, returning early")
-            return jsonify({'status': 'success', 'message': 'No accounts found'})
-        
-        adjustments_made = []
-        savings_updated = False
-        
-        for account in accounts:
-            # Only process active depository accounts (checking/savings)
-            is_active = account.get('is_active', 0)
-            sync_transactions = account.get('sync_transactions', 0)
-            account_type = account.get('account_type', '').lower()
-            account_name = account.get('account_name', '').lower()
-            current_balance = account.get('current_balance', 0)
-            
-            log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Account: {account.get('account_name')} - type={account_type}, is_active={is_active}, sync_transactions={sync_transactions}, balance={current_balance}")
-            
-            if is_active and sync_transactions and account_type == 'depository' and current_balance:
-                # Check if it's a CHECKING account - create auto-adjustment
-                if 'checking' in account_name:
-                    log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Processing CHECKING account '{account.get('account_name')}' with balance {current_balance}")
-                    
-                    success, message = _create_auto_adjustment_for_bank_balance(
-                        current_user.id,
-                        current_balance,
-                        account_name
-                    )
-                    
-                    if success:
-                        adjustments_made.append({
-                            'account_name': account.get('account_name'),
-                            'balance': float(current_balance),
-                            'message': message
-                        })
-                        log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Success for {account.get('account_name')}: {message}")
-                    else:
-                        log_warning(app.logger, 'AUTO_ADJUST_CHECKING', f"Failed for {account.get('account_name')}: {message}")
-                
-                # Check if it's a SAVINGS account - update savings balance
-                elif 'savings' in account_name:
-                    log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Processing SAVINGS account '{account.get('account_name')}' with balance {current_balance}")
-                    
-                    success, message = _update_savings_balance_from_bank(
-                        current_user.id,
-                        float(current_balance)
-                    )
-                    
-                    if success:
-                        savings_updated = True
-                        log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Savings updated for {account.get('account_name')}: {message}")
-                    else:
-                        log_warning(app.logger, 'AUTO_ADJUST_CHECKING', f"Failed to update savings for {account.get('account_name')}: {message}")
-        
-        # Recalculate totals and remainders if any changes were made
-        if adjustments_made or savings_updated:
-            log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Recalculating totals for user {current_user.id}")
-            try:
-                save_totals_remainders_d()
-                log_info(app.logger, 'AUTO_ADJUST_CHECKING', f"Totals recalculated successfully")
-            except Exception as calc_err:
-                log_error(app.logger, 'AUTO_ADJUST_CHECKING', f"Error recalculating totals: {calc_err}")
-        
-        result_message = []
-        if adjustments_made:
-            result_message.append(f'Created {len(adjustments_made)} auto-adjustment(s)')
-        if savings_updated:
-            result_message.append('Updated savings balance')
-        
-        if result_message:
-            return jsonify({
-                'status': 'success',
-                'adjustments': adjustments_made,
-                'savings_updated': savings_updated,
-                'message': ' | '.join(result_message)
-            })
-        else:
-            return jsonify({
-                'status': 'success',
-                'message': 'No accounts needed adjustment'
-            })
-    
-    except Exception as e:
-        log_exception(app.logger, 'AUTO_ADJUST_CHECKING', f"Error: {e}")
-        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
-
-
 @app.route('/bank/toggle-auto-import', methods=['POST'])
 @login_required
 def bank_toggle_auto_import():
@@ -28623,6 +25784,551 @@ def bank_toggle_auto_import():
     except Exception as e:
         log_error(app.logger, 'BANK', f"Error toggling auto-import: {e}")
         return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+
+
+
+##############################################################################
+################ SIMPLEFIN CONNECT FLOW + AI CATEGORIZATION ##################
+##############################################################################
+# The connection flows only. Pulling transactions, the daily poll and the
+# enrichment itself come in the next phase; these routes get a user from
+# "no bank" to "accounts linked and classified", and from "no key" to "key
+# tested and AI switched on" - guided, on the setup wizard and on the bank
+# and profile pages, through the shared partials templates/_simplefin_connect.html
+# and templates/_ai_settings_panel.html.
+
+
+def _ai_display(user_id):
+    """The AI panel's state for a page, or None when Claude is not the provider."""
+    provider = get_enrichment_provider()
+    if getattr(provider, 'name', '') != 'claude' or not hasattr(provider, 'get_display'):
+        return None
+    try:
+        return provider.get_display(user_id)
+    except Exception as e:
+        log_error(app.logger, 'AI', f'Could not read AI settings for user {user_id}: {e}')
+        return None
+
+
+def _simplefin_provider():
+    provider = get_bank_provider()
+    if getattr(provider, 'name', '') != 'simplefin':
+        abort(404)
+    return provider
+
+
+def _claude_provider():
+    provider = get_enrichment_provider()
+    if getattr(provider, 'name', '') != 'claude':
+        abort(404)
+    return provider
+
+
+def _linked_starting_balances(user_id):
+    """
+    The checking and savings balances the bank last reported, as floats, for
+    the wizard's starting-balance step. None for a kind nothing is linked to.
+    """
+    out = {'checking': None, 'savings': None}
+    try:
+        from bank_redis import get_linked_accounts, linked_account_kind
+        for acc in get_linked_accounts(user_id) or []:
+            if str(acc.get('is_active', 1)).lower() in ('0', 'false'):
+                continue
+            kind = linked_account_kind(acc)
+            if kind not in out or out[kind] is not None:
+                continue
+            bal = acc.get('current_balance')
+            if bal is None:
+                bal = acc.get('available_balance')
+            if bal is not None:
+                out[kind] = round(float(bal), 2)
+    except Exception as e:
+        log_exception(app.logger, 'BANK', f'user {user_id}: could not read linked balances: {e}')
+    return out
+
+
+def _simplefin_overview_payload(user_id, provider):
+    """
+    What the account-classification screen needs: the live accounts from
+    SimpleFIN (one balances-only request), what is already stored for them
+    (so a re-visit shows the user's own choices), and the user's Blankee cards
+    to link to.
+    """
+    from providers.simplefin import SimpleFINError
+    from bank_redis import _get_all_linked_accounts_raw
+    from credit_link import cards_for_linking
+    payload = {'connections': [], 'accounts': [], 'errors': [], 'stored_accounts': [], 'existing_cards': []}
+    try:
+        payload.update(provider.fetch_overview(user_id))
+    except SimpleFINError as e:
+        payload['errors'] = [{'code': e.code, 'msg': e.message}]
+        payload['message'] = e.message
+    try:
+        payload['stored_accounts'] = [
+            {'account_id': a.get('account_id'), 'account_subtype': a.get('account_subtype'),
+             'is_active': a.get('is_active', 1), 'alias': a.get('alias')}
+            for a in (_get_all_linked_accounts_raw(user_id) or [])
+        ]
+    except Exception as e:
+        log_warning(app.logger, 'BANK', f'Could not read stored accounts for user {user_id}: {e}')
+    try:
+        payload['existing_cards'] = cards_for_linking(user_id)
+    except Exception as e:
+        log_warning(app.logger, 'BANK', f'Could not read cards for user {user_id}: {e}')
+    payload['bank'] = provider.connect_widget_config(user_id)
+    return payload
+
+
+@app.route('/bank/simplefin/claim', methods=['POST'])
+@app.route('/bank/simplefin/replace-token', methods=['POST'])
+@login_required
+def bank_simplefin_claim():
+    """
+    Paste a Setup Token: claim it, store the access URL, show the accounts.
+    Replacing a token is the same operation - the new access URL simply
+    overwrites the old one and the accounts already linked stay linked.
+    """
+    provider = _simplefin_provider()
+    data = request.get_json(silent=True) or {}
+    try:
+        ok, message = provider.claim_setup_token(current_user.id, data.get('token', ''))
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    if not ok:
+        # A spent token from someone who is already connected is the common
+        # slip (a reload put the old token back, or it was pasted twice).
+        # Refusing would hide the fact that they are connected; show them
+        # their accounts instead.
+        if 'already been used' in message and provider.has_credentials(current_user.id):
+            payload = _simplefin_overview_payload(current_user.id, provider)
+            payload['status'] = 'success'
+            payload['message'] = ('That token was already used - and you are already connected. '
+                                  'Choose your accounts below.')
+            return jsonify(payload)
+        return jsonify({'status': 'error', 'message': message}), 400
+    payload = _simplefin_overview_payload(current_user.id, provider)
+    payload.setdefault('message', message)
+    payload['status'] = 'success'
+    return jsonify(payload)
+
+
+@app.route('/bank/simplefin/accounts', methods=['GET'])
+@login_required
+def bank_simplefin_accounts():
+    """The classification screen for an already-connected user (bank page)."""
+    provider = _simplefin_provider()
+    if not provider.has_credentials(current_user.id):
+        return jsonify({'status': 'error', 'message': 'No SimpleFIN connection yet.'}), 404
+    payload = _simplefin_overview_payload(current_user.id, provider)
+    payload['status'] = 'error' if payload.get('errors') and not payload.get('accounts') else 'success'
+    return jsonify(payload), (400 if payload['status'] == 'error' else 200)
+
+
+_SUBTYPES = ('checking', 'savings', 'credit_card', 'skip')
+
+
+@app.route('/bank/simplefin/link-accounts', methods=['POST'])
+@login_required
+def bank_simplefin_link_accounts():
+    """
+    Save the user's classification of their SimpleFIN accounts.
+
+    SimpleFIN has no account types, so this is where checking / savings /
+    credit card is decided, and it is the only place: everything downstream
+    reads linked_accounts.account_type / account_subtype. Connections are
+    written to MySQL directly so the accounts get real connection ids at
+    once, rather than temporary ones the flush has to remap. No transaction
+    pull happens here yet - that is the next phase.
+    """
+    from providers.simplefin import SimpleFINError, account_type_for
+    from bank_redis import (upsert_linked_connection, upsert_linked_account,
+                            _get_all_linked_accounts_raw)
+    from credit_link import link_credit_account, unlink_credit_account, create_linked_credit_account
+    import redis_manager as _rm
+
+    provider = _simplefin_provider()
+    user_id = current_user.id
+    data = request.get_json(silent=True) or {}
+    rows = data.get('accounts') or []
+    # 'setup' is the wizard, whose starting-balance step sets the opening
+    # figures; anywhere else the bank's balances are applied at once.
+    from_wizard = (data.get('mode') == 'setup')
+    if not isinstance(rows, list) or not rows:
+        return jsonify({'status': 'error', 'message': 'Choose what each account is first.'}), 400
+    for row in rows:
+        if row.get('subtype') not in _SUBTYPES:
+            return jsonify({'status': 'error', 'message': 'Unknown account type.'}), 400
+    chosen = [r for r in rows if r['subtype'] != 'skip']
+    if not chosen:
+        return jsonify({'status': 'error', 'message': 'Choose at least one account to import, or skip this step.'}), 400
+    if sum(1 for r in chosen if r['subtype'] == 'checking') > 1:
+        return jsonify({'status': 'error', 'message': 'Only one checking account can be imported.'}), 400
+    if sum(1 for r in chosen if r['subtype'] == 'savings') > 1:
+        return jsonify({'status': 'error', 'message': 'Only one savings account can be imported.'}), 400
+
+    try:
+        overview = provider.fetch_overview(user_id)
+    except SimpleFINError as e:
+        return jsonify({'status': 'error', 'message': e.message}), 400
+    live_accounts = {a['account_id']: a for a in overview['accounts']}
+    live_connections = {c['connection_id']: c for c in overview['connections']}
+    stored = {a.get('account_id'): a for a in (_get_all_linked_accounts_raw(user_id) or [])}
+
+    try:
+        # Connections first, MySQL-direct, so their real ids exist.
+        needed = {}
+        for row in chosen:
+            acc = live_accounts.get(row.get('account_id'))
+            if not acc:
+                return jsonify({'status': 'error', 'message': 'One of those accounts is no longer reported by SimpleFIN. Reload and try again.'}), 400
+            conn = live_connections.get(acc['connection_id'])
+            if conn:
+                needed[conn['connection_id']] = conn
+        real_ids = {}
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            for cid, conn in needed.items():
+                cursor.execute(
+                    "INSERT INTO linked_connections (user_id, connection_id, institution_name, institution_id, status, last_synced_at) "
+                    "VALUES (%s, %s, %s, %s, %s, NOW()) "
+                    "ON DUPLICATE KEY UPDATE institution_name = VALUES(institution_name), "
+                    " institution_id = VALUES(institution_id), status = VALUES(status)",
+                    (user_id, cid, conn.get('institution_name'), conn.get('institution_id'), conn.get('status') or 'ACTIVE'))
+            if needed:
+                cursor.execute("SELECT id, connection_id FROM linked_connections WHERE user_id = %s", (user_id,))
+                for db_id, cid in cursor.fetchall():
+                    real_ids[cid] = db_id
+        # Drop the cached list so the Redis-first helpers reload it with the
+        # real ids, then let them own the rows from here.
+        if app.config.get('REDIS_OK') and _redis_client is not None:
+            _redis_client.delete(f"linked_connections:v1:{user_id}")
+        for cid, conn in needed.items():
+            upsert_linked_connection({
+                'connection_id': cid,
+                'institution_name': conn.get('institution_name'),
+                'institution_id': conn.get('institution_id'),
+                'status': conn.get('status') or 'ACTIVE',
+            }, user_id)
+
+        linked = 0
+        cards_made = 0
+        # What the bank says each linked balance is, for the reconciliation
+        # below. Cards created here already start at the bank's figure.
+        feed = {'checking': None, 'savings': None, 'cards': {}}
+        for row in rows:
+            aid = row.get('account_id')
+            acc = live_accounts.get(aid)
+            was = stored.get(aid) or {}
+            subtype = row['subtype']
+            if subtype == 'skip':
+                if was:
+                    upsert_linked_account({'account_id': aid, 'connection_id': was.get('connection_id'),
+                                           'is_active': 0, 'sync_transactions': 0}, user_id)
+                    if (was.get('account_subtype') or '') == 'credit_card':
+                        unlink_credit_account(user_id, aid)
+                continue
+            conn_db_id = real_ids.get(acc['connection_id']) or was.get('connection_id')
+            name = acc['account_name']
+            upsert_linked_account({
+                'account_id': aid,
+                'connection_id': conn_db_id,
+                'account_name': name,
+                'account_type': account_type_for(subtype),
+                'account_subtype': subtype,
+                'mask': acc.get('mask') or was.get('mask') or '',
+                'currency': acc.get('currency') or 'USD',
+                'current_balance': acc.get('current_balance'),
+                'available_balance': acc.get('available_balance'),
+                'is_active': 1,
+                'sync_transactions': 1,
+            }, user_id)
+            linked += 1
+            if subtype in ('checking', 'savings') and acc.get('current_balance') is not None:
+                feed[subtype] = float(acc['current_balance'])
+            if subtype == 'credit_card':
+                card = row.get('card') or {}
+                if card.get('mode') == 'existing' and card.get('credit_account_id'):
+                    link_credit_account(user_id, aid, int(card['credit_account_id']), mask=acc.get('mask'))
+                    if acc.get('current_balance') is not None:
+                        feed['cards'][int(card['credit_account_id'])] = abs(float(acc['current_balance']))
+                elif (was.get('account_subtype') or '') != 'credit_card' or card.get('mode') == 'new':
+                    display = (was.get('alias') or name)
+                    if create_linked_credit_account(user_id, display, aid, mask=acc.get('mask'),
+                                                    starting_balance=acc.get('current_balance')) is not None:
+                        cards_made += 1
+            elif (was.get('account_subtype') or '') == 'credit_card':
+                unlink_credit_account(user_id, aid)
+
+        # credit_accounts is in the forced-flush list; the linked_* tables are
+        # picked up by the periodic worker within seconds.
+        try:
+            _rm.flush_dirty_tables_for_user(user_id)
+        except Exception as e:
+            log_warning(app.logger, 'BANK', f'Post-link flush for user {user_id}: {e}')
+        # The nav reads these keys directly; make the next request see them.
+        try:
+            _bump_data_version(user_id)
+        except Exception:
+            pass
+        log_info(app.logger, 'BANK', f'user {user_id}: {linked} SimpleFIN account(s) linked, {cards_made} card(s) created')
+        msg = f'{linked} account{"s" if linked != 1 else ""} saved.'
+        if cards_made:
+            msg += f' {cards_made} credit card{"s" if cards_made != 1 else ""} created in Blankee.'
+        # Outside the wizard the bank's figures become the app's figures now,
+        # so the remainders match from the first day rather than drifting
+        # until the next scheduled balance.
+        reconciled = None
+        if not from_wizard and (feed['checking'] is not None or feed['savings'] is not None or feed['cards']):
+            try:
+                import auto_balance
+                reconciled = auto_balance.reconcile_to_feed(
+                    user_id, checking=feed['checking'], savings=feed['savings'], cards=feed['cards'])
+                chk = reconciled.get('checking') or {}
+                if chk and not chk.get('ok'):
+                    msg += f" Your checking balance could not be matched: {chk.get('error') or 'unknown error'}"
+                else:
+                    msg += ' Balances matched to the bank.'
+            except Exception as e:
+                log_exception(app.logger, 'BANK', f'user {user_id}: reconcile after link failed: {e}')
+                msg += ' The accounts are linked, but the balances could not be matched yet.'
+        return jsonify({'status': 'success', 'message': msg, 'linked': linked,
+                        'reconciled': reconciled,
+                        'balances': _linked_starting_balances(user_id),
+                        'bank': provider.connect_widget_config(user_id)})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+
+
+@app.route('/bank/disconnect', methods=['POST'])
+@login_required
+def bank_disconnect():
+    """
+    Forget a connection. SimpleFIN has no API for this; the user removes the
+    app on the Bridge, and the page tells them so. When it was the last
+    connection the stored access URL goes too (bank_redis does that), so a
+    later reconnect needs a fresh Setup Token.
+    """
+    from bank_redis import get_linked_connections, _get_all_linked_accounts_raw
+    from credit_link import unlink_credit_account
+    provider = get_bank_provider()
+    data = request.get_json(silent=True) or {}
+    connection_id = str(data.get('connection_id') or '').strip()
+    if not connection_id:
+        return jsonify({'status': 'error', 'message': 'Missing connection_id'}), 400
+    try:
+        user_id = current_user.id
+        conn = next((c for c in get_linked_connections(user_id) if c.get('connection_id') == connection_id), None)
+        if not conn:
+            return jsonify({'status': 'error', 'message': 'Connection not found'}), 404
+        for acc in _get_all_linked_accounts_raw(user_id) or []:
+            if acc.get('connection_id') == conn.get('id'):
+                unlink_credit_account(user_id, acc.get('account_id'))
+        try:
+            import redis_manager as _rm
+            _rm.flush_dirty_tables_for_user(user_id)   # credit_accounts is in the forced list
+        except Exception as e:
+            log_warning(app.logger, 'BANK', f'user {user_id}: flush after unlink: {e}')
+        ok = provider.disconnect(user_id, connection_id)
+        if not ok:
+            return jsonify({'status': 'error', 'message': 'Could not remove the connection.'}), 500
+        # The deletion markers are only picked up by the periodic worker for a
+        # user hydrated in *this* process, and they expire in five minutes.
+        # Flush them here, so the MySQL rows go now rather than maybe never.
+        try:
+            _rm.flush_dirty_tables_for_user(user_id)
+        except Exception as e:
+            log_warning(app.logger, 'BANK', f'user {user_id}: flush after disconnect: {e}')
+        # Last one gone: forget the access URL too, here and now, rather than
+        # relying on bank_redis's cleanup (which reads the profile row from
+        # MySQL and can miss one that has not flushed yet). Reconnecting then
+        # means a fresh Setup Token, which is the honest state.
+        remaining = [c for c in get_linked_connections(user_id) if c.get('connection_id') != connection_id]
+        if not remaining:
+            try:
+                provider.delete_user(user_id)
+                with get_db_pool().get_cursor(commit=True) as cursor:
+                    cursor.execute("DELETE FROM linked_provider_profiles WHERE user_id = %s", (user_id,))
+                if app.config.get('REDIS_OK') and _redis_client is not None:
+                    _redis_client.delete(f"linked_provider_profiles:v1:{user_id}")
+                log_info(app.logger, 'BANK', f'user {user_id}: last connection removed, credentials forgotten')
+            except Exception as e:
+                log_warning(app.logger, 'BANK', f'user {user_id}: could not forget credentials: {e}')
+        try:
+            _bump_data_version(user_id)
+        except Exception:
+            pass
+        log_info(app.logger, 'BANK', f'user {user_id}: connection {connection_id} disconnected')
+        widget = provider.connect_widget_config(user_id) or {}
+        return jsonify({'status': 'success',
+                        'message': 'Disconnected. To stop SimpleFIN sharing this bank with Blankee, '
+                                   'remove the Blankee app under Apps on the Bridge as well.',
+                        'bank': widget, 'ai': _ai_display(user_id)})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+
+
+@app.route('/bank/update-account', methods=['POST'])
+@login_required
+def bank_update_account():
+    """Change one linked account's type, or pause/resume it, from the bank page."""
+    from providers.simplefin import account_type_for
+    from bank_redis import _get_all_linked_accounts_raw, _set_to_redis
+    from credit_link import link_credit_account, unlink_credit_account, create_linked_credit_account
+    import redis_manager as _rm
+    data = request.get_json(silent=True) or {}
+    account_id = data.get('account_id')
+    if not account_id:
+        return jsonify({'status': 'error', 'message': 'Missing account_id'}), 400
+    subtype = data.get('subtype')
+    if subtype is not None and subtype not in _SUBTYPES:
+        return jsonify({'status': 'error', 'message': 'Unknown account type.'}), 400
+    try:
+        user_id = current_user.id
+        accounts = _get_all_linked_accounts_raw(user_id) or []
+        acc = next((a for a in accounts if a.get('account_id') == account_id), None)
+        if not acc:
+            return jsonify({'status': 'error', 'message': 'Account not found'}), 404
+        was_subtype = acc.get('account_subtype') or ''
+        if subtype == 'skip':
+            acc['is_active'] = 0
+            acc['sync_transactions'] = 0
+        elif subtype:
+            others = [a for a in accounts if a.get('account_id') != account_id and int(a.get('is_active', 1) or 0) == 1]
+            if subtype in ('checking', 'savings') and any((a.get('account_subtype') or '') == subtype for a in others):
+                return jsonify({'status': 'error', 'message': f'Only one {subtype} account can be imported.'}), 400
+            acc['account_subtype'] = subtype
+            acc['account_type'] = account_type_for(subtype)
+            acc['is_active'] = 1
+            acc['sync_transactions'] = 1
+        if 'sync_transactions' in data and subtype is None:
+            acc['sync_transactions'] = 1 if data.get('sync_transactions') else 0
+        _set_to_redis('linked_accounts', user_id, accounts)
+        if subtype == 'credit_card' and was_subtype != 'credit_card':
+            card = data.get('card') or {}
+            if card.get('mode') == 'existing' and card.get('credit_account_id'):
+                link_credit_account(user_id, account_id, int(card['credit_account_id']), mask=acc.get('mask'))
+            else:
+                create_linked_credit_account(user_id, acc.get('alias') or acc.get('account_name') or 'Card',
+                                             account_id, mask=acc.get('mask'),
+                                             starting_balance=acc.get('current_balance'))
+        elif was_subtype == 'credit_card' and subtype and subtype != 'credit_card':
+            unlink_credit_account(user_id, account_id)
+        try:
+            _rm.flush_dirty_tables_for_user(user_id)
+        except Exception:
+            pass
+        return jsonify({'status': 'success', 'message': 'Saved.', 'ai': _ai_display(user_id)})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+
+
+@app.route('/bank/sync', methods=['POST'])
+@login_required
+def bank_sync():
+    """
+    Sync now: one pull, the same one the morning runs. Refused while the
+    connection needs a new token (the page already says so), and refused
+    near the day's ceiling so that tonight's automatic pull keeps its
+    request - the button is a convenience, the schedule is the feature.
+    """
+    import bank_import
+    from providers.simplefin import DAILY_SOFT_CEILING
+    provider = _simplefin_provider()
+    user_id = current_user.id
+    st = provider.status(user_id)
+    if not st.get('connected'):
+        return jsonify({'status': 'error', 'message': 'No SimpleFIN connection yet.'}), 400
+    if st.get('needs_new_token'):
+        return jsonify({'status': 'error', 'message': 'SimpleFIN no longer accepts this connection. '
+                                                     'Replace the Setup Token below first.'}), 400
+    reserved = 2
+    if int(st.get('pulls_today') or 0) >= DAILY_SOFT_CEILING - reserved:
+        return jsonify({'status': 'error',
+                        'message': f"{st.get('pulls_today')} of about {DAILY_SOFT_CEILING} pulls are used today; "
+                                   f"the rest is kept for tonight's automatic pull. Try again tomorrow."}), 400
+    try:
+        result = bank_import.pull(user_id, 'manual')
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    if not result.get('ok'):
+        return jsonify({'status': 'error', 'message': result.get('message') or 'The pull failed.',
+                        'code': result.get('error')}), 400
+    message = result['message']
+    note = bank_import.reconcile_summary(result.get('reconciled'))
+    if note:
+        message = f'{message} {note}'
+    counts = {k: result.get(k) for k in ('fetched', 'new', 'updated', 'matched', 'removed', 'pending',
+                                          'imported', 'skipped', 'deferred')}
+    return jsonify({'status': 'success', 'message': message, 'counts': counts,
+                    'bank': provider.connect_widget_config(user_id)})
+
+
+# ------------------------------------------------------------- AI (Claude)
+
+@app.route('/ai/settings', methods=['POST'])
+@login_required
+def ai_settings_save():
+    provider = _claude_provider()
+    data = request.get_json(silent=True) or {}
+    try:
+        ok, message = provider.save_config(current_user.id, data.get('api_key'), data.get('model'))
+        ai = provider.get_display(current_user.id)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    return jsonify({'status': 'success' if ok else 'error', 'message': message, 'ai': ai}), (200 if ok else 400)
+
+
+@app.route('/ai/test', methods=['POST'])
+@login_required
+def ai_settings_test():
+    provider = _claude_provider()
+    try:
+        ok, message = provider.test_config(current_user.id)
+        ai = provider.get_display(current_user.id)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    return jsonify({'status': 'success' if ok else 'error', 'message': message, 'ai': ai}), (200 if ok else 400)
+
+
+@app.route('/ai/toggle', methods=['POST'])
+@login_required
+def ai_settings_toggle():
+    """
+    The user's choice. Turning it ON is refused unless the key has passed a
+    test and a bank account is linked - the same rule the provider applies on
+    every call, so the switch can never lie about what will happen.
+    """
+    provider = _claude_provider()
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get('enabled'))
+    try:
+        ai = provider.get_display(current_user.id)
+        # Bank first: without one the key is beside the point, and the panel's
+        # own note says the same thing in the same order.
+        if enabled and not ai['bank_linked']:
+            return jsonify({'status': 'error', 'message': 'Connect a bank first - there is nothing to categorize without one.', 'ai': ai}), 400
+        if enabled and not ai['verified']:
+            return jsonify({'status': 'error', 'message': 'Test your key first.', 'ai': ai}), 400
+        _update_user_setting_in_redis(current_user.id, 'ai_categorization', 1 if enabled else 0)
+        ai = provider.get_display(current_user.id)
+        log_info(app.logger, 'AI', f'user {current_user.id}: AI categorization {"on" if enabled else "off"}')
+        return jsonify({'status': 'success', 'message': 'AI categorization is on.' if enabled else 'AI categorization is off.', 'ai': ai})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+
+
+@app.route('/ai/clear-key', methods=['POST'])
+@login_required
+def ai_settings_clear():
+    provider = _claude_provider()
+    try:
+        ok, message = provider.clear_key(current_user.id)
+        if ok:
+            _update_user_setting_in_redis(current_user.id, 'ai_categorization', 0)
+        ai = provider.get_display(current_user.id)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': _client_error(e)}), 500
+    return jsonify({'status': 'success' if ok else 'error', 'message': message, 'ai': ai}), (200 if ok else 500)
 
 
 ############################################################################################
