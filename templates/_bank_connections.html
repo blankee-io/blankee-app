@@ -32,12 +32,6 @@
                 the next pull.
             </div>
             {% endif %}
-            <p class="sf-meta" id="sf-status-line">
-                Connected to SimpleFIN{% if bank.claimed_at %} since {{ bank.claimed_at[:10] }}{% endif %}.
-                {% if bank.last_pull_at %}Last pull {{ bank.last_pull_at[:16]|replace('T', ' ') }}.{% endif %}
-                {{ bank.pulls_today }} of about {{ bank.daily_ceiling }} pulls used today.
-                {% if bank.last_error_msg and not bank.needs_new_token %}<span class="sf-error">{{ bank.last_error_msg }}</span>{% endif %}
-            </p>
 
             {% if not connections %}
             <div class="sf-banner sf-banner-warn" id="sf-nothing-chosen">
@@ -93,6 +87,15 @@
                 </div>
             </div>
             {% endfor %}
+
+            {# The connection's state, at the foot: under the rule the last
+               card leaves, above the things that change it. #}
+            <p class="sf-meta sf-status-foot" id="sf-status-line">
+                Connected to SimpleFIN{% if bank.claimed_at %} since {{ bank.claimed_at[:10] }}{% endif %}.
+                {% if bank.last_pull_at %}Last pull {{ bank.last_pull_at[:16]|replace('T', ' ') }}.{% endif %}
+                {{ bank.pulls_today }} of about {{ bank.daily_ceiling }} pulls used today.
+                {% if bank.last_error_msg and not bank.needs_new_token %}<span class="sf-error">{{ bank.last_error_msg }}</span>{% endif %}
+            </p>
 
             <div class="sf-row">
                 <button type="button" class="guide-button guide-button-secondary" id="sf-choose-accounts-btn">

@@ -8144,6 +8144,38 @@ transform: scale(1.2);
     background-color: var(--white);
 }
 
+/* Inside Settings the bank section starts with its first card, not a rule:
+   the status line that used to sit above it is at the foot now, under the
+   rule the last card leaves, above the buttons that change things. */
+.settings-bank-section .connection-card:first-of-type {
+    border-top: none;
+    padding-top: 4px;
+}
+
+.settings-bank-section .sf-status-foot {
+    margin: -6px 0 14px;
+    text-align: center;
+}
+
+/* The AI steps as rules rather than boxes, to match the rest of the page.
+   The wizard keeps its boxes: there each step is a card in a modal. */
+.settings-ai-section .guide-cards {
+    gap: 0;
+}
+
+.settings-ai-section .guide-card {
+    padding: 16px 0;
+    border: none;
+    border-top: 1px solid var(--secondary-hover);
+    border-radius: 0;
+    background: transparent;
+}
+
+.settings-ai-section .guide-card:first-child {
+    padding-top: 4px;
+    border-top: none;
+}
+
 /* A labelled group of rows within a section, set off from what is above it
    by a rule - the balance corrections at the foot of Settings. The heading
    sits at the rows' own 16px so it lines up with their labels. */
