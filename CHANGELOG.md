@@ -90,6 +90,13 @@ tidies afterwards rather than gating.
   description, amount and direction of each imported transaction and the
   names of your own categories.
 
+### Fixed
+- The AI categorization switch turned itself off whenever the server
+  restarted: it is a column on the user row, the user row is flushed with an
+  explicit column list, and the column added in 1.41.0 was not on it - so the
+  switch lived only in the cache until the cache was rebuilt from the
+  database. It is flushed now.
+
 ### Removed
 - The old importer and its balance adjustments (`_sync_bank_transactions_for_user`,
   `_webhook_autobalance`, `/bank/auto-adjust-checking`), none of which had a

@@ -2972,7 +2972,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             bank_auto_import = %s,
                             member_since = %s,
                             setup_step = %s,
-                            completed_tutorials = %s
+                            completed_tutorials = %s,
+                            -- COALESCE for the same reason as email_notify_disabled:
+                            -- the switch was added in 1.41.0 and a blob cached
+                            -- before then has no key for it. Left out of this list
+                            -- altogether, the switch lived only in Redis and went
+                            -- off again on the next rehydration.
+                            ai_categorization = COALESCE(%s, ai_categorization)
                         WHERE id = %s
                     """, (
                         float(_coerce(user_data.get('balance_threshold'), 0)),
@@ -2996,6 +3002,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         user_data.get('member_since'),
                         int(_coerce(user_data.get('setup_step'), 0)),
                         user_data.get('completed_tutorials'),
+                        (int(_coerce(user_data['ai_categorization'], 0))
+                         if 'ai_categorization' in user_data else None),
                         user_id
                     ))
                     
