@@ -8153,7 +8153,11 @@ transform: scale(1.2);
 }
 
 .settings-bank-section .sf-status-foot {
-    margin: -6px 0 14px;
+    /* Tucked up against the rule the last card leaves, small and light, so it
+       reads as a caption on the rule rather than a row of its own. */
+    margin: -14px 0 18px;
+    color: var(--secondary);
+    font-size: 12px;
     text-align: center;
 }
 
