@@ -68,6 +68,15 @@ tidies afterwards rather than gating.
   The Bank Accounts menu entry and the profile page's AI section are gone;
   `/bank_accounts` redirects to the section, so an older notification's link
   still lands in the right place.
+- **The Settings page is tidier.** The Balance Reminder sits under
+  Notifications with the other reminders, and with it the two "Balance
+  corrections" choices (Shortfall goes to / Extra goes to), now labelled and
+  set off by a rule; both are offered only while the Entries to confirm
+  notification is on, being the same evening's business. The "Balance now"
+  button is gone - the balance step opens by itself after the entries are
+  confirmed, and from the nav while one is waiting. The Bank Connection and
+  AI Categorization sections' content sits at the same inset as the rows
+  above them.
 - **Transaction dates are read in the person's own timezone.** The bank's
   posted time is an instant; a purchase at ten in the evening Pacific was
   landing on the next day.

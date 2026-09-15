@@ -66,63 +66,11 @@
                                 </div>
                             </form>
 
-                        </div>
-                    </div>
-                    <div class="data-section">
-                        <div class="section-liner">
-                            <form id="currency-type-form" class="profile-form">
-                                <div class="input-group">
-                                    <label for="currency_type">Currency:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The currency symbol used throughout the app. It changes how amounts are displayed and does not convert anything.</span></span></label>
-                                    <select name="currency_type" id="currency_type" class="login-input" required>
-                                        <option value="USD" {% if currency_type == 'USD' %}selected{% endif %}>USD</option>
-                                        <option value="EUR" {% if currency_type == 'EUR' %}selected{% endif %}>EUR</option>
-                                    </select>
-                                    <button type="submit" class="submit-button">
-                                        <i id="currency-type-submit-icon" class="fas fa-check"></i>
-                                    </button>
-                                </div>
-                            </form>
-                            <!-- Balance Threshold Form -->
-                            <form id="balance-threshold-form" class="profile-form">
-                                <div class="input-group">
-                                    <label for="balance_threshold">Threshold:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">You are warned when a projected balance falls below this figure, so a shortfall shows up before it arrives.</span></span></label>
-                                    <div class="currency-input-container">
-                                        <span class="p-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
-                                        <input type="number" name="balance_threshold" id="balance_threshold" class="login-input" value="{{ balance_threshold }}" required step="0.01" min="0" inputmode="decimal" placeholder="0.00">
-                                    </div>
-                                    <button type="submit" class="submit-button">
-                                        <i id="balance-threshold-submit-icon" class="fas fa-check"></i>
-                                    </button>
-                                </div>
-                            </form>
-                            <form id="landing-page-form" class="profile-form">
-                                <div class="input-group">
-                                    <label for="landing_page">Landing Page:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which dashboard opens when you sign in or tap the logo.</span></span></label>
-                                    <select class="login-input" name="landing_page" id="landing_page">
-                                        <option value="dashboard" {% if landing_page == 'dashboard' %}selected{% endif %}>Week View</option>
-                                        <option value="dashboard_d" {% if landing_page == 'dashboard_d' %}selected{% endif %}>Day View</option>
-                                        <option value="dashboard_3m" {% if landing_page == 'dashboard_3m' %}selected{% endif %}>Month View</option>
-                                    </select>
-                                    <button type="submit" class="submit-button">
-                                        <i id="landing-page-submit-icon" class="fas fa-check"></i>
-                                    </button>
-                                </div>
-                            </form>
-                            <form id="goofy-week-form" class="profile-form">
-                                <div class="input-group">
-                                    <label for="goofy_week_mode">Friday Start Week:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Shifts your budget week to Friday-Thursday instead of the default Saturday-Friday, so weekly totals line up with a Friday payday.</span></span></label>
-                                    <input type="text" disabled class="hidden-spacer">
-                                    <input type="checkbox" id="goofy_week_mode" {% if goofy_week_mode == 1 %}checked{% endif %} class="hidden-checkbox">
-                                    <button type="button" class="toggle-switch" data-checkbox="goofy_week_mode">
-                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if goofy_week_mode != 1 %}toggle-off{% endif %}"></i>
-                                    </button>
-                                </div>
-                            </form>
                             <!-- Balance Reminder: asks, on a cadence, whether the
                                  user wants to reconcile against their real balance. The
                                  cadence controls are the same widget as the recurring
                                  income page, so the ids and classes match it. -->
-                            <form id="balance-notification-form" class="profile-form">
+                            <form id="balance-notification-form" class="profile-form" hidden>
                                 <div class="input-group">
                                     <label for="balance_reminder_enabled">Balance Reminder:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Asks, on the cadence below, whether you want to reconcile against your real bank balance. Nothing is changed unless you say yes.</span></span></label>
                                     <input type="text" disabled class="hidden-spacer">
@@ -179,6 +127,8 @@
                                 <p class="balance-next-check" id="balance-next-check"></p>
                                 </div>
                             </form>
+                            <div class="settings-group" id="balance-corrections-group" hidden>
+                                <p class="settings-group-heading">Balance corrections<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Where the difference goes when a balance - one you type, or one read from your bank - does not match what Blankee expected.</span></span></p>
                             <!-- Where a correction lands. Its own form because it is
                                  its own decision: Balance now works whether or not the
                                  reminder above is switched on, so this saves without
@@ -196,12 +146,57 @@
                                     </button>
                                 </div>
                             </form>
-                            <form id="balance-now-form" class="profile-form">
+                            </div>
+
+                        </div>
+                    </div>
+                    <div class="data-section">
+                        <div class="section-liner">
+                            <form id="currency-type-form" class="profile-form">
                                 <div class="input-group">
-                                    <label>Balance now:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Reconcile straight away rather than waiting for the next scheduled check.</span></span></label>
+                                    <label for="currency_type">Currency:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The currency symbol used throughout the app. It changes how amounts are displayed and does not convert anything.</span></span></label>
+                                    <select name="currency_type" id="currency_type" class="login-input" required>
+                                        <option value="USD" {% if currency_type == 'USD' %}selected{% endif %}>USD</option>
+                                        <option value="EUR" {% if currency_type == 'EUR' %}selected{% endif %}>EUR</option>
+                                    </select>
+                                    <button type="submit" class="submit-button">
+                                        <i id="currency-type-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            <!-- Balance Threshold Form -->
+                            <form id="balance-threshold-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="balance_threshold">Threshold:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">You are warned when a projected balance falls below this figure, so a shortfall shows up before it arrives.</span></span></label>
+                                    <div class="currency-input-container">
+                                        <span class="p-currency-symbol">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}</span>
+                                        <input type="number" name="balance_threshold" id="balance_threshold" class="login-input" value="{{ balance_threshold }}" required step="0.01" min="0" inputmode="decimal" placeholder="0.00">
+                                    </div>
+                                    <button type="submit" class="submit-button">
+                                        <i id="balance-threshold-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            <form id="landing-page-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="landing_page">Landing Page:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Which dashboard opens when you sign in or tap the logo.</span></span></label>
+                                    <select class="login-input" name="landing_page" id="landing_page">
+                                        <option value="dashboard" {% if landing_page == 'dashboard' %}selected{% endif %}>Week View</option>
+                                        <option value="dashboard_d" {% if landing_page == 'dashboard_d' %}selected{% endif %}>Day View</option>
+                                        <option value="dashboard_3m" {% if landing_page == 'dashboard_3m' %}selected{% endif %}>Month View</option>
+                                    </select>
+                                    <button type="submit" class="submit-button">
+                                        <i id="landing-page-submit-icon" class="fas fa-check"></i>
+                                    </button>
+                                </div>
+                            </form>
+                            <form id="goofy-week-form" class="profile-form">
+                                <div class="input-group">
+                                    <label for="goofy_week_mode">Friday Start Week:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Shifts your budget week to Friday-Thursday instead of the default Saturday-Friday, so weekly totals line up with a Friday payday.</span></span></label>
                                     <input type="text" disabled class="hidden-spacer">
-                                    <button type="button" id="balance-now-btn" class="submit-button">
-                                        <i class="fa-solid fa-scale-balanced"></i>
+                                    <input type="checkbox" id="goofy_week_mode" {% if goofy_week_mode == 1 %}checked{% endif %} class="hidden-checkbox">
+                                    <button type="button" class="toggle-switch" data-checkbox="goofy_week_mode">
+                                        <i class="fa-solid fa-toggle-large-on toggle-icon {% if goofy_week_mode != 1 %}toggle-off{% endif %}"></i>
                                     </button>
                                 </div>
                             </form>
@@ -838,13 +833,6 @@
                 });
             })();
 
-            var now = document.getElementById('balance-now-btn');
-            if (now) {
-                now.addEventListener('click', function () {
-                    // force, so it works whether or not the cadence is due.
-                    showAutoBalancePrompt({ force: true });
-                });
-            }
 
             load();
         })();
@@ -900,6 +888,7 @@
                     box.checked = !box.checked;
                     icon.classList.toggle('toggle-off', !box.checked);
                     save();
+                    syncReminder();
                 });
 
                 wrap.appendChild(label);
@@ -944,6 +933,19 @@
                     .catch(function () { showToast('Could not reach the server.', 'error'); });
             }
 
+            // The balance reminder rides the same evening walk as Entries to
+            // confirm and is the same family of notification, so it and the
+            // corrections it writes are offered only while that kind is on.
+            // Both start hidden in the markup; this is what reveals them.
+            function syncReminder() {
+                var box = document.getElementById('email-type-entries_to_confirm');
+                var on = !!(box && box.checked);
+                ['balance-notification-form', 'balance-corrections-group'].forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) { el.hidden = !on; }
+                });
+            }
+
             fetch('/api/email-notification-types', { headers: { 'Accept': 'application/json' } })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {
@@ -951,6 +953,7 @@
                     list.innerHTML = '';
                     d.types.forEach(function (t) { list.appendChild(row(t)); });
                     showPanel();
+                    syncReminder();
                 })
                 .catch(function () { /* leave the panel hidden */ });
 
