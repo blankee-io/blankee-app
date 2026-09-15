@@ -8,6 +8,192 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.0 — 2026-09-14
+
+The bank's transactions come in. 1.41.0 connected the bank; this release
+reads it: every morning, and on demand, what posted to a linked checking
+account or card becomes an entry in the budget, with a guessed category,
+and the balances are matched to the bank's. The person confirms or corrects
+each one in the same "Did these come through?" modal that asks about
+forecasts - the numbers are right the moment the bank speaks, and the person
+tidies afterwards rather than gating.
+
+### Added
+- **The daily pull.** At six in the morning in each person's own timezone,
+  Blankee asks SimpleFIN for what posted since the last pull (re-asking the
+  last week, in case a bank posts late) and brings it in. One request, once a
+  day, claimed per person so that two server processes cannot pull twice. A
+  **Sync now** button in the Bank Connection section runs the same pull by hand;
+  it refuses within two of the day's ceiling so the morning pull keeps its
+  request. Import starts at the moment an account was linked - nothing
+  already inside the balance matched at link time is counted twice.
+- **A guessed category, applied on arrival.** Each posted transaction
+  becomes a real entry at once, marked for confirmation: in the category the
+  merchant memory remembers, else the one Claude picks (when that is switched
+  on), else the category of a forecast nearby with exactly this amount, else
+  Uncategorized. A guess that names a forecast - a bill, a wage, a one-off -
+  turns that forecast into the record at the bank's amount and date; a
+  category guess writes a new entry and depletes the category's forecast the
+  way a typed entry would. A card's incoming payment is recorded as a payment
+  with nothing to ask.
+- **The bank's rows in the confirm modal.** Above the forecasts: each row with
+  its merchant, account and amount, the guessed category pre-selected, where
+  the guess came from, and the other categories listed with the forecast each
+  would consume. One button confirms. Changing the category puts back the
+  forecast the guess had consumed - dated tomorrow, as "No" would have left
+  it - and consumes the new category's. The choice is remembered for the
+  merchant. One notification (and push) says how many rows wait; it goes when
+  the last is answered.
+- **Balances matched to the bank, twice a day.** After each pull and again
+  when the last bank row is confirmed, the checking, savings and card
+  balances are matched to the bank's figures as of yesterday - today's
+  balance less anything posted today - with the same corrections a typed
+  balance writes. The remainders are right without anyone typing a figure.
+- **Claude sorts what the memory does not know.** Once per pull, the rows the
+  merchant memory has no answer for go to Anthropic in one request: each
+  row's description, amount and direction, with the names of the person's
+  categories. A name not on the list is dropped, never invented. A failed
+  request is shown in the AI Categorization section without un-verifying the key.
+- **Pending transactions** are stored and watched, not imported: a
+  transaction the bank still calls pending gets no entry until it posts.
+  Posting under a new id replaces the pending row that matches it (same
+  account, amount to the cent, date within a few days); one the bank stops
+  reporting is withdrawn after three days.
+
+### Changed
+- **The bank connection and AI categorization live on the Settings page**, as
+  two sections at its foot: Bank Connection (what the Bank Accounts page was -
+  connect, choose accounts, Sync now, Disconnect, Replace the Setup Token) and
+  AI Categorization (connect a key, test it, switch it on or off, remove it).
+  The Bank Accounts menu entry and the profile page's AI section are gone;
+  `/bank_accounts` redirects to the section, so an older notification's link
+  still lands in the right place.
+- **One reminder instead of two.** The fixed 20:00 "entries to confirm"
+  notification is gone; the reminder on the cadence you choose - the old
+  Balance reminder - is now *Entries to confirm*, and says what is waiting:
+  entries to confirm, a balance to check, or both. Its cadence sits right
+  under its row in the "Send an email for" list on the Settings page, and
+  that row's switch is the reminder's switch.
+- **The Settings page is tidier.** The two "Balance corrections" choices
+  (Shortfall goes to / Extra goes to) sit at the foot of Settings, labelled
+  and set off by a rule. The "Balance now" button is gone - the balance step
+  opens by itself after the entries are confirmed, and from the nav while
+  one is waiting. The Bank Connection and AI Categorization sections'
+  content sits at the same inset as the rows above them.
+- **Transaction dates are read in the person's own timezone.** The bank's
+  posted time is an instant; a purchase at ten in the evening Pacific was
+  landing on the next day.
+- **Forecasts on a bank-fed table leave the evening prompt.** With a checking
+  account linked, income and expense forecasts are matched by transactions as
+  they post; a linked card's forecasts likewise. One nothing matched is moved
+  to tomorrow on each pull, exactly as "No" moves it, until a transaction
+  matches it or it is removed by hand. The evening prompt and its count still
+  cover everything the bank does not answer for.
+- **Savings-account transactions are not imported.** A transfer into savings
+  is the checking side's expense already, and the savings balance is set
+  from the bank feed on each pull.
+- A balance correction now **adds to** the day's correction rather than
+  replacing it, netted across the income and expense sides, so a second
+  match in one day no longer undoes the first; and the totals are
+  recalculated and stored before a balance is measured and again after the
+  correction is written, so a figure is never compared against a stale
+  remainder.
+- The AI privacy note on the profile page says in full what is sent: the
+  description, amount and direction of each imported transaction and the
+  names of your own categories.
+
+### Fixed
+- The AI categorization switch turned itself off whenever the server
+  restarted: it is a column on the user row, the user row is flushed with an
+  explicit column list, and the column added in 1.41.0 was not on it - so the
+  switch lived only in the cache until the cache was rebuilt from the
+  database. It is flushed now.
+- A payment towards a card, dragged to another day on the daily dashboard or
+  moved to tomorrow by "not yet" in the confirm modal, moved only on the
+  checking side: the card's own copy of the payment stayed on the old day,
+  so the card's balance kept showing it there. The card's copy now moves,
+  resizes and goes with the expense (drag, "not yet", a corrected amount,
+  "skip"), and the card's balances are recalculated after each.
+- Card payments were deleted and re-created in the database, with new ids,
+  on every flush: the cache kept the temporary ids it gave them, so the
+  flush's orphan check saw every real row as gone. The flush now hands the
+  real ids back to the cache, as it does for the other entry tables, and the
+  immediate per-user flush includes the payments table at all.
+- The balance modal still showed a "Current account" row - with no figure -
+  for a checking account a bank feed keeps current. The server had already
+  stopped offering it; the page now leaves the row out, asks only for the
+  accounts no feed covers, and does not open at all when the feed covers
+  them all.
+
+### Removed
+- The old importer and its balance adjustments (`_sync_bank_transactions_for_user`,
+  `_webhook_autobalance`, `/bank/auto-adjust-checking`), none of which had a
+  caller since the previous vendor left; `/bank/confirm-all-transactions`
+  (the modal answers rows one at a time). The widget's link and the dashboard
+  tooltips no longer point at the pending-transactions page removed in 1.41.0.
+
+### Notes
+- Migration `add_bank_import.sql`: `custom_category_confidence` admits
+  `memory` and `amount`; `linked_transactions.matched_pending_id` and
+  `depleted_bucket`; the `bank_pulls` claim table. Backward-compatible.
+- `redis_manager.py` is stored with LF line endings from here on (it was
+  the one file git classed as binary, which turned every edit into a
+  whole-file diff); `*.py` is declared text in `.gitattributes`.
+
+## 1.41.0 — 2026-09-13
+
+Bank connections are back, through **SimpleFIN Bridge**, and Claude arrives as
+the categorisation helper. This release is the two **connection flows** - how
+a person links their bank and sets up their key, guided step by step in the
+setup wizard and on the bank and profile pages. Pulling transactions in,
+categorising them and the daily refresh come in the next release; until then
+a linked bank changes nothing in the budget itself.
+
+### Added
+- **Connect a bank with SimpleFIN.** SimpleFIN Bridge is a service each person
+  signs up for themselves ($1.50 a month or $15 a year, paid to SimpleFIN):
+  they link their banks there, create a Setup Token, and paste it into
+  Blankee. The wizard's new step 3 and the Bank Accounts page walk through
+  those three steps on one screen, validate the token as it is pasted, and
+  then show the accounts. Because SimpleFIN does not say what kind of account
+  each one is, the person tells Blankee - Checking, Savings, Credit card, or
+  Don't import - with a guess pre-selected from the name. A credit card
+  becomes a Blankee card automatically, or links to one that already exists.
+- **AI categorization with Claude, on your own key.** The wizard's new step 4
+  and a new section on the profile page explain how to get an Anthropic API
+  key, store it encrypted, test it with one tiny call, and switch the
+  feature on. It is off until switched on, and it cannot be switched on
+  without a tested key and a linked bank account; disconnecting the last bank
+  turns it off again while keeping the key. What is sent, when it is on, is
+  stated on the page: the description and amount of imported transactions,
+  nothing else.
+- Bank Accounts page: connection cards with each account's type, the card it
+  backs, a "Choose accounts again" step, Disconnect (with the reminder to also
+  remove the app on the Bridge), a "Replace the Setup Token" fold-out, and a
+  line showing how many of the day's SimpleFIN pulls are used. The reconnect
+  notification's link highlights the connection it means.
+
+### Changed
+- **The setup wizard has nine steps**: Welcome, MFA, Bank connection, AI
+  categorization, Categories, Name, Currency, Starting balance, Threshold.
+  Skipping the bank step skips the AI step. Anyone mid-wizard restarts at
+  Welcome, as with the last renumbering.
+- Linked accounts carry the person's own classification (`account_subtype`),
+  and the places that used to decide "checking or savings" from the account's
+  name read that first.
+- New installs get `BANK_PROVIDER=simplefin` and `ENRICHMENT_PROVIDER=claude`;
+  an existing install that still has `null` in both is switched on its next
+  update. Both providers do nothing for a person until that person connects.
+
+### Fixed
+- The provider profile row could never reach the database: the flush still
+  wrote the old vendor's columns.
+
+### Notes
+- Migrations: `simplefin_credentials`, `user_ai_settings`,
+  `users.ai_categorization`. Backward-compatible.
+- No transactions are imported yet. Sync now is shown but disabled.
+
 ## 1.40.0 — 2026-09-13
 
 ### Security

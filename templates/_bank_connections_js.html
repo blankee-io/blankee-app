@@ -1,0 +1,100 @@
+{# The bank connection section's scripts. After script.js: they use showToast. #}
+<script src="{{ url_for('static', filename='js/simplefin_connect.js') }}"></script>
+<script>
+(function () {
+    function post(url, body) {
+        return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                            body: JSON.stringify(body || {}) })
+            .then(function (r) { return r.json().then(function (d) { if (!r.ok || d.status === 'error') throw new Error(d.message || 'Request failed'); return d; }); });
+    }
+    var connected = {{ 'true' if bank and bank.connected else 'false' }};
+
+    // The paste flow: on first connect it lands on this page with the
+    // accounts saved; on replace-token it keeps the accounts. Either way
+    // the page re-renders from the server.
+    if (window.SimpleFINConnect) {
+        SimpleFINConnect.init({
+            onLinked: function () { window.location.reload(); },
+            onClaimed: function (data) {
+                if (connected && data && data.accounts) {
+                    // Replacing the token: the accounts are still chosen;
+                    // show them so a change can be made, but nothing has to be.
+                    showToast('Token replaced. Your accounts are unchanged.', 'success');
+                }
+            }
+        });
+    }
+
+    var chooseBtn = document.getElementById('sf-choose-accounts-btn');
+    function loadAccounts(scroll) {
+        if (chooseBtn) chooseBtn.disabled = true;
+        return fetch('/bank/simplefin/accounts', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.status === 'error') { showToast(data.message || 'Could not load accounts.', 'error'); return; }
+                var details = document.getElementById('sf-replace');
+                details.open = true;
+                SimpleFINConnect.render(data);
+                if (scroll) document.getElementById('sf-accounts').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            })
+            .catch(function () { showToast('Could not load accounts.', 'error'); })
+            .finally(function () { if (chooseBtn) chooseBtn.disabled = false; });
+    }
+    if (chooseBtn) chooseBtn.addEventListener('click', function () { loadAccounts(true); });
+    // Connected but nothing chosen yet: the partial loads the accounts by
+    // itself (data-autoload); open the fold-out so they are visible.
+    if (connected && document.getElementById('sf-nothing-chosen')) {
+        var det = document.getElementById('sf-replace');
+        if (det) det.open = true;
+    }
+
+    document.querySelectorAll('.sf-disconnect-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var name = btn.dataset.institution;
+            if (!window.confirm('Disconnect ' + name + ' from Blankee?\n\nEntries already recorded stay. To stop SimpleFIN sharing this bank, also remove the Blankee app under Apps on the Bridge.')) return;
+            btn.disabled = true;
+            post('/bank/disconnect', { connection_id: btn.dataset.connectionId })
+                .then(function (d) { showToast(d.message || 'Disconnected.', 'success'); setTimeout(function () { window.location.reload(); }, 900); })
+                .catch(function (e) { showToast(e.message, 'error'); btn.disabled = false; });
+        });
+    });
+
+    var linkedSelects = document.querySelectorAll('.sf-linked-subtype');
+    if (linkedSelects.length && window.SimpleFINConnect && SimpleFINConnect.enforceSingletons) {
+        SimpleFINConnect.enforceSingletons(linkedSelects);
+    }
+    linkedSelects.forEach(function (sel) {
+        sel.addEventListener('change', function () {
+            var row = sel.closest('.sf-linked-account');
+            sel.disabled = true;
+            post('/bank/update-account', { account_id: row.dataset.accountId, subtype: sel.value })
+                .then(function (d) { showToast(d.message || 'Saved.', 'success'); setTimeout(function () { window.location.reload(); }, 600); })
+                .catch(function (e) { showToast(e.message, 'error'); sel.disabled = false; });
+        });
+    });
+
+    // Sync now: one pull, then the status line is redrawn from what the
+    // server says rather than reloading the page around a toast.
+    var syncBtn = document.getElementById('sf-sync-btn');
+    function statusLine(b) {
+        var s = 'Connected to SimpleFIN' + (b.claimed_at ? ' since ' + b.claimed_at.slice(0, 10) : '') + '.';
+        if (b.last_pull_at) s += ' Last pull ' + b.last_pull_at.slice(0, 16).replace('T', ' ') + '.';
+        s += ' ' + b.pulls_today + ' of about ' + b.daily_ceiling + ' pulls used today.';
+        return s;
+    }
+    if (syncBtn) syncBtn.addEventListener('click', function () {
+        syncBtn.disabled = true;
+        post('/bank/sync')
+            .then(function (d) {
+                showToast(d.message || 'Synced.', 'success', 8000);
+                var line = document.getElementById('sf-status-line');
+                if (line && d.bank) line.textContent = statusLine(d.bank);
+            })
+            .catch(function (e) { showToast(e.message, 'error', 8000); })
+            .finally(function () { syncBtn.disabled = false; });
+    });
+
+    var attention = document.querySelector('.connection-card-attention');
+    if (attention) attention.scrollIntoView({ behavior: 'smooth', block: 'center' });
+})();
+</script>

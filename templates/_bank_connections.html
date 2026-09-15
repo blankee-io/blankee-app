@@ -1,0 +1,133 @@
+{#
+  The bank connection, as a section of the Settings page.
+
+  `bank` is the provider's connect_widget_config(): with the null provider it
+  is empty and the section shows the "no provider" state; with SimpleFIN it says
+  whether this user has claimed a Setup Token, how many of today's pulls are
+  used, and whether the access URL has been refused (needs_new_token).
+
+  Not connected: the guided three-card flow (templates/_simplefin_connect.html).
+  Connected: one card per institution with its accounts, each account's type
+  (the user's own classification - SimpleFIN has none), the Blankee card it
+  backs, Sync now, Disconnect; and, folded away unless needed, the same flow
+  again for replacing the token or re-choosing accounts.
+
+  The scripts are in _bank_connections_js.html, included after script.js.
+#}
+<div id="bank-connections-section">
+    <div class="section-liner">
+    {% if bank and bank.mode == 'setup_token' %}
+        {% if bank.connected %}
+            {% if bank.needs_new_token %}
+            <div class="sf-banner sf-banner-error">
+                <i class="fa-solid fa-plug-circle-exclamation"></i>
+                SimpleFIN no longer accepts this connection. Create a new Setup Token on the
+                Bridge and paste it below under "Replace the Setup Token".
+            </div>
+            {% elif reconnect_id %}
+            <div class="sf-banner sf-banner-warn">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                One of these banks reported a problem. Fix it on the SimpleFIN Bridge
+                (sign in there and re-authorise the bank), then it will pick up again on
+                the next pull.
+            </div>
+            {% endif %}
+
+            {% if not connections %}
+            <div class="sf-banner sf-banner-warn" id="sf-nothing-chosen">
+                <i class="fa-solid fa-list-check"></i>
+                Connected to SimpleFIN, but no accounts have been chosen yet. Your accounts are
+                loading below, under "Replace the Setup Token" - say what each one is and press Save accounts.
+            </div>
+            {% endif %}
+            {% for conn in connections %}
+            <div class="connection-card{% if reconnect_id and conn.connection_id == reconnect_id %} connection-card-attention{% endif %}"
+                 data-connection-id="{{ conn.connection_id }}">
+                <div class="connection-header">
+                    <div class="connection-info">
+                        <h3><i class="fa-solid fa-building-columns"></i> {{ conn.institution_name or 'Bank' }}</h3>
+                        {% set st = (conn.status or 'ACTIVE')|lower %}
+                        <span class="connection-status status-{{ 'synced' if st in ('active', 'synced', 'connected') else st }}">
+                            {% if st in ('active', 'synced', 'connected') %}<i class="fa-solid fa-circle-check"></i> Connected
+                            {% elif st in ('error', 'error_repairable', 'error_institution', 'error_provider', 'error_service') %}<i class="fa-solid fa-triangle-exclamation"></i> Needs attention on the Bridge
+                            {% elif st == 'disconnected' %}<i class="fa-solid fa-plug-circle-xmark"></i> Disconnected
+                            {% else %}{{ conn.status }}{% endif %}
+                        </span>
+                    </div>
+                    <button type="button" class="guide-button guide-button-danger sf-disconnect-btn"
+                            data-connection-id="{{ conn.connection_id }}"
+                            data-institution="{{ conn.institution_name or 'this bank' }}">
+                        <i class="fa-solid fa-link-slash"></i> Disconnect
+                    </button>
+                </div>
+                <div class="account-selection-list">
+                    {% for acc in conn.accounts %}
+                    <div class="account-selection-item sf-linked-account{% if not acc.is_active %} sf-paused{% endif %}" data-account-id="{{ acc.account_id }}">
+                        <div class="account-selection-info">
+                            <div class="account-selection-name">
+                                {{ acc.alias or acc.account_name }}
+                                {% if acc.mask %}<span class="account-selection-mask">····{{ acc.mask }}</span>{% endif %}
+                                {% if acc.card %}<span class="sf-card-badge" title="Backs the Blankee card {{ acc.card.name }}"><i class="fa-regular fa-credit-card"></i> {{ acc.card.name }}</span>{% endif %}
+                            </div>
+                            <div class="account-selection-details">
+                                {% if acc.current_balance is not none %}{{ currency_symbol }}{{ '%.2f'|format(acc.current_balance) }}{% endif %}
+                                {% if not acc.is_active %}<span class="sf-paused-label">not imported</span>{% endif %}
+                            </div>
+                        </div>
+                        <div class="sf-account-controls">
+                            <select class="login-input sf-linked-subtype" aria-label="Account type">
+                                <option value="checking" {% if acc.is_active and acc.account_subtype == 'checking' %}selected{% endif %}>Checking</option>
+                                <option value="savings" {% if acc.is_active and acc.account_subtype == 'savings' %}selected{% endif %}>Savings</option>
+                                <option value="credit_card" {% if acc.is_active and acc.account_subtype == 'credit_card' %}selected{% endif %}>Credit card</option>
+                                <option value="skip" {% if not acc.is_active %}selected{% endif %}>Don't import</option>
+                            </select>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+
+            {# The connection's state, at the foot: under the rule the last
+               card leaves, above the things that change it. #}
+            <p class="sf-meta sf-status-foot" id="sf-status-line">
+                Connected to SimpleFIN{% if bank.claimed_at %} since {{ bank.claimed_at[:10] }}{% endif %}.
+                {% if bank.last_pull_at %}Last pull {{ bank.last_pull_at[:16]|replace('T', ' ') }}.{% endif %}
+                {{ bank.pulls_today }} of about {{ bank.daily_ceiling }} pulls used today.
+                {% if bank.last_error_msg and not bank.needs_new_token %}<span class="sf-error">{{ bank.last_error_msg }}</span>{% endif %}
+            </p>
+
+            <div class="sf-row">
+                <button type="button" class="guide-button guide-button-secondary" id="sf-choose-accounts-btn">
+                    <i class="fa-solid fa-list-check"></i> Choose accounts again
+                </button>
+                <button type="button" class="guide-button guide-button-secondary" id="sf-sync-btn"
+                        {% if bank.needs_new_token %}disabled title="Replace the Setup Token first"{% endif %}>
+                    <i class="fa-solid fa-rotate"></i> Sync now
+                </button>
+            </div>
+
+            <details class="sf-details" id="sf-replace" {% if bank.needs_new_token %}open{% endif %}>
+                <summary>Having trouble? Replace the Setup Token</summary>
+                <p class="sf-meta">A new token from the Bridge replaces the stored connection and keeps the
+                   accounts you have already chosen.</p>
+                {% set sf_mode = 'replace' %}
+                {% include '_simplefin_connect.html' %}
+            </details>
+        {% else %}
+            <h2>Connect your bank</h2>
+            <p class="sf-intro">Blankee reads your accounts through <strong>SimpleFIN Bridge</strong>, a
+               service you own and control. Three steps, on their site and then back here.</p>
+            {% set sf_mode = 'page' %}
+            {% include '_simplefin_connect.html' %}
+        {% endif %}
+    {% else %}
+        <div class="no-connections">
+            <i class="fa-solid fa-building-columns"></i>
+            <h3>No bank provider configured</h3>
+            <p>Bank connections are turned off on this installation (BANK_PROVIDER is
+               not set). Manual entry is unaffected.</p>
+        </div>
+    {% endif %}
+    </div>
+</div>

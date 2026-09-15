@@ -3564,7 +3564,7 @@
                     if (hasPending) {
                         cell.classList.add('pending-entry');
                         const qualifier = pendingCount >= totalCount ? 'All' : 'Some';
-                        cell.title = `${qualifier} entries for this week are pending categorization — go to Pending Transactions to confirm`;
+                        cell.title = `${qualifier} entries for this week came from your bank and are waiting to be checked — open Entries to confirm in the nav`;
                     } else if (isProcessed) {
                         cell.classList.add('paid');
                         cell.title = 'All entries for this week are marked as paid';
@@ -3677,7 +3677,7 @@
                     if (hasPending) {
                         cell.classList.add('pending-entry');
                         const qualifier = pendingCount >= totalCount ? 'All' : 'Some';
-                        cell.title = `${qualifier} entries for this week are pending categorization — go to Pending Transactions to confirm`;
+                        cell.title = `${qualifier} entries for this week came from your bank and are waiting to be checked — open Entries to confirm in the nav`;
                     } else if (isProcessed) {
                         cell.classList.add('paid');
                         cell.title = 'All entries for this week are marked as paid';
@@ -3791,7 +3791,7 @@
                         if (hasPending) {
                             cell.classList.add('pending-entry');
                             const qualifier = pendingCount >= totalCount ? 'All' : 'Some';
-                            cell.title = `${qualifier} entries for this week are pending categorization — go to Pending Transactions to confirm`;
+                            cell.title = `${qualifier} entries for this week came from your bank and are waiting to be checked — open Entries to confirm in the nav`;
                         } else if (isProcessed) {
                             cell.classList.add('paid');
                             cell.title = 'All entries for this week are marked as paid';

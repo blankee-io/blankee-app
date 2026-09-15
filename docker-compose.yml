@@ -67,8 +67,8 @@ services:
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
       BLANKEE_CONFIG: /config/blankee.conf
-      BANK_PROVIDER: null
-      ENRICHMENT_PROVIDER: null
+      BANK_PROVIDER: ${BANK_PROVIDER:-simplefin}
+      ENRICHMENT_PROVIDER: ${ENRICHMENT_PROVIDER:-claude}
     ports:
       # Uncommon on purpose: clear of the 3000/5000/8000/9000 range other
       # dev tools sit on, and below 32768 where the kernel starts handing out

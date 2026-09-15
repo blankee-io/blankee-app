@@ -1,0 +1,107 @@
+{#
+  AI categorization settings, used by the setup wizard (step 4) and the
+  Settings page. Expects `ai` = get_enrichment_provider().get_display(user_id).
+  static/js/ai_settings.js drives it; the page calls AISettings.init().
+  Connect (Save a key), Test, switch on or off, Remove key - the whole of
+  what a person can do about Claude is here.
+
+  The toggle here is deliberately NOT a .toggle-switch: pages bind a generic
+  click handler to that class, and a second handler on the same element would
+  flip it twice. .ai-toggle is styled identically in style.css.
+#}
+<div class="ai-settings" id="ai-settings"
+     data-enabled="{{ '1' if ai.enabled else '0' }}"
+     data-verified="{{ '1' if ai.verified else '0' }}"
+     data-bank-linked="{{ '1' if ai.bank_linked else '0' }}">
+
+  <div class="guide-cards">
+    <div class="guide-card">
+      <div class="guide-num">1</div>
+      <div class="guide-body">
+        <h4>Get a Claude API key</h4>
+        <p>Blankee can ask Claude to pick a category for each imported transaction the
+           merchant memory does not already know. It runs on <em>your</em> key, so you
+           control it and pay Anthropic directly, from usage credits you buy in advance.</p>
+        <p class="ai-cost-note"><strong>What it costs:</strong> at today's prices, roughly
+           25&cent; per 1,000 transactions on Claude Haiku 4.5 - for most users a few
+           cents a month. Anthropic bills by usage and changes its prices, so treat this as
+           an estimate, not a quote; your usage shows on platform.claude.com.</p>
+        <p>Sign in at <a href="https://platform.claude.com/" target="_blank" rel="noopener noreferrer">platform.claude.com</a>,
+           add a payment method under <strong>Billing</strong>, then create a key under
+           <strong>API keys</strong>. A Claude Pro or Max subscription does not include
+           API access; the key is separate.</p>
+      </div>
+    </div>
+
+    <div class="guide-card">
+      <div class="guide-num">2</div>
+      <div class="guide-body">
+        <h4>Paste and test it</h4>
+        {% if not ai.encryption_available %}
+        <p class="sf-error">The server has no SETTINGS_ENCRYPTION_KEY, so a key cannot be stored yet.
+           Ask the administrator to set one.</p>
+        {% endif %}
+        <div class="ai-field">
+          <label for="ai-api-key">API key</label>
+          <div class="ai-key-row">
+            {# Stored: shown masked and read-only (the key itself never comes
+               back to the browser); Edit opens an empty field to replace it. #}
+            <input type="{% if ai.key_stored %}text{% else %}password{% endif %}" id="ai-api-key" class="login-input"
+                   autocomplete="new-password" spellcheck="false"
+                   {% if ai.key_stored %}readonly value="sk-ant-&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"{% else %}placeholder="sk-ant-..."{% endif %}>
+            <button type="button" class="guide-button guide-button-secondary" id="ai-edit-key-btn"
+                    {% if not ai.key_stored %}hidden{% endif %}><i class="fa-solid fa-pen"></i> Edit</button>
+            <button type="button" class="guide-button guide-button-secondary" id="ai-cancel-edit-btn" hidden>Cancel</button>
+          </div>
+        </div>
+        <div class="ai-field">
+          <label for="ai-model">Model</label>
+          <select id="ai-model" class="login-input">
+            {% for m in ai.models %}
+            <option value="{{ m.id }}" {% if m.id == ai.model %}selected{% endif %}>{{ m.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="sf-row">
+          <button type="button" class="guide-button" id="ai-save-btn"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+          <button type="button" class="guide-button guide-button-secondary" id="ai-test-btn"
+                  {% if not ai.key_stored %}disabled{% endif %}><i class="fa-solid fa-vial"></i> Test</button>
+          <button type="button" class="guide-button guide-button-danger" id="ai-clear-btn"
+                  {% if not ai.key_stored %}hidden{% endif %}><i class="fa-solid fa-trash"></i> Remove key</button>
+        </div>
+        <p class="ai-verified-line" id="ai-verified-line" {% if not ai.verified %}hidden{% endif %}>
+          <i class="fa-solid fa-circle-check"></i> Key tested and working.
+        </p>
+        <span class="sf-status" id="ai-status" aria-live="polite">{{ ai.last_error }}</span>
+      </div>
+    </div>
+
+    <div class="guide-card">
+      <div class="guide-num">3</div>
+      <div class="guide-body">
+        <h4>Turn it on</h4>
+        <div class="ai-toggle-row">
+          <input type="checkbox" id="ai-enabled" class="hidden-checkbox" {% if ai.effective %}checked{% endif %}>
+          <button type="button" class="ai-toggle" id="ai-toggle-btn"
+                  aria-pressed="{{ 'true' if ai.effective else 'false' }}"
+                  {% if not (ai.verified and ai.bank_linked) %}disabled{% endif %}>
+            <i class="fa-solid fa-toggle-large-on toggle-icon {% if not ai.effective %}toggle-off{% endif %}"></i>
+          </button>
+          <span class="ai-toggle-label" id="ai-toggle-label">AI categorization</span>
+        </div>
+        <p class="ai-gate-note" id="ai-gate-note">
+          {% if not ai.bank_linked %}Connect a bank first - there is nothing to categorize without one.
+          {% elif not ai.verified %}Test your key first.
+          {% elif ai.enabled %}On. New transactions get a suggested category to confirm.
+          {% else %}Off. Nothing is sent anywhere until you switch this on.{% endif %}
+        </p>
+        <p class="ai-privacy-note">When this is on, the description, amount and direction of each
+           imported transaction, together with the names of your own categories, are sent to
+           Anthropic under your key so Claude can pick a category. Nothing else is sent - no
+           balances, no account details, no history - and Anthropic's API terms do not use it for
+           training. Your key stays stored, encrypted, even if you turn this off or disconnect
+           your bank.</p>
+      </div>
+    </div>
+  </div>
+</div>

@@ -101,6 +101,46 @@
         </div>
     </div>
 
+    {% if bank and bank.mode == 'setup_token' %}
+    <!-- Bank Connection Modal (SimpleFIN) -->
+    <div id="bank-connect-modal-setup" class="modal-setup-profile" style="display: none;">
+        <div class="modal-content-setup-profile modal-content-wide">
+            <h2>Connect your bank</h2>
+            <p>Blankee reads your accounts through SimpleFIN Bridge, a service you own. Three
+               steps, on their site and then back here. You can skip this and connect later
+               from Bank Accounts.</p>
+            {% set sf_mode = 'setup' %}
+            {% include '_simplefin_connect.html' %}
+            <div class="setup-profile-button-container">
+                <button type="button" class="setup-profile-previous-button" id="bank-connect-prev-btn">Previous</button>
+                <button type="button" class="setup-profile-next-button" id="bank-connect-continue-btn" {% if not bank.connected %}disabled{% endif %}>Continue</button>
+            </div>
+            <div class="setup-skip-link-container">
+                <a href="#" class="setup-skip-link" id="bank-connect-skip-btn">Skip for Now</a>
+            </div>
+        </div>
+    </div>
+    {% if ai %}
+    <!-- AI Categorization Modal (Claude) -->
+    <div id="ai-setup-modal-setup" class="modal-setup-profile" style="display: none;">
+        <div class="modal-content-setup-profile modal-content-wide">
+            <h2>AI categorization</h2>
+            <p>Optional. Claude can suggest a category for each imported transaction, using a
+               key you own. Skip it and nothing is sent anywhere; you can set it up later from
+               your profile.</p>
+            {% include '_ai_settings_panel.html' %}
+            <div class="setup-profile-button-container">
+                <button type="button" class="setup-profile-previous-button" id="ai-setup-prev-btn">Previous</button>
+                <button type="button" class="setup-profile-next-button" id="ai-setup-continue-btn" {% if not (ai and ai.effective) %}data-locked="1"{% endif %}>Continue</button>
+            </div>
+            <div class="setup-skip-link-container">
+                <a href="#" class="setup-skip-link" id="ai-setup-skip-btn">Skip for Now</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    {% endif %}
+
     <!-- Category Recommendations Modal -->
     <div id="category-recommendations-modal-setup" class="modal-setup-profile">
         <div class="modal-content-setup-profile modal-content-category-recommendations">
@@ -418,6 +458,8 @@
 
     <!-- Link to external JavaScript -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/simplefin_connect.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ai_settings.js') }}"></script>
 
     <script>
         // Disable data-version auto-reload on setup page — the POST calls during
@@ -428,11 +470,31 @@
         // Track if bank was connected
         let mfaAlreadyEnabled = {{ 'true' if mfa_enabled else 'false' }};
         let mfaVerifiedThisSession = false;
+        // The bank step is done when at least one account is linked; the AI
+        // step is only reachable after it.
+        let setupBankLinked = {{ 'true' if bank and bank.connected else 'false' }};
         let savedSetupStep = {{ setup_step|default(0) }};
-        let bankBalances = {
-            checking: 0,
-            savings: 0
-        };
+        // What the bank last reported for the linked checking and savings
+        // accounts (null where nothing is linked). Updated again when accounts
+        // are linked during this visit.
+        let bankBalances = {{ (linked_balances or {'checking': None, 'savings': None})|tojson }};
+        // The value we last put in each field, so we can tell our own fill
+        // from something the user typed and leave the latter alone.
+        let autoFilledBalance = { checking: null, savings: null };
+        function prefillStartingBalances() {
+            var fields = { checking: '#setup-profile-starting-balance', savings: '#setup-profile-starting-savings' };
+            Object.keys(fields).forEach(function (k) {
+                var v = bankBalances ? bankBalances[k] : null;
+                if (typeof v !== 'number' || isNaN(v) || v < 0) return;
+                var $f = $(fields[k]);
+                var cur = $f.val();
+                if (cur !== '' && cur !== autoFilledBalance[k]) return;
+                var txt = v.toFixed(2);
+                $f.val(txt);
+                autoFilledBalance[k] = txt;
+                $('#' + k + '-auto-filled-indicator').addClass('visible');
+            });
+        }
         
         // Saved form data for prefilling on resume
         let savedFirstName = {{ saved_first_name|tojson }};
@@ -488,9 +550,19 @@
         // "bank-only" modal and silently switched the user into the 8-step
         // counter. So the step counter disagreed with the actual flow for every
         // user who skipped. Collapsing to one flow fixes that as well.
+        // Nine steps with a bank provider, seven without: the bank and AI
+        // modals only exist when one is configured, and the flow lists what
+        // exists. Step numbers saved to the server are indexes into this
+        // array - see stepIndex() - so nothing below hardcodes a number.
         let setupStepFlow = [
             'welcome-modal-setup',
             'mfa-setup-modal-setup',
+            {% if bank and bank.mode == 'setup_token' %}
+            'bank-connect-modal-setup',
+            {% if ai %}
+            'ai-setup-modal-setup',
+            {% endif %}
+            {% endif %}
             'category-recommendations-modal-setup',
             'name-modal-setup',
             'currency-modal-setup',
@@ -499,9 +571,8 @@
         ];
         let setupCurrentStep = 0;
 
-        function switchToBankFlow() {
-            // No-op: there is only one flow now. Kept as a seam so a future
-            // provider can reintroduce its own steps in one place.
+        function stepIndex(modalId) {
+            return Math.max(0, setupStepFlow.indexOf(modalId));
         }
 
         function setSetupStep(modalId) {
@@ -574,7 +645,7 @@
         function removeBankConnection() {
             // Nothing to remove: no provider means no setup-time connections.
             // Returns a resolved jQuery promise because callers chain .always().
-            bankBalances = { checking: 0, savings: 0 };
+            // Balances come from the linked accounts; nothing to reset.
             window.setupSelectedAccountIds = [];
             selectedAccountIdsForCategories = [];
             return $.when();
@@ -596,6 +667,102 @@
 
             document.getElementById('loading-screen').style.display = 'none';
 
+            // ==================== BANK + AI STEPS ====================
+            // Present only when a bank provider is configured (the modals are
+            // rendered conditionally); with none, both fall through to the
+            // categories step so the flow is the same seven steps as before.
+            var _sfInit = false, _aiInit = false;
+            function showBankStep() {
+                if (!document.getElementById('bank-connect-modal-setup')) {
+                    saveSetupStep(stepIndex('category-recommendations-modal-setup'));
+                    enterCategoryStep();
+                    return;
+                }
+                goToStep('bank-connect-modal-setup');
+                saveSetupStep(stepIndex('bank-connect-modal-setup'));
+                if (!_sfInit && window.SimpleFINConnect) {
+                    _sfInit = true;
+                    SimpleFINConnect.init({
+                        onLinked: function (data) {
+                            setupBankLinked = true;
+                            if (data.balances) bankBalances = data.balances;
+                            $('#bank-connect-continue-btn').prop('disabled', false);
+                            saveSetupStep(stepIndex('bank-connect-modal-setup'), { setup_bank_flow: 'linked' });
+                            showToast(data.message || 'Accounts saved.', 'success');
+                        }
+                    });
+                }
+            }
+            function showAiStep() {
+                if (!document.getElementById('ai-setup-modal-setup')) {
+                    $('#bank-connect-modal-setup').hide();
+                    saveSetupStep(stepIndex('category-recommendations-modal-setup'));
+                    enterCategoryStep();
+                    return;
+                }
+                goToStep('ai-setup-modal-setup');
+                saveSetupStep(stepIndex('ai-setup-modal-setup'));
+                if (!_aiInit && window.AISettings) {
+                    _aiInit = true;
+                    AISettings.init({
+                        // Continue means "AI is on"; anything less is Skip.
+                        onChanged: function (ai) {
+                            $('#ai-setup-continue-btn').attr('data-locked', (ai && ai.effective) ? null : '1');
+                        }
+                    });
+                }
+            }
+            $('#bank-connect-prev-btn').on('click', function () {
+                $('#bank-connect-modal-setup').hide();
+                saveSetupStep(stepIndex('mfa-setup-modal-setup'));
+                showMfaModal();
+            });
+            $('#bank-connect-continue-btn').on('click', function () {
+                if (!setupBankLinked) {
+                    showToast('Save your accounts first, or use Skip for Now.', 'warning');
+                    return;
+                }
+                showAiStep();
+            });
+            // Skipping the bank skips AI too: there is nothing to categorize.
+            $('#bank-connect-skip-btn').on('click', function (e) {
+                e.preventDefault();
+                $('#bank-connect-modal-setup').hide();
+                saveSetupStep(stepIndex('category-recommendations-modal-setup'), { setup_bank_flow: 'skipped' });
+                enterCategoryStep();
+            });
+            $('#ai-setup-prev-btn').on('click', function () {
+                showBankStep();
+            });
+            // Continue only once AI categorization is actually on. Pressing it
+            // earlier says what is still missing; Skip for Now is the way past.
+            $('#ai-setup-continue-btn').on('click', function () {
+                var panel = document.getElementById('ai-settings');
+                var d = panel ? panel.dataset : {};
+                var keyStored = panel && !panel.querySelector('#ai-clear-btn').hidden;
+                if (d.bankLinked !== '1') {
+                    showToast('Connect a bank first, or use Skip for Now.', 'warning'); return;
+                }
+                if (!keyStored) {
+                    showToast('Save your Claude API key and test it, or use Skip for Now.', 'warning'); return;
+                }
+                if (d.verified !== '1') {
+                    showToast('Test your key first, or use Skip for Now.', 'warning'); return;
+                }
+                if (d.enabled !== '1') {
+                    showToast('Turn AI categorization on to continue, or use Skip for Now.', 'warning'); return;
+                }
+                $('#ai-setup-modal-setup').hide();
+                saveSetupStep(stepIndex('category-recommendations-modal-setup'));
+                enterCategoryStep();
+            });
+            $('#ai-setup-skip-btn').on('click', function (e) {
+                e.preventDefault();
+                $('#ai-setup-modal-setup').hide();
+                saveSetupStep(stepIndex('category-recommendations-modal-setup'));
+                enterCategoryStep();
+            });
+
             // Remove readonly from name fields after a short delay to prevent 1Password detection
             setTimeout(function() {
                 $('#setup-profile-first-name, #setup-profile-last-name').removeAttr('readonly');
@@ -610,6 +777,7 @@
             }
             if (savedStartingBalance) $('#setup-profile-starting-balance').val(savedStartingBalance);
             if (savedStartingSavings) $('#setup-profile-starting-savings').val(savedStartingSavings);
+            prefillStartingBalances();
             if (savedBalanceThreshold) $('#setup-profile-balance-threshold').val(savedBalanceThreshold);
             // Restore selected account IDs
             if (savedSelectedAccountIds && savedSelectedAccountIds.length > 0) {
@@ -636,38 +804,30 @@
             // setup_step for anyone mid-wizard. The guard below still catches
             // legacy 7/8 and any step whose modal no longer exists.
             function resumeAtStep(stepNumber) {
-                var STEP_TO_MODAL = {
-                    1: 'mfa-setup-modal-setup',
-                    2: 'category-recommendations-modal-setup',
-                    3: 'name-modal-setup',
-                    4: 'currency-modal-setup',
-                    5: 'starting-balance-modal-setup',
-                    6: 'balance-threshold-modal-setup'
-                };
-                // Never leave the user on a blank overlay: if the saved step
-                // points at a modal that is not in this build, restart cleanly.
-                var _targetModal = STEP_TO_MODAL[stepNumber];
+                // The saved step is an index into setupStepFlow. Never leave
+                // the user on a blank overlay: if it points at a modal that is
+                // not in this build, restart cleanly.
+                var _targetModal = setupStepFlow[stepNumber];
                 if (stepNumber > 0 && (!_targetModal || !document.getElementById(_targetModal))) {
                     goToStep('welcome-modal-setup');
-                    saveSetupStep(0);
+                    saveSetupStep(stepIndex('welcome-modal-setup'));
                     return;
                 }
-                switch (stepNumber) {
-                    case 1:
+                switch (_targetModal) {
+                    case 'mfa-setup-modal-setup':
                         showMfaModal();
                         break;
-                    case 2:
-                        // Third copy of this restore-or-fallback logic, now the
-                        // same one call as every other route in.
+                    case 'bank-connect-modal-setup':
+                        showBankStep();
+                        break;
+                    case 'ai-setup-modal-setup':
+                        showAiStep();
+                        break;
+                    case 'category-recommendations-modal-setup':
                         enterCategoryStep();
                         break;
                     default:
-                        var modalId = STEP_TO_MODAL[stepNumber];
-                        if (modalId) {
-                            goToStep(modalId);
-                        } else {
-                            goToStep('welcome-modal-setup');
-                        }
+                        goToStep(_targetModal || 'welcome-modal-setup');
                         break;
                 }
             }
@@ -704,15 +864,15 @@
                         } else {
                             showToast('Failed to set up MFA. You can enable it later in your profile.', 'error');
                             $('#mfa-setup-modal-setup').hide();
-                            enterCategoryStep();
-                            saveSetupStep(2);
+                            showBankStep();
+                            saveSetupStep(stepIndex('bank-connect-modal-setup'));
                         }
                     }).fail(function() {
                         $('#mfa-setup-loading').hide();
                         showToast('Failed to set up MFA. You can enable it later in your profile.', 'error');
                         $('#mfa-setup-modal-setup').hide();
-                        enterCategoryStep();
-                        saveSetupStep(2);
+                        showBankStep();
+                        saveSetupStep(stepIndex('bank-connect-modal-setup'));
                     });
                 }
             }
@@ -720,7 +880,7 @@
             // Handle welcome next button - show MFA setup step
             $('#welcome-next-button').on('click', function () {
                 $('#welcome-modal-setup').hide();
-                saveSetupStep(1);
+                saveSetupStep(stepIndex('mfa-setup-modal-setup'));
                 showMfaModal();
             });
 
@@ -731,8 +891,8 @@
                 e.preventDefault();
                 $.post('/cancel_mfa');
                 $('#mfa-setup-modal-setup').hide();
-                enterCategoryStep();
-                saveSetupStep(2);
+                showBankStep();
+                saveSetupStep(stepIndex('bank-connect-modal-setup'));
             });
 
             // Previous button on MFA modal - go back to welcome
@@ -740,19 +900,19 @@
                 if (!mfaAlreadyEnabled && !mfaVerifiedThisSession) {
                     $.post('/cancel_mfa');
                 }
-                saveSetupStep(0);
+                saveSetupStep(stepIndex('welcome-modal-setup'));
                 goToStep('welcome-modal-setup');
             });
 
             // MFA already-configured Previous/Continue buttons
             $('#mfa-configured-prev-btn').on('click', function() {
-                saveSetupStep(0);
+                saveSetupStep(stepIndex('welcome-modal-setup'));
                 goToStep('welcome-modal-setup');
             });
             $('#mfa-configured-continue-btn').on('click', function() {
                 $('#mfa-setup-modal-setup').hide();
-                enterCategoryStep();
-                saveSetupStep(2);
+                showBankStep();
+                saveSetupStep(stepIndex('bank-connect-modal-setup'));
             });
 
             // Copy MFA secret to clipboard (setup version)
@@ -847,8 +1007,8 @@
                         showMfaSetupMessage('MFA enabled!', 'success');
                         setTimeout(function() {
                             $('#mfa-setup-modal-setup').hide();
-                            enterCategoryStep();
-                            saveSetupStep(2);
+                            showBankStep();
+                            saveSetupStep(stepIndex('bank-connect-modal-setup'));
                         }, 1200);
                     } else {
                         showMfaSetupMessage('Incorrect code', 'error');
@@ -911,11 +1071,11 @@
             function fetchBankBalancesForSelectedAccounts(selectedAccountIds) {
                 // No provider means no live balances. Starting balances are
                 // entered by hand on the starting-balance step instead.
-                bankBalances = { checking: 0, savings: 0 };
+                // Balances come from the linked accounts; nothing to reset.
             }
             function fetchBankBalances() {
                 // No provider means no balances to fetch.
-                bankBalances = { checking: 0, savings: 0 };
+                // Balances come from the linked accounts; nothing to reset.
             }
 
             // ============================================================================
@@ -1607,7 +1767,7 @@
                 // does not move you.
                 goToStep('name-modal-setup');
                 $('#setup-profile-first-name').focus();
-                saveSetupStep(3);
+                saveSetupStep(stepIndex('name-modal-setup'));
             });
 
             // Handle previous from category recommendations -> back to MFA.
@@ -1619,8 +1779,17 @@
             // with it - there is no connection to remove.
             $('#category-recommendations-prev-btn').on('click', function() {
                 $('#category-recommendations-modal-setup').hide();
-                saveSetupStep(1);
-                showMfaModal();
+                if (document.getElementById('bank-connect-modal-setup')) {
+                    // Back to AI if the bank was linked (AI follows it), else to the bank step.
+                    if (setupBankLinked && document.getElementById('ai-setup-modal-setup')) {
+                        showAiStep();
+                    } else {
+                        showBankStep();
+                    }
+                } else {
+                    saveSetupStep(stepIndex('mfa-setup-modal-setup'));
+                    showMfaModal();
+                }
             });
 
             // Handle create categories button - Store data and proceed to name modal
@@ -1647,7 +1816,7 @@
                 goToStep('name-modal-setup');
                 $('#setup-profile-first-name').focus();
                 // Save categories to Redis so they persist across reloads/browsers
-                saveSetupStep(3, { setup_categories: window.pendingCategoriesToCreate });
+                saveSetupStep(stepIndex('name-modal-setup'), { setup_categories: window.pendingCategoriesToCreate });
             });
 
             // Display category confirmation summary
@@ -1754,7 +1923,7 @@
 
                 $('#name-modal-setup').hide();
 
-                saveSetupStep(4, { first_name: window.setupFirstName, last_name: window.setupLastName });
+                saveSetupStep(stepIndex('currency-modal-setup'), { first_name: window.setupFirstName, last_name: window.setupLastName });
                 $('#currency-modal-setup').show();
                 $('#setup-profile-currency-type').focus();
             });
@@ -1781,13 +1950,13 @@
             // Handle previous button on name modal
             $('#name-modal-prev-btn').on('click', function () {
                 $('#name-modal-setup').hide();
-                saveSetupStep(2);
+                saveSetupStep(stepIndex('category-recommendations-modal-setup'));
                 enterCategoryStep();
             });
 
             // Handle previous button click on the currency modal
             $('#currency-modal-prev-btn').on('click', function () {
-                saveSetupStep(3);
+                saveSetupStep(stepIndex('name-modal-setup'));
                 goToStep('name-modal-setup');
                 $('#setup-profile-first-name').focus();
             });
@@ -1796,14 +1965,15 @@
                 event.preventDefault();
                 const currencyType = $('#setup-profile-currency-type').val();
                 updateCurrencySymbols(currencyType);
-                saveSetupStep(5, { currency_type: currencyType });
+                saveSetupStep(stepIndex('starting-balance-modal-setup'), { currency_type: currencyType });
+                prefillStartingBalances();
                 goToStep('starting-balance-modal-setup');
                 $('#setup-profile-starting-balance').focus();
             });
 
             // Handle previous button click on the starting balance modal
             $('#starting-balance-prev-btn').on('click', function () {
-                saveSetupStep(4);
+                saveSetupStep(stepIndex('currency-modal-setup'));
                 goToStep('currency-modal-setup');
                 $('#setup-profile-currency-type').focus();
             });
@@ -1814,14 +1984,15 @@
                     setup_starting_balance: $('#setup-profile-starting-balance').val(),
                     starting_savings: parseFloat($('#setup-profile-starting-savings').val()) || 0
                 };
-                saveSetupStep(6, balData);
+                saveSetupStep(stepIndex('balance-threshold-modal-setup'), balData);
                 goToStep('balance-threshold-modal-setup');
                 $('#setup-profile-balance-threshold').focus();
             });
 
             // Handle previous button click on the balance threshold modal
             $('#balance-threshold-prev-btn').on('click', function () {
-                saveSetupStep(5);
+                saveSetupStep(stepIndex('starting-balance-modal-setup'));
+                prefillStartingBalances();
                 goToStep('starting-balance-modal-setup');
                 $('#setup-profile-starting-balance').focus();
             });
@@ -1934,6 +2105,10 @@
 
             // Decimal validation for monetary inputs
             $('#setup-profile-starting-balance, #setup-profile-starting-savings, #setup-profile-balance-threshold').on('input', function() {
+                var kind = { 'setup-profile-starting-balance': 'checking', 'setup-profile-starting-savings': 'savings' }[this.id];
+                if (kind && this.value !== autoFilledBalance[kind]) {
+                    $('#' + kind + '-auto-filled-indicator').removeClass('visible');
+                }
                 let value = this.value;
                 // Allow only one decimal point
                 const parts = value.split('.');

@@ -62,7 +62,7 @@ These keys are hydrated from MySQL when a user becomes active, and flushed back 
 | `linked_accounts:v1:{user_id}` | STRING (JSON array) | Individual linked bank accounts |
 | `linked_transactions:v1:{user_id}` | STRING (JSON array) | Imported bank transactions, with provider enrichment fields |
 | `category_memory:v1:{user_id}` | STRING (JSON array) | Category memory — maps merchant/description to budget categories |
-| `linked_last_txn_date:v1:{user_id}` | STRING | Cached latest transaction date; also the entry-locking cutoff |
+| `bank_last_txn_date:v1:{user_id}` | STRING | Cached latest posted transaction date; also the entry-locking cutoff |
 
 ---
 

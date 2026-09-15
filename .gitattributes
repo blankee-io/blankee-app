@@ -9,3 +9,8 @@ static/fontawesome-free/** -text
 # The licence text, verbatim from gnu.org. Same reasoning: git should not be
 # rewriting the bytes of a licence.
 LICENSE -text
+
+# Python is text whatever git's heuristic says. redis_manager.py was being
+# classed as binary, which skipped line-ending normalisation and turned every
+# edit to it into a whole-file diff.
+*.py text

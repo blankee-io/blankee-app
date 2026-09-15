@@ -7,9 +7,10 @@ entry dated in the past depletes the matching bucket, so the forecast is consume
 rather than counted twice.
 
 Nothing resolved a bucket whose day simply passed. The only code that turned one
-into a real entry lived inside _sync_bank_transactions_for_user, which has no
-callers, ran only when a bank sync had already imported transactions, and covered
-credit expenses alone - so an unconfirmed forecast stayed in the totals forever.
+into a real entry lived inside the old bank importer (since removed), which had
+no callers, ran only when a bank sync had already imported transactions, and
+covered credit expenses alone - so an unconfirmed forecast stayed in the totals
+forever.
 
 This module is the answer to "did it actually happen?", asked once each evening:
 
@@ -240,8 +241,15 @@ def pending_buckets(user_id, on_date=None):
     """
     on_date = on_date or _user_today(user_id)
     items = []
+    fed = _fed_tables(user_id)
 
     for table in ENTRY_TABLES:
+        # A table the bank feed answers for is not asked about here: its
+        # forecasts are matched by transactions as they post, and the ones
+        # nothing matched are moved on by the pull. Asking as well would put
+        # the same forecast to the person twice.
+        if table in fed and fed[table] is None:
+            continue
         entries = _entries(table, user_id)
         if not entries:
             continue
@@ -292,6 +300,9 @@ def pending_buckets(user_id, on_date=None):
                     days_pushed = max(0, (e_date - orig).days)
 
             cid = int(e.get('category_id')) if e.get('category_id') is not None else None
+            # A linked card's categories, on a table shared with unlinked cards.
+            if table in fed and fed[table] and cid in fed[table]:
+                continue
             items.append({
                 'entry_id': e.get('id'),
                 'table': table,
@@ -395,6 +406,19 @@ def count_pending_from_db(user_id, on_date=None):
     on_date = on_date or _user_today(user_id)
     total = 0
 
+    # The same exclusion pending_buckets makes, from the flags rather than
+    # the cache: a dehydrated user has no cached categories to filter by, but
+    # the linked-account flags read MySQL when they must.
+    skip_cash = False
+    linked_cards = []
+    try:
+        from bank_redis import get_user_linked_account_flags
+        flags = get_user_linked_account_flags(user_id) or {}
+        skip_cash = bool(flags.get('has_checking'))
+        linked_cards = [int(i) for i in (flags.get('linked_credit_ids') or [])]
+    except Exception as e:
+        log_warning(logger, 'BUCKET_CONFIRM', f"Could not read bank flags for user {user_id}: {e}")
+
     # One row per bucket. This counted distinct categories while a sweeper
     # collapsed each category to its newest due bucket; now that nothing is
     # removed unasked, every due bucket is listed, and counting categories would
@@ -403,23 +427,30 @@ def count_pending_from_db(user_id, on_date=None):
     # Credit expense categories hang off an account, not a user - they have
     # account_id where the other two have user_id - so that one needs an extra
     # hop through credit_accounts.
-    queries = (
-        ("SELECT COUNT(*) FROM income_entries e "
-         "  JOIN income_categories c ON c.id = e.category_id "
-         " WHERE c.user_id = %s AND e.is_bucket = 1 AND e.amount > 0 AND e.date <= %s"),
-        ("SELECT COUNT(*) FROM expense_entries e "
-         "  JOIN expense_categories c ON c.id = e.category_id "
-         " WHERE c.user_id = %s AND e.is_bucket = 1 AND e.amount > 0 AND e.date <= %s"),
-        ("SELECT COUNT(*) FROM c_expense_entries e "
-         "  JOIN c_expense_categories c ON c.id = e.category_id "
-         "  JOIN credit_accounts a ON a.id = c.account_id "
-         " WHERE a.user_id = %s AND e.is_bucket = 1 AND e.amount > 0 AND e.date <= %s"),
-    )
+    queries = []
+    if not skip_cash:
+        queries.append(("SELECT COUNT(*) FROM income_entries e "
+                        "  JOIN income_categories c ON c.id = e.category_id "
+                        " WHERE c.user_id = %s AND e.is_bucket = 1 AND e.amount > 0 AND e.date <= %s",
+                        (user_id, on_date.isoformat())))
+        queries.append(("SELECT COUNT(*) FROM expense_entries e "
+                        "  JOIN expense_categories c ON c.id = e.category_id "
+                        " WHERE c.user_id = %s AND e.is_bucket = 1 AND e.amount > 0 AND e.date <= %s",
+                        (user_id, on_date.isoformat())))
+    card_sql = ("SELECT COUNT(*) FROM c_expense_entries e "
+                "  JOIN c_expense_categories c ON c.id = e.category_id "
+                "  JOIN credit_accounts a ON a.id = c.account_id "
+                " WHERE a.user_id = %s AND e.is_bucket = 1 AND e.amount > 0 AND e.date <= %s")
+    card_args = [user_id, on_date.isoformat()]
+    if linked_cards:
+        card_sql += " AND a.id NOT IN (" + ", ".join(["%s"] * len(linked_cards)) + ")"
+        card_args.extend(linked_cards)
+    queries.append((card_sql, tuple(card_args)))
 
     try:
         with get_db_pool().get_cursor() as cursor:
-            for sql in queries:
-                cursor.execute(sql, (user_id, on_date.isoformat()))
+            for sql, args in queries:
+                cursor.execute(sql, args)
                 row = cursor.fetchone()
                 if not row:
                     continue
@@ -430,6 +461,20 @@ def count_pending_from_db(user_id, on_date=None):
                       f"Could not count pending buckets for user {user_id}: {e}")
         return 0
     return total
+
+
+def _fed_tables(user_id):
+    """
+    The entry tables a bank feed answers for - see bank_import.fed_tables.
+    Empty when that cannot be read: asking about a forecast twice is the
+    smaller mistake than never asking.
+    """
+    try:
+        import bank_import
+        return bank_import.fed_tables(user_id) or {}
+    except Exception as e:
+        log_warning(logger, 'BUCKET_CONFIRM', f"Could not read the bank-fed tables for user {user_id}: {e}")
+        return {}
 
 
 def _user_today(user_id):
@@ -459,6 +504,50 @@ def _user_today(user_id):
 
 def _save_entries(table, user_id, entries):
     return redis_manager.set_table_cache(table, user_id, entries, mark_dirty=True)
+
+
+def _mirror_card_payment(user_id, table, category_id, old_date, new_date, old_amount, new_amount):
+    """
+    An expense in a card's mirror category is a payment towards that card,
+    held on the card side as a c_payment on the same day. An answer that
+    moves or resizes the expense has to do the same to the payment, or the
+    card's balance goes on showing it where it was. Returns whether there
+    was one to keep in step, so the route can recalculate the card.
+    """
+    if table != 'expense_entries':
+        return False
+    cat = next((c for c in (redis_manager.get_table_cache('expense_categories', user_id) or [])
+                if c.get('id') is not None and int(c['id']) == int(category_id)), None)
+    if not cat or int(cat.get('is_credit_account') or 0) != 1 or not cat.get('credit_account_id'):
+        return False
+    try:
+        from app import _shift_payment_in_redis
+        _shift_payment_in_redis(user_id, int(cat['credit_account_id']), old_date, new_date, old_amount, new_amount)
+    except Exception as e:
+        log_warning(logger, 'BUCKET_CONFIRM', f"user {user_id}: could not keep the card payment in step for category {category_id}: {e}")
+    return True
+
+
+def _mirror_card_payment(user_id, table, category_id, old_date, new_date, old_amount, new_amount):
+    """
+    An expense in a card's mirror category is a payment towards that card,
+    held on the card side as a c_payment on the same day. An answer that
+    moves or resizes the expense has to do the same to the payment, or the
+    card's balance goes on showing it where it was. Returns whether there
+    was one to keep in step, so the route can recalculate the card.
+    """
+    if table != 'expense_entries':
+        return False
+    cat = next((c for c in (redis_manager.get_table_cache('expense_categories', user_id) or [])
+                if c.get('id') is not None and int(c['id']) == int(category_id)), None)
+    if not cat or int(cat.get('is_credit_account') or 0) != 1 or not cat.get('credit_account_id'):
+        return False
+    try:
+        from app import _shift_payment_in_redis
+        _shift_payment_in_redis(user_id, int(cat['credit_account_id']), old_date, new_date, old_amount, new_amount)
+    except Exception as e:
+        log_warning(logger, 'BUCKET_CONFIRM', f"user {user_id}: could not keep the card payment in step for category {category_id}: {e}")
+    return True
 
 
 def _forget_entry(table, user_id, entry_id):
@@ -658,6 +747,7 @@ def resolve(user_id, table, entry_id, action, amount=None):
             return False, 'That amount is not a number.', None
         if new_amount <= 0:
             return False, 'Enter an amount greater than zero.', None
+        old_amount = float(target.get('amount') or 0)
         target['is_bucket'] = 0
         target['amount'] = new_amount
         target['original_amount'] = None
@@ -665,7 +755,10 @@ def resolve(user_id, table, entry_id, action, amount=None):
         _apply_to_record(table, user_id, category_id, bucket_date,
                          lambda r, rs: False, also=entry_date)
         _save_entries(table, user_id, entries)
-        return True, 'Recorded.', _state(target)
+        change = _state(target)
+        if _mirror_card_payment(user_id, table, category_id, entry_date, entry_date, old_amount, new_amount):
+            change['card_payment'] = True
+        return True, 'Recorded.', change
 
     if action == 'defer':
         # Tomorrow where the user is, not the day after the bucket's own date.
@@ -704,7 +797,11 @@ def resolve(user_id, table, entry_id, action, amount=None):
         # edit of that bundle would rebuild a second forecast there. One plan,
         # one date.
         _defer_bundle_items(user_id, category_id, bucket_date, tomorrow)
-        return True, 'Moved to tomorrow.', _state(target)
+        change = _state(target)
+        amount = float(target.get('amount') or 0)
+        if _mirror_card_payment(user_id, table, category_id, entry_date, tomorrow, amount, amount):
+            change['card_payment'] = True
+        return True, 'Moved to tomorrow.', change
 
     # skip
     entries.remove(target)
@@ -712,4 +809,7 @@ def resolve(user_id, table, entry_id, action, amount=None):
     _apply_to_record(table, user_id, category_id, bucket_date,
                      lambda r, rs: False, also=entry_date)
     _save_entries(table, user_id, entries)
-    return True, 'Removed.', _state(removed=True)
+    change = _state(removed=True)
+    if _mirror_card_payment(user_id, table, category_id, entry_date, None, float(target.get('amount') or 0), 0):
+        change['card_payment'] = True
+    return True, 'Removed.', change

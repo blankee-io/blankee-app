@@ -8109,9 +8109,124 @@ transform: scale(1.2);
     content: "Profile";
 }
 
-/* Bank Connections section label override */
-#bank-connections-section::before {
-    content: "Bank Connections";
+/* The two sections at the foot of the Settings page: the bank connection and
+   Claude. Each is a .profile-section, so the label rule above applies; only
+   the words change. */
+.settings-bank-section::before {
+    content: "Bank Connection";
+}
+
+.settings-ai-section::before {
+    content: "AI Categorization";
+}
+
+/* The settings rows are .input-group elements carrying 16px of their own
+   inside the section's 16px, so their content starts 32px in. These two
+   sections hold cards rather than rows; the same 16px on their liners keeps
+   the four sections' content on one line. */
+.settings-bank-section #bank-connections-section > .section-liner,
+.settings-ai-section > .section-liner {
+    padding: 0 16px;
+    box-sizing: border-box;
+}
+
+/* The Entries to confirm reminder's cadence, moved in under its row in the
+   email kinds list. The list is already the grey panel, so the cadence box
+   goes white inside it rather than grey on grey, and loses the side margins
+   the standalone panel needed. */
+.email-types-panel #balance-notification-form {
+    width: 100%;
+    margin: 0;
+}
+
+.email-types-panel .balance-notification-panel {
+    margin: 0 0 8px;
+    background-color: var(--white);
+}
+
+/* Inside Settings the bank section starts with its first card, not a rule:
+   the status line that used to sit above it is at the foot now, under the
+   rule the last card leaves, above the buttons that change things. */
+.settings-bank-section .connection-card:first-of-type {
+    border-top: none;
+    padding-top: 4px;
+}
+
+.settings-bank-section .sf-status-foot {
+    /* Tucked up against the rule the last card leaves, small and light, so it
+       reads as a caption on the rule rather than a row of its own. */
+    margin: -14px 0 18px;
+    color: var(--secondary);
+    font-size: 12px;
+    text-align: center;
+}
+
+/* The AI steps as rules rather than boxes, to match the rest of the page.
+   The wizard keeps its boxes: there each step is a card in a modal. */
+.settings-ai-section .guide-cards {
+    gap: 0;
+}
+
+.settings-ai-section .guide-card {
+    padding: 16px 0;
+    border: none;
+    border-top: 1px solid var(--secondary-hover);
+    border-radius: 0;
+    background: transparent;
+}
+
+.settings-ai-section .guide-card:first-child {
+    padding-top: 4px;
+    border-top: none;
+}
+
+/* A labelled group of rows within a section, set off from what is above it
+   by a rule - the balance corrections at the foot of Settings. The heading
+   sits at the rows' own 16px so it lines up with their labels. */
+.settings-group {
+    width: 100%;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--secondary-hover);
+}
+
+.settings-group-heading {
+    margin: 0 16px 6px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+}
+
+/* The two correction choices on one row. The first label keeps the page's
+   30% column so the row lines up with the ones above; the second is inline,
+   as wide as its words. Wraps to two lines where there is no room. */
+.corrections-row {
+    flex-wrap: wrap;
+}
+
+.corrections-row .login-input {
+    min-width: 140px;
+}
+
+.corrections-row .corrections-inline-label {
+    width: auto;
+    padding-left: 8px;
+}
+
+@media (max-width: 600px) {
+    /* Stacked: each select claims most of a line, so the second label has
+       to start the next one and takes the column the first has - the two
+       lines read as two rows of the same form. */
+    .corrections-row .login-input {
+        flex: 1 1 55%;
+        min-width: 0;
+    }
+
+    .corrections-row .corrections-inline-label {
+        width: 30%;
+        padding-left: 0;
+    }
 }
 
 /* Notification item label override (singular for notifications page) */
@@ -18497,6 +18612,79 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     border-top: 1px solid var(--secondary-lighter);
 }
 
+/* Bank rows share the prompt with the forecasts. The money has moved, so
+   there is no Yes, No or Skip - only which category it was, offered as a
+   list with the guess already chosen, and one button to say so. A small
+   heading separates the two kinds so a row is never mistaken for the other. */
+.bucket-prompt-section {
+    margin: 0 0 8px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.bucket-prompt-item + .bucket-prompt-section {
+    margin-top: 16px;
+}
+
+.bucket-prompt-source {
+    font-weight: 600;
+}
+
+.bucket-prompt-choose {
+    align-items: center;
+}
+
+.bucket-prompt-picker {
+    flex: 1 1 160px;
+    min-width: 0;
+}
+
+/* The field every category picker in the app has, sized to the row. */
+.bucket-prompt-category-input {
+    width: 100%;
+    height: 32px;
+    box-sizing: border-box;
+    padding: 0 10px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 8px;
+    background-color: var(--white);
+    color: var(--text-dark);
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+}
+
+.bucket-prompt-category-input:focus {
+    border-color: var(--primary);
+}
+
+/* Its list. Fixed and on the body, placed by script against the field: the
+   dialog's list of rows scrolls, and an absolutely positioned list would be
+   cut off at its edge. Above the open dialog (.modal--open is 9000), below
+   the toasts. */
+.category-dropdown.bucket-prompt-dropdown {
+    position: fixed;
+    z-index: 9500;
+    width: auto;
+    margin-top: 0;
+    font-size: 13px;
+}
+
+.bucket-prompt-dropdown .search-result .bucket-prompt-choice {
+    flex: 1;
+    min-width: 0;
+}
+
+.bucket-prompt-dropdown .bucket-prompt-forecast {
+    display: block;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    font-weight: 400;
+}
+
 
 
 /* A caller with nothing to say leaves the paragraph empty; collapse it so
@@ -20356,4 +20544,320 @@ label.loaf-holiday {
     .loaf-summary-mark {
         height: 22px;
     }
+}
+
+/* =====================================================================
+   Guided connection flows: SimpleFIN (bank) and Claude (AI categorization).
+   Shared by the setup wizard, the bank page and the profile page through
+   templates/_simplefin_connect.html and templates/_ai_settings_panel.html.
+   ===================================================================== */
+.guide-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: 100%;
+    text-align: left;
+}
+.guide-card {
+    display: flex;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 12px;
+    background: var(--text-light);
+}
+.guide-num {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--primary);
+    color: var(--text-light);
+    font-weight: 700;
+}
+.guide-body {
+    flex: 1;
+    min-width: 0;
+}
+.guide-body h4 {
+    margin: 2px 0 6px;
+    font-size: 16px;
+}
+.guide-body p {
+    margin: 0 0 10px;
+    color: var(--secondary-dark);
+    font-size: 14px;
+    line-height: 1.45;
+}
+.guide-body p:last-child {
+    margin-bottom: 0;
+}
+.guide-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 10px;
+    background: var(--primary);
+    color: var(--text-light);
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.2s, transform 0.1s;
+}
+.guide-button:hover {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+}
+.guide-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+.guide-button-secondary {
+    background: var(--secondary-lighter);
+    color: var(--text-dark);
+}
+.guide-button-secondary:hover {
+    background: var(--secondary-hover);
+}
+.guide-button-danger {
+    background: var(--secondary-lighter);
+    color: var(--danger);
+}
+.guide-button-danger:hover {
+    background: var(--accent-lighter);
+}
+.sf-token-input {
+    width: 100%;
+    box-sizing: border-box;
+    margin: 6px 0 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    resize: vertical;
+}
+.sf-token-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-lighter);
+}
+.sf-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+.sf-row-end {
+    justify-content: flex-end;
+    margin-top: 14px;
+}
+.sf-status {
+    font-size: 13px;
+    color: var(--secondary-dark);
+}
+.sf-status.sf-error,
+.sf-error {
+    color: var(--danger);
+}
+.sf-accounts {
+    margin-top: 18px;
+    text-align: left;
+}
+.sf-accounts-title {
+    margin: 0 0 6px;
+}
+.sf-account-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+    min-width: 170px;
+}
+.sf-account-controls select.login-input {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 13px;
+}
+.sf-intro,
+.sf-meta {
+    color: var(--secondary-dark);
+    font-size: 14px;
+    margin: 0 0 14px;
+}
+.sf-banner {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border-radius: 10px;
+    margin-bottom: 14px;
+    font-size: 14px;
+}
+.sf-banner-error {
+    background: var(--accent-lighter);
+    color: var(--danger);
+}
+.sf-banner-warn {
+    background: var(--secondary-lighter);
+    color: var(--text-dark);
+}
+.sf-card-badge {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--primary-lighter);
+    color: var(--primary);
+    white-space: nowrap;
+}
+.sf-paused {
+    opacity: 0.6;
+}
+.sf-paused-label {
+    margin-left: 8px;
+    font-size: 12px;
+    color: var(--secondary-dark);
+}
+.sf-details {
+    margin-top: 18px;
+    padding: 12px 14px;
+    border: 1px dashed var(--secondary-hover);
+    border-radius: 12px;
+}
+.sf-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--secondary-dark);
+}
+.sf-details[open] summary {
+    margin-bottom: 10px;
+}
+.connection-card-attention {
+    box-shadow: 0 0 0 3px var(--accent-lighter);
+    border-radius: 8px;
+}
+
+/* The AI panel */
+.ai-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 8px 0;
+}
+.ai-field label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--secondary-dark);
+}
+.ai-field .login-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+.ai-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0;
+}
+/* Same look as .profile-form .toggle-switch, on its own class so the pages'
+   generic toggle handler does not also bind to it and flip it twice. */
+.ai-toggle {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 40px;
+    height: 32px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+}
+.ai-toggle .toggle-icon {
+    font-size: 30px;
+    line-height: 1;
+    color: var(--accent);
+    transition: color 0.3s ease;
+    transform-origin: center center;
+}
+.ai-toggle .toggle-icon.toggle-off {
+    color: var(--secondary);
+    transform: scaleX(-1);
+}
+.ai-toggle:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+.ai-toggle-label {
+    font-weight: 600;
+}
+.ai-verified-line {
+    color: var(--success);
+    font-size: 13px;
+    margin: 6px 0 0;
+}
+.ai-gate-note {
+    font-size: 13px;
+    color: var(--text-dark);
+    margin: 4px 0 8px;
+}
+.ai-privacy-note {
+    font-size: 12px;
+    color: var(--secondary-dark);
+    line-height: 1.45;
+}
+.ai-profile-section h3 {
+    margin: 0 0 12px;
+}
+
+/* The wizard modals that hold the guided flows need more room than the
+   one-field steps. */
+.modal-content-setup-profile.modal-content-wide {
+    width: min(720px, 100%);
+    max-width: 720px;
+}
+
+/* The guide buttons and selects set their own display, which would beat the
+   hidden attribute's user-agent rule; say it explicitly. */
+.sf-connect [hidden],
+.ai-settings [hidden] {
+    display: none !important;
+}
+/* A Continue the user cannot press yet should look it. */
+.setup-profile-next-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* A Continue that is locked looks disabled but still takes the click, so
+   it can say what is missing. */
+.setup-profile-next-button[data-locked="1"] {
+    opacity: 0.5;
+}
+.ai-cost-note {
+    background: var(--secondary-lighter);
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+.ai-key-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.ai-key-row .login-input {
+    flex: 1;
+    min-width: 0;
+}
+.ai-key-row .login-input[readonly] {
+    color: var(--secondary-dark);
+    letter-spacing: 1px;
+    background: var(--secondary-lighter);
 }
