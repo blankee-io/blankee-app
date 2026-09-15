@@ -1131,10 +1131,19 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
     # actually having and measured against that day's stored figures.
     on_date = on_date or _user_now(user_id).date()
 
-    try:
-        actual = Decimal(str(actual_balance))
-    except Exception:
-        return False, {'error': 'That balance is not a number.'}
+    # A current account a bank feed keeps current is not the user's to state:
+    # the modal leaves its row out and sends nothing for it. Everything else
+    # still happens - the confirmations, the recalculation, savings and the
+    # cards - and nothing is measured against a figure nobody typed.
+    if actual_balance is None:
+        if reconcilable(user_id)['cash']:
+            return False, {'error': 'Enter your current balance.'}
+        actual = None
+    else:
+        try:
+            actual = Decimal(str(actual_balance))
+        except Exception:
+            return False, {'error': 'That balance is not a number.'}
 
     # 1. Settle the outstanding confirmations before anything is measured. This
     #    does not move the balance - a bucket already counts and Yes keeps its
@@ -1152,6 +1161,17 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
         return False, {'error': 'Could not recalculate your totals. Nothing was changed.'}
     _flush(user_id)
 
+    if actual is None:
+        result = {'confirmed': confirmed, 'cash': False, 'app_balance': None,
+                  'actual': None, 'difference': None, 'entry_written': False,
+                  'direction': None}
+        clear_pending(user_id)
+        _correct_the_rest(user_id, on_date, actual_savings, actual_cards, result)
+        log_info(logger, 'AUTOBALANCE',
+                 f"User {user_id} balanced savings/cards only; the current "
+                 f"account is fed (confirmed {confirmed})")
+        return True, result
+
     # 3. What the app thinks now.
     current = app_balance(user_id, on_date)
     if current is None:
@@ -1161,6 +1181,7 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
     difference = actual - current
     result = {
         'confirmed': confirmed,
+        'cash': True,
         'app_balance': float(current),
         'actual': float(actual),
         'difference': float(difference),

@@ -1659,13 +1659,13 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 
                 log_info(logger, 'FLUSH', f"→ c_expense_entries: {len(batch_data)} rows")
                 return len(batch_data)
-                
+
             elif table == 'c_payment_entries':
                 # Credit account payment entries table
-                
+
                 # First, compare Redis IDs with MySQL IDs and delete orphans
                 redis_ids = set(int(row.get('id')) for row in rows if row.get('id') and int(row.get('id')) > 0)
-                
+
                 # Get all IDs from MySQL for this user's credit accounts
                 cursor.execute("""
                     SELECT cpe.id FROM c_payment_entries cpe
@@ -1673,7 +1673,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     WHERE ca.user_id = %s
                 """, (user_id,))
                 mysql_ids = set(row[0] for row in cursor.fetchall())
-                
+
                 # Delete records that exist in MySQL but not in Redis (orphan detection)
                 ids_to_delete = mysql_ids - redis_ids
                 if ids_to_delete:
@@ -1682,11 +1682,11 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         DELETE FROM c_payment_entries WHERE id IN ({placeholders})
                     """, list(ids_to_delete))
                     log_info(logger, 'FLUSH', f"Deleted {len(ids_to_delete)} c_payment_entries orphans from MySQL")
-                
+
                 # Also handle pending deletions from the set (if any)
                 pending_key = f"pending_deletes:c_payment_entries:{user_id}"
                 pending_deletes = _redis_client.smembers(pending_key)
-                
+
                 if pending_deletes:
                     delete_ids = [int(id_str) for id_str in pending_deletes]
                     placeholders = ','.join(['%s'] * len(delete_ids))
@@ -1694,7 +1694,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         DELETE FROM c_payment_entries WHERE id IN ({placeholders})
                     """, delete_ids)
                     log_info(logger, 'FLUSH', f"Deleted {len(delete_ids)} c_payment_entries from pending set")
-                    
+
                     # CRITICAL: Filter out pending deletes from Redis rows to prevent re-upserting
                     delete_ids_set = set(delete_ids)
                     rows = [r for r in rows if int(r.get('id', 0)) not in delete_ids_set]
@@ -1703,19 +1703,26 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     log_info(logger, 'FLUSH', f"Filtered {len(delete_ids)} deleted c_payment_entries from Redis")
                     # Clear the pending deletes set
                     _redis_client.delete(pending_key)
-                
-                # Now UPSERT the current state from Redis
+
+                # Now UPSERT the current state from Redis. A row with a temp
+                # (negative) id is inserted on its own so MySQL's id can be
+                # handed back to Redis, as the entry tables do. Left negative,
+                # the orphan pass above saw every real row as absent from
+                # Redis on the next flush and deleted and re-created the lot -
+                # new ids each time - for as long as the table stayed dirty.
                 batch_data = []
+                redis_needs_update = False
                 for row in rows:
                     row_id = int(row.get('id', 0))
                     recurring_id = row.get('recurring_id')
                     if recurring_id is not None:
                         recurring_id = int(recurring_id)
-                    
-                    # Handle negative IDs (new entries not yet in MySQL)
+
                     if row_id < 0:
-                        batch_data.append((
-                            None,  # Let MySQL auto-generate ID
+                        cursor.execute("""
+                            INSERT INTO c_payment_entries (account_id, date, amount, recurring_id, processed, auto_confirmed)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        """, (
                             row.get('account_id'),
                             row.get('date'),
                             float(row.get('amount', 0)),
@@ -1723,6 +1730,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('processed', 0)),
                             int(row.get('auto_confirmed', 0))
                         ))
+                        row['id'] = cursor.lastrowid
+                        redis_needs_update = True
                     else:
                         batch_data.append((
                             row_id,
@@ -1733,7 +1742,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('processed', 0)),
                             int(row.get('auto_confirmed', 0))
                         ))
-                
+
                 if batch_data:
                     cursor.executemany("""
                         INSERT INTO c_payment_entries (id, account_id, date, amount, recurring_id, processed, auto_confirmed)
@@ -1745,26 +1754,30 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             recurring_id = VALUES(recurring_id),
                             auto_confirmed = VALUES(auto_confirmed)
                     """, batch_data)
-                
+
+                if redis_needs_update:
+                    _redis_client.setex(redis_key, REDIS_TTL, json.dumps(rows, cls=DecimalEncoder))
+                    log_info(logger, 'FLUSH', f"Updated Redis with real IDs for c_payment_entries")
+
                 conn.commit()
                 cursor.close()
-                
+
                 # Clear pending deletions set after successful flush
                 _redis_client.delete(pending_key)
-                
-                log_info(logger, 'FLUSH', f"→ c_payment_entries: {len(batch_data)} rows")
-                return len(batch_data)
-                
+
+                log_info(logger, 'FLUSH', f"→ c_payment_entries: {len(rows)} rows")
+                return len(rows)
+
             elif table == 'recurring_income':
                 # Recurring income table
-                
+
                 # First, compare Redis IDs with MySQL IDs and delete orphans
                 redis_ids = set(int(row.get('id')) for row in rows if row.get('id') and int(row.get('id')) > 0)
-                
+
                 # Get all IDs from MySQL for this user
                 cursor.execute("SELECT id FROM recurring_income WHERE user_id = %s", (user_id,))
                 mysql_ids = set(row[0] for row in cursor.fetchall())
-                
+
                 # Delete records that exist in MySQL but not in Redis
                 ids_to_delete = mysql_ids - redis_ids
                 if ids_to_delete:
@@ -5170,6 +5183,7 @@ def flush_dirty_tables_for_user(user_id: int):
             'income_entries',
             'expense_entries',
             'c_expense_entries',
+            'c_payment_entries',  # Payments towards cards; the worker flushes these, and so must this
             'recurring_income',  # Recurring entry configurations
             'recurring_expense',
             'recurring_c_expense',

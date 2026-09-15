@@ -506,6 +506,50 @@ def _save_entries(table, user_id, entries):
     return redis_manager.set_table_cache(table, user_id, entries, mark_dirty=True)
 
 
+def _mirror_card_payment(user_id, table, category_id, old_date, new_date, old_amount, new_amount):
+    """
+    An expense in a card's mirror category is a payment towards that card,
+    held on the card side as a c_payment on the same day. An answer that
+    moves or resizes the expense has to do the same to the payment, or the
+    card's balance goes on showing it where it was. Returns whether there
+    was one to keep in step, so the route can recalculate the card.
+    """
+    if table != 'expense_entries':
+        return False
+    cat = next((c for c in (redis_manager.get_table_cache('expense_categories', user_id) or [])
+                if c.get('id') is not None and int(c['id']) == int(category_id)), None)
+    if not cat or int(cat.get('is_credit_account') or 0) != 1 or not cat.get('credit_account_id'):
+        return False
+    try:
+        from app import _shift_payment_in_redis
+        _shift_payment_in_redis(user_id, int(cat['credit_account_id']), old_date, new_date, old_amount, new_amount)
+    except Exception as e:
+        log_warning(logger, 'BUCKET_CONFIRM', f"user {user_id}: could not keep the card payment in step for category {category_id}: {e}")
+    return True
+
+
+def _mirror_card_payment(user_id, table, category_id, old_date, new_date, old_amount, new_amount):
+    """
+    An expense in a card's mirror category is a payment towards that card,
+    held on the card side as a c_payment on the same day. An answer that
+    moves or resizes the expense has to do the same to the payment, or the
+    card's balance goes on showing it where it was. Returns whether there
+    was one to keep in step, so the route can recalculate the card.
+    """
+    if table != 'expense_entries':
+        return False
+    cat = next((c for c in (redis_manager.get_table_cache('expense_categories', user_id) or [])
+                if c.get('id') is not None and int(c['id']) == int(category_id)), None)
+    if not cat or int(cat.get('is_credit_account') or 0) != 1 or not cat.get('credit_account_id'):
+        return False
+    try:
+        from app import _shift_payment_in_redis
+        _shift_payment_in_redis(user_id, int(cat['credit_account_id']), old_date, new_date, old_amount, new_amount)
+    except Exception as e:
+        log_warning(logger, 'BUCKET_CONFIRM', f"user {user_id}: could not keep the card payment in step for category {category_id}: {e}")
+    return True
+
+
 def _forget_entry(table, user_id, entry_id):
     """Register a removed row for deletion in MySQL as well as in Redis.
 
@@ -703,6 +747,7 @@ def resolve(user_id, table, entry_id, action, amount=None):
             return False, 'That amount is not a number.', None
         if new_amount <= 0:
             return False, 'Enter an amount greater than zero.', None
+        old_amount = float(target.get('amount') or 0)
         target['is_bucket'] = 0
         target['amount'] = new_amount
         target['original_amount'] = None
@@ -710,7 +755,10 @@ def resolve(user_id, table, entry_id, action, amount=None):
         _apply_to_record(table, user_id, category_id, bucket_date,
                          lambda r, rs: False, also=entry_date)
         _save_entries(table, user_id, entries)
-        return True, 'Recorded.', _state(target)
+        change = _state(target)
+        if _mirror_card_payment(user_id, table, category_id, entry_date, entry_date, old_amount, new_amount):
+            change['card_payment'] = True
+        return True, 'Recorded.', change
 
     if action == 'defer':
         # Tomorrow where the user is, not the day after the bucket's own date.
@@ -749,7 +797,11 @@ def resolve(user_id, table, entry_id, action, amount=None):
         # edit of that bundle would rebuild a second forecast there. One plan,
         # one date.
         _defer_bundle_items(user_id, category_id, bucket_date, tomorrow)
-        return True, 'Moved to tomorrow.', _state(target)
+        change = _state(target)
+        amount = float(target.get('amount') or 0)
+        if _mirror_card_payment(user_id, table, category_id, entry_date, tomorrow, amount, amount):
+            change['card_payment'] = True
+        return True, 'Moved to tomorrow.', change
 
     # skip
     entries.remove(target)
@@ -757,4 +809,7 @@ def resolve(user_id, table, entry_id, action, amount=None):
     _apply_to_record(table, user_id, category_id, bucket_date,
                      lambda r, rs: False, also=entry_date)
     _save_entries(table, user_id, entries)
-    return True, 'Removed.', _state(removed=True)
+    change = _state(removed=True)
+    if _mirror_card_payment(user_id, table, category_id, entry_date, None, float(target.get('amount') or 0), 0):
+        change['card_payment'] = True
+    return True, 'Removed.', change

@@ -5628,6 +5628,138 @@ def _update_payment_entry_in_redis(user_id, account_id, entry_date, amount):
     except Exception as e:
         pass
 
+def _shift_payment_in_redis(user_id, account_id, old_date, new_date, old_amount, new_amount):
+    """
+    An expense in a card's mirror category ("Quicksilver payment") is one
+    payment towards that card, and the card side holds it as a c_payment
+    cell on the same day. This keeps the two together when the expense
+    moves or changes size: old_amount leaves the cell on old_date (the row
+    goes when nothing is left in it) and new_amount joins the cell on
+    new_date (None: it leaves altogether). Adding and deleting already keep
+    them in step; moving and answering the evening prompt did not, so a
+    payment dragged to tomorrow stayed on today for the card, and the card's
+    balance kept showing it a day early.
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    try:
+        table_name = 'c_payment_entries'
+        entries = _get_entries_from_redis(table_name, user_id)
+        if entries is None:
+            entries = []
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT cpe.* FROM c_payment_entries cpe
+                    JOIN credit_accounts ca ON cpe.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                entries = list(cursor.fetchall())
+                cursor.close()
+            entries = _filter_pending_deletions(table_name, user_id, entries)
+
+        def _day(value):
+            return value.isoformat() if isinstance(value, date) else (str(value)[:10] if value else None)
+        old_day, new_day = _day(old_date), _day(new_date)
+
+        def _cell(day):
+            return next((e for e in entries
+                         if int(e.get('account_id', 0)) == int(account_id) and _day(e.get('date')) == day), None)
+
+        deleted_ids = []
+        if old_day and old_amount:
+            cell = _cell(old_day)
+            if cell is not None:
+                left = float(cell.get('amount') or 0) - float(old_amount)
+                if left > 0.005:
+                    cell['amount'] = round(left, 2)
+                else:
+                    entries.remove(cell)
+                    if cell.get('id') and int(cell['id']) > 0:
+                        deleted_ids.append(str(cell['id']))
+        if new_day and new_amount:
+            cell = _cell(new_day)
+            if cell is not None:
+                cell['amount'] = round(float(cell.get('amount') or 0) + float(new_amount), 2)
+            else:
+                max_id = max([abs(int(e.get('id', 0))) for e in entries], default=0)
+                entries.append({'id': -(max_id + 1), 'account_id': int(account_id), 'date': new_day,
+                                'amount': round(float(new_amount), 2), 'recurring_id': None, 'processed': 0})
+
+        _set_entries_to_redis(table_name, user_id, entries)
+        if deleted_ids:
+            pending_key = f"pending_deletes:{table_name}:{user_id}"
+            _redis_client.sadd(pending_key, *deleted_ids)
+            _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+    except Exception as e:
+        log_warning(logger, 'PAYMENT', f"user {user_id}: could not move the card payment for account {account_id}: {e}")
+
+def _shift_payment_in_redis(user_id, account_id, old_date, new_date, old_amount, new_amount):
+    """
+    An expense in a card's mirror category ("Quicksilver payment") is one
+    payment towards that card, and the card side holds it as a c_payment
+    cell on the same day. This keeps the two together when the expense
+    moves or changes size: old_amount leaves the cell on old_date (the row
+    goes when nothing is left in it) and new_amount joins the cell on
+    new_date (None: it leaves altogether). Adding and deleting already keep
+    them in step; moving and answering the evening prompt did not, so a
+    payment dragged to tomorrow stayed on today for the card, and the card's
+    balance kept showing it a day early.
+    """
+    if not app.config.get('REDIS_OK'):
+        return
+    try:
+        table_name = 'c_payment_entries'
+        entries = _get_entries_from_redis(table_name, user_id)
+        if entries is None:
+            entries = []
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT cpe.* FROM c_payment_entries cpe
+                    JOIN credit_accounts ca ON cpe.account_id = ca.id
+                    WHERE ca.user_id = %s
+                """, (user_id,))
+                entries = list(cursor.fetchall())
+                cursor.close()
+            entries = _filter_pending_deletions(table_name, user_id, entries)
+
+        def _day(value):
+            return value.isoformat() if isinstance(value, date) else (str(value)[:10] if value else None)
+        old_day, new_day = _day(old_date), _day(new_date)
+
+        def _cell(day):
+            return next((e for e in entries
+                         if int(e.get('account_id', 0)) == int(account_id) and _day(e.get('date')) == day), None)
+
+        deleted_ids = []
+        if old_day and old_amount:
+            cell = _cell(old_day)
+            if cell is not None:
+                left = float(cell.get('amount') or 0) - float(old_amount)
+                if left > 0.005:
+                    cell['amount'] = round(left, 2)
+                else:
+                    entries.remove(cell)
+                    if cell.get('id') and int(cell['id']) > 0:
+                        deleted_ids.append(str(cell['id']))
+        if new_day and new_amount:
+            cell = _cell(new_day)
+            if cell is not None:
+                cell['amount'] = round(float(cell.get('amount') or 0) + float(new_amount), 2)
+            else:
+                max_id = max([abs(int(e.get('id', 0))) for e in entries], default=0)
+                entries.append({'id': -(max_id + 1), 'account_id': int(account_id), 'date': new_day,
+                                'amount': round(float(new_amount), 2), 'recurring_id': None, 'processed': 0})
+
+        _set_entries_to_redis(table_name, user_id, entries)
+        if deleted_ids:
+            pending_key = f"pending_deletes:{table_name}:{user_id}"
+            _redis_client.sadd(pending_key, *deleted_ids)
+            _redis_client.expire(pending_key, PERSISTENT_CACHE_TTL)
+    except Exception as e:
+        log_warning(logger, 'PAYMENT', f"user {user_id}: could not move the card payment for account {account_id}: {e}")
+
 def _delete_payment_entry_in_redis(user_id, account_id, start_date, end_date):
     """
     Delete payment entries from Redis cache by account and date range.
@@ -9938,8 +10070,8 @@ def move_entry_d():
                 
                 # Verify authorization and get category details
                 cursor.execute("""
-                    SELECT id, is_credit_account, name 
-                    FROM expense_categories 
+                    SELECT id, is_credit_account, credit_account_id, name
+                    FROM expense_categories
                     WHERE id = %s AND user_id = %s
                 """, (category_id, current_user.id))
                 row = cursor.fetchone()
@@ -9947,6 +10079,7 @@ def move_entry_d():
                     cursor.close()
                     return jsonify({'status': 'error', 'message': 'Entry not found or not authorized'}), 404
                 is_credit = row['is_credit_account']
+                payment_account_id = row.get('credit_account_id')
                 
                 amount = Decimal(entry_to_move.get('amount', 0))
                 old_date = entry_to_move.get('date')
@@ -10000,8 +10133,13 @@ def move_entry_d():
                                         f"Moved entry became a forecast but its bucket "
                                         f"record was not created: {e}")
 
-                # If is_credit_account, trigger CA balance update
+                # A payment towards a card: the card's own copy of it moves
+                # too, or the balance recalculated below would still carry it
+                # on the old day.
                 if is_credit == 1:
+                    if payment_account_id:
+                        _shift_payment_in_redis(current_user.id, payment_account_id,
+                                                old_date, new_date, float(amount), float(amount))
                     ca_triggered = True
 
             elif entry_type == 'ca':
@@ -17901,7 +18039,10 @@ def api_buckets_resolve():
     # Server-side rather than in the browser: dashboard_d has no CA balance
     # function of its own, so leaving it to the page would fix one dashboard and
     # miss the rest.
-    if table == 'c_expense_entries':
+    # The same when the answer was about a payment towards a card (an expense
+    # in the card's mirror category): resolve() moved or resized the card's
+    # copy of it, and says so.
+    if table == 'c_expense_entries' or (change and change.get('card_payment')):
         try:
             save_ca_daily_balance()
         except Exception as e:
@@ -18195,6 +18336,9 @@ def api_autobalance_state():
         'success': True,
         'pending': True,
         'forced': force and not pending,
+        # False when a feed covers the current account: the modal then has no
+        # row for it and asks for nothing there.
+        'cash': bool(allowed['cash']),
         'app_balance': float(balance) if balance is not None else None,
         # None means the user has no savings figure recorded, which is different
         # from zero: the modal leaves the row out rather than inviting them to
@@ -18220,7 +18364,9 @@ def api_autobalance_apply():
     import auto_balance
 
     data = request.get_json(silent=True) or {}
-    if data.get('balance') is None:
+    # No figure for the current account is only an answer when a bank feed
+    # keeps that account; apply() checks the same thing.
+    if data.get('balance') is None and auto_balance.reconcilable(current_user.id)['cash']:
         return jsonify({'success': False, 'error': 'Enter your current balance.'}), 400
 
     # cards arrives as {account_id: balance}; JSON object keys are strings, so

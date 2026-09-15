@@ -3168,9 +3168,14 @@ function showAutoBalancePrompt(opts) {
             // One block per thing being reconciled: cash, savings if there is a
             // figure for it, and each card. Nothing is netted across them - a
             // card balance is a debt and savings is not spendable cash - so each
-            // gets its own "we think" and its own input.
-            var body = '<div class="autobalance-body">' +
-                _abBlock('autobalance-actual', 'Current account', shown, symbol);
+            // gets its own "we think" and its own input. An account a bank feed
+            // keeps current is not offered: the server leaves it out (cash
+            // false, no savings figure, the card not listed), and when every
+            // account is fed it says there is nothing pending at all.
+            var body = '<div class="autobalance-body">';
+            if (d.cash !== false) {
+                body += _abBlock('autobalance-actual', 'Current account', shown, symbol);
+            }
 
             if (d.savings_balance != null) {
                 body += _abBlock('autobalance-savings', 'Savings',
@@ -3194,7 +3199,8 @@ function showAutoBalancePrompt(opts) {
                 cancelText: "Not now",
                 modalClass: "autobalance-modal",
                 onReady: function (bodyEl) {
-                    var input = bodyEl.querySelector("#autobalance-actual");
+                    var input = bodyEl.querySelector("#autobalance-actual") ||
+                                bodyEl.querySelector(".autobalance-input");
                     // Pre-filled with what the app thinks, because the common
                     // case is agreement and the rest is typing over it.
                     if (input) { input.focus(); input.select(); }
@@ -3217,7 +3223,9 @@ function showAutoBalancePrompt(opts) {
                     // exists and still does what it says - nothing calls it.
                     return Promise.resolve(false);
                 }
-                if (typed === null || typed === "") {
+                if (d.cash === false) {
+                    typed = null;
+                } else if (typed === null || typed === "") {
                     showToast("Enter your current balance.", "error");
                     return false;
                 }
@@ -3270,7 +3278,7 @@ function _abApply(balance, savings, cards) {
                 parts.push("Recorded " + Math.abs(d.difference).toFixed(2) +
                            " " + d.direction + " in " +
                            (d.category_name || "Uncategorized") + ".");
-            } else {
+            } else if (d.cash !== false) {
                 parts.push("Your balance matches.");
             }
             if (d.savings && d.savings.entry_written) {
@@ -3284,6 +3292,7 @@ function _abApply(balance, savings, cards) {
                 parts.push("Adjusted " + cardsFixed +
                            (cardsFixed === 1 ? " card." : " cards."));
             }
+            if (!parts.length) { parts.push("Everything matches."); }
             showToast(parts.join(" "), "success");
 
             // The confirmations and the correction between them can have moved

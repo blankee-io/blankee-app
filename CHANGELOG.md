@@ -108,6 +108,22 @@ tidies afterwards rather than gating.
   explicit column list, and the column added in 1.41.0 was not on it - so the
   switch lived only in the cache until the cache was rebuilt from the
   database. It is flushed now.
+- A payment towards a card, dragged to another day on the daily dashboard or
+  moved to tomorrow by "not yet" in the confirm modal, moved only on the
+  checking side: the card's own copy of the payment stayed on the old day,
+  so the card's balance kept showing it there. The card's copy now moves,
+  resizes and goes with the expense (drag, "not yet", a corrected amount,
+  "skip"), and the card's balances are recalculated after each.
+- Card payments were deleted and re-created in the database, with new ids,
+  on every flush: the cache kept the temporary ids it gave them, so the
+  flush's orphan check saw every real row as gone. The flush now hands the
+  real ids back to the cache, as it does for the other entry tables, and the
+  immediate per-user flush includes the payments table at all.
+- The balance modal still showed a "Current account" row - with no figure -
+  for a checking account a bank feed keeps current. The server had already
+  stopped offering it; the page now leaves the row out, asks only for the
+  accounts no feed covers, and does not open at all when the feed covers
+  them all.
 
 ### Removed
 - The old importer and its balance adjustments (`_sync_bank_transactions_for_user`,
