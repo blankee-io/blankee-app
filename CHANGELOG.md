@@ -23,7 +23,7 @@ tidies afterwards rather than gating.
   Blankee asks SimpleFIN for what posted since the last pull (re-asking the
   last week, in case a bank posts late) and brings it in. One request, once a
   day, claimed per person so that two server processes cannot pull twice. A
-  **Sync now** button on the Bank Accounts page runs the same pull by hand;
+  **Sync now** button in the Bank Connection section runs the same pull by hand;
   it refuses within two of the day's ceiling so the morning pull keeps its
   request. Import starts at the moment an account was linked - nothing
   already inside the balance matched at link time is counted twice.
@@ -53,7 +53,7 @@ tidies afterwards rather than gating.
   merchant memory has no answer for go to Anthropic in one request: each
   row's description, amount and direction, with the names of the person's
   categories. A name not on the list is dropped, never invented. A failed
-  request is shown on the profile page without un-verifying the key.
+  request is shown in the AI Categorization section without un-verifying the key.
 - **Pending transactions** are stored and watched, not imported: a
   transaction the bank still calls pending gets no entry until it posts.
   Posting under a new id replaces the pending row that matches it (same
@@ -61,6 +61,16 @@ tidies afterwards rather than gating.
   reporting is withdrawn after three days.
 
 ### Changed
+- **The bank connection and AI categorization live on the Settings page**, as
+  two sections at its foot: Bank Connection (what the Bank Accounts page was -
+  connect, choose accounts, Sync now, Disconnect, Replace the Setup Token) and
+  AI Categorization (connect a key, test it, switch it on or off, remove it).
+  The Bank Accounts menu entry and the profile page's AI section are gone;
+  `/bank_accounts` redirects to the section, so an older notification's link
+  still lands in the right place.
+- **Transaction dates are read in the person's own timezone.** The bank's
+  posted time is an instant; a purchase at ten in the evening Pacific was
+  landing on the next day.
 - **Forecasts on a bank-fed table leave the evening prompt.** With a checking
   account linked, income and expense forecasts are matched by transactions as
   they post; a linked card's forecasts likewise. One nothing matched is moved

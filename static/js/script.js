@@ -642,7 +642,7 @@ function goToReconnect() {
     if (window._bankReconnectData && window._bankReconnectData.length > 0) {
         // Go to profile page with reconnect parameter for first connection
         const connectionId = window._bankReconnectData[0].connection_id;
-        window.location.href = '/bank_accounts?reconnect=' + encodeURIComponent(connectionId);
+        window.location.href = '/settings?reconnect=' + encodeURIComponent(connectionId) + '#bank';
     } else {
         window.location.href = '/profile';
     }

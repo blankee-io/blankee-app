@@ -391,7 +391,8 @@ Blankee reads bank accounts through [SimpleFIN Bridge](https://beta-bridge.simpl
 a service each person signs up for themselves - $1.50 a month or $15 a year,
 paid to SimpleFIN, not to Blankee. There is no widget: the Bridge hands the
 person a one-time **Setup Token**, and they paste it into Blankee. The setup
-wizard (step 3) and the Bank Accounts page walk through it:
+wizard (step 3) and the **Bank Connection** section of the Settings page walk
+through it:
 
 1. **Create your SimpleFIN account** - sign up with an email, subscribe, then
    add each bank under *Financial Institutions → New Connection*.
@@ -415,9 +416,9 @@ come through?" modal to be confirmed or moved. Forecasts on a linked account
 are no longer asked about in the evening: a transaction that matches one
 fulfils it, and one nothing matches is moved to tomorrow. After each pull, and
 again when the last bank row is confirmed, the checking, savings and card
-balances are matched to the bank's as of yesterday. **Sync now** on the Bank
-Accounts page runs the same pull by hand (it keeps two of the day's requests
-back for the morning). Import starts at the moment an account is linked -
+balances are matched to the bank's as of yesterday. **Sync now** in the Bank
+Connection section runs the same pull by hand (it keeps two of the day's
+requests back for the morning). Import starts at the moment an account is linked -
 history is not fetched.
 
 Disconnecting in Blankee forgets the connection here; to stop SimpleFIN sharing
@@ -441,8 +442,9 @@ subscription does not include API access; the key comes from
 [platform.claude.com](https://platform.claude.com/) under *Billing* then
 *API keys*.
 
-The wizard (step 4, only after a bank is linked) and the profile page hold the
-key (encrypted), the model choice, a **Test** button, and the switch. The
+The wizard (step 4, only after a bank is linked) and the **AI Categorization**
+section of the Settings page hold the key (encrypted), the model choice, a
+**Test** button, the switch, and **Remove key** to disconnect Claude. The
 switch cannot be turned on without a tested key and a linked bank account;
 disconnecting the last bank turns it off while keeping the key. When it is on,
 each pull sends Anthropic one request with the description, amount and

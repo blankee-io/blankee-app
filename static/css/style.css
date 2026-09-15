@@ -8109,9 +8109,15 @@ transform: scale(1.2);
     content: "Profile";
 }
 
-/* Bank Connections section label override */
-#bank-connections-section::before {
-    content: "Bank Connections";
+/* The two sections at the foot of the Settings page: the bank connection and
+   Claude. Each is a .profile-section, so the label rule above applies; only
+   the words change. */
+.settings-bank-section::before {
+    content: "Bank Connection";
+}
+
+.settings-ai-section::before {
+    content: "AI Categorization";
 }
 
 /* Notification item label override (singular for notifications page) */

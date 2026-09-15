@@ -59,13 +59,8 @@
             </div>
         </div>
         <div class="dropdown-link"><a href="{{ url_for('credit_accounts') }}">Credit Accounts</a><i class="fa-light fa-credit-card"></i></div>
-        {# Hidden until there is a provider behind it: BANK_PROVIDER defaults
-           to 'null', and on such an install the page could not connect
-           anything. Still shown to anyone who already has a connection or an
-           account, so nobody loses their way in. #}
-        {% if has_bank_connections or has_bank_accounts or bank_connect_available %}
-        <div class="dropdown-link"><a href="{{ url_for('bank_accounts') }}">Bank Accounts</a><i class="fa-light fa-building-columns"></i></div>
-        {% endif %}
+        {# The bank connection and AI categorization live on the Settings
+           page now - they are configuration, not a place to go every day. #}
         <div class="dropdown-link"><a href="{{ url_for('bundles') }}">Bundles</a><i class="fa-light fa-boxes-stacked"></i></div>
         <div class="dropdown-link"><a href="{{ url_for('settings') }}">Settings</a><i class="fa-light fa-sliders"></i></div>
         {# Only means anything inside the iOS app, which injects window.nativeApp

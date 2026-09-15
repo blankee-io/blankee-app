@@ -1,7 +1,9 @@
 {#
   AI categorization settings, used by the setup wizard (step 4) and the
-  profile page. Expects `ai` = get_enrichment_provider().get_display(user_id).
+  Settings page. Expects `ai` = get_enrichment_provider().get_display(user_id).
   static/js/ai_settings.js drives it; the page calls AISettings.init().
+  Connect (Save a key), Test, switch on or off, Remove key - the whole of
+  what a person can do about Claude is here.
 
   The toggle here is deliberately NOT a .toggle-switch: pages bind a generic
   click handler to that class, and a second handler on the same element would
@@ -17,9 +19,9 @@
       <div class="guide-num">1</div>
       <div class="guide-body">
         <h4>Get a Claude API key</h4>
-        <p>Blankee can ask Claude to suggest a category and tidy the merchant name for
-           each imported transaction. It runs on <em>your</em> key, so you control it
-           and pay Anthropic directly, from usage credits you buy in advance.</p>
+        <p>Blankee can ask Claude to pick a category for each imported transaction the
+           merchant memory does not already know. It runs on <em>your</em> key, so you
+           control it and pay Anthropic directly, from usage credits you buy in advance.</p>
         <p class="ai-cost-note"><strong>What it costs:</strong> at today's prices, roughly
            25&cent; per 1,000 transactions on Claude Haiku 4.5 - for most users a few
            cents a month. Anthropic bills by usage and changes its prices, so treat this as

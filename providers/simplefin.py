@@ -128,11 +128,32 @@ def _epoch_int(epoch) -> Optional[int]:
     return epoch if epoch > 0 else None
 
 
-def _epoch_to_date(epoch) -> Optional[str]:
+def _epoch_to_date(epoch, tz=None) -> Optional[str]:
+    """
+    The calendar day an epoch falls on - in `tz` when given, else UTC.
+
+    The user's own zone, for anything that becomes an entry: a bank posts a
+    card purchase at ten in the evening Pacific, the epoch says five the next
+    morning UTC, and read in UTC the entry lands on tomorrow.
+    """
     epoch = _epoch_int(epoch)
     if epoch is None:
         return None
-    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime('%Y-%m-%d')
+    return datetime.fromtimestamp(epoch, tz=tz or timezone.utc).strftime('%Y-%m-%d')
+
+
+def _user_zone(user_id: int):
+    """The user's timezone as a tzinfo, or None when unknown or unreadable here."""
+    try:
+        from zoneinfo import ZoneInfo
+        with get_db_pool().get_cursor() as cursor:
+            cursor.execute("SELECT timezone FROM users WHERE id = %s", (user_id,))
+            row = cursor.fetchone()
+        name = (row[0] if not isinstance(row, dict) else row.get('timezone')) if row else None
+        return ZoneInfo(name) if name else None
+    except Exception as e:
+        log_warning(logger, 'SIMPLEFIN', f'user {user_id}: timezone unusable, dates read in UTC: {e}')
+        return None
 
 
 class SimpleFINError(Exception):
@@ -557,6 +578,8 @@ class SimpleFINBankProvider(BankProvider):
         if account_id:
             params['account'] = account_id
         body = self._get(user_id, params)
+        # Dates in the user's own zone - see _epoch_to_date.
+        tz = _user_zone(user_id)
         out: List[Dict[str, Any]] = []
         for a in body.get('accounts') or []:
             aid = str(a.get('id') or '')
@@ -565,8 +588,8 @@ class SimpleFINBankProvider(BankProvider):
                 if amount is None:
                     continue
                 pending = bool(t.get('pending')) or not t.get('posted')
-                posted = _epoch_to_date(t.get('posted'))
-                transacted = _epoch_to_date(t.get('transacted_at'))
+                posted = _epoch_to_date(t.get('posted'), tz)
+                transacted = _epoch_to_date(t.get('transacted_at'), tz)
                 txn_date = posted or transacted
                 if not txn_date:
                     continue

@@ -16376,11 +16376,14 @@ def profile():
         mfa_enabled=mfa_enabled,
     )
 
-@app.route('/bank_accounts', methods=['GET'])
-@login_required
-def bank_accounts():
+def _bank_page_context(user_id):
+    """
+    Everything the bank connection section of the Settings page needs:
+    the provider's state, the connections with their accounts and the
+    Blankee card each backs, and the cards available to link.
+    """
     # Get user settings for landing_page and currency
-    redis_key = f"users:v1:{current_user.id}"
+    redis_key = f"users:v1:{user_id}"
     user_data = None
 
     if app.config.get('REDIS_OK'):
@@ -16396,7 +16399,7 @@ def bank_accounts():
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute(
                 "SELECT landing_page, currency_type FROM users WHERE id = %s",
-                (current_user.id,)
+                (user_id,)
             )
             user_data = cursor.fetchone()
             cursor.close()
@@ -16407,17 +16410,17 @@ def bank_accounts():
     # Get linked connections
     connections = []
     currency_symbol = '$'
-    _widget = get_bank_provider().connect_widget_config(current_user.id) or {}
+    _widget = get_bank_provider().connect_widget_config(user_id) or {}
     existing_cards = []
     try:
         from credit_link import cards_for_linking
-        existing_cards = cards_for_linking(current_user.id)
+        existing_cards = cards_for_linking(user_id)
     except Exception as e:
         log_error(app.logger, 'PROFILE', f"Error loading cards for bank_accounts: {e}")
     try:
-        connections = get_linked_connections(current_user.id)
+        connections = get_linked_connections(user_id)
         from bank_redis import _get_all_linked_accounts_raw
-        all_accounts = _get_all_linked_accounts_raw(current_user.id) or []
+        all_accounts = _get_all_linked_accounts_raw(user_id) or []
         for conn_row in connections:
             accounts = [a for a in all_accounts if a.get('connection_id') == conn_row.get('id')]
             for a in accounts:
@@ -16432,18 +16435,17 @@ def bank_accounts():
     except Exception as e:
         log_error(app.logger, 'PROFILE', f"Error loading linked bank data for bank_accounts: {e}")
 
-    last_txn_date = get_last_linked_transaction_date(current_user.id)
+    last_txn_date = get_last_linked_transaction_date(user_id)
 
-    return render_template(
-        'bank_accounts.html',
-        landing_page=landing_page,
+    # No landing_page and no ai: the Settings route passes its own, and a
+    # second copy of either would collide with it.
+    return dict(
         connections=connections,
         currency_symbol=currency_symbol,
         bank=_widget,
         sf_mode='replace' if _widget.get('needs_new_token') else 'page',
         existing_cards=existing_cards,
         reconnect_id=request.args.get('reconnect', ''),
-        ai=_ai_display(current_user.id),
         bank_last_txn_date=last_txn_date,
         bank_last_txn_date_formatted=(
             datetime.strptime(last_txn_date, '%Y-%m-%d').strftime('%m/%d/%Y')
@@ -16453,6 +16455,20 @@ def bank_accounts():
 
 # Exempt for the same reason as /api/widget-token: native iOS code registers
 # and unregisters the device, with the session cookie and nothing else.
+
+
+@app.route('/bank_accounts', methods=['GET'])
+@login_required
+def bank_accounts():
+    """
+    The bank connection moved to the Settings page. Kept as a redirect:
+    notifications and the reconnect modal link here with ?reconnect=<id>,
+    and the section on the settings page reads that.
+    """
+    reconnect = request.args.get('reconnect', '')
+    return redirect(url_for('settings', reconnect=reconnect or None, _anchor='bank'))
+
+
 @app.route('/api/notifications/register', methods=['POST'])
 @csrf.exempt
 @login_required
@@ -18637,7 +18653,9 @@ def settings():
         landing_page=landing_page,
         currency_type=currency_type,
         mfa_enabled=mfa_enabled,
-        email_notifications=email_notifications
+        email_notifications=email_notifications,
+        ai=_ai_display(current_user.id),
+        **_bank_page_context(current_user.id)
     )
 
 @app.route('/update_email_notifications', methods=['POST'])

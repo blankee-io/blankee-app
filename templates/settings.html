@@ -207,6 +207,23 @@
                             </form>
                         </div>
                     </div>
+                    {# The bank connection. Shown when there is a provider to
+                       connect through, or something already connected on an
+                       install that has since turned the provider off. #}
+                    {% if bank_connect_available or has_bank_connections or has_bank_accounts %}
+                    <div class="profile-section profile-bank-connections settings-bank-section" id="bank">
+                        {% include '_bank_connections.html' %}
+                    </div>
+                    {% endif %}
+                    {# Claude: connect a key, test it, switch it on or off, remove
+                       it. Only when Claude is the enrichment provider. #}
+                    {% if ai %}
+                    <div class="profile-section ai-profile-section settings-ai-section" id="ai">
+                        <div class="section-liner">
+                            {% include '_ai_settings_panel.html' %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -217,6 +234,13 @@
 
     <!-- Include the external JavaScript file for additional functionality -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    {% if bank_connect_available or has_bank_connections or has_bank_accounts %}
+    {% include '_bank_connections_js.html' %}
+    {% endif %}
+    {% if ai %}
+    <script src="{{ url_for('static', filename='js/ai_settings.js') }}"></script>
+    <script>document.addEventListener('DOMContentLoaded', function () { if (window.AISettings) AISettings.init({}); });</script>
+    {% endif %}
 
     <script type="text/javascript">
         document.getElementById('loading-screen').style.display = 'none';
