@@ -182,12 +182,11 @@
                             <div class="settings-group" id="balance-corrections-group">
                                 <p class="settings-group-heading">Balance corrections<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Where the difference goes when a balance - one you type, or one read from your bank - does not match what Blankee expected.</span></span></p>
                             <form id="balance-categories-form" class="profile-form">
-                                <div class="input-group">
+                                <!-- One row, two choices: they are a pair, and one check saves both. -->
+                                <div class="input-group corrections-row">
                                     <label for="balance-expense-category">Shortfall goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds less than Blankee expected, the difference is written here as an expense.</span></span></label>
                                     <select id="balance-expense-category" class="login-input"></select>
-                                </div>
-                                <div class="input-group">
-                                    <label for="balance-income-category">Extra goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds more than Blankee expected, the difference is written here as income.</span></span></label>
+                                    <label for="balance-income-category" class="corrections-inline-label">Extra goes to:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">When your bank holds more than Blankee expected, the difference is written here as income.</span></span></label>
                                     <select id="balance-income-category" class="login-input"></select>
                                     <button type="submit" class="submit-button">
                                         <i id="balance-categories-submit-icon" class="fas fa-check"></i>

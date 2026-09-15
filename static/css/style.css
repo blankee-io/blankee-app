@@ -8162,6 +8162,37 @@ transform: scale(1.2);
     text-align: left;
 }
 
+/* The two correction choices on one row. The first label keeps the page's
+   30% column so the row lines up with the ones above; the second is inline,
+   as wide as its words. Wraps to two lines where there is no room. */
+.corrections-row {
+    flex-wrap: wrap;
+}
+
+.corrections-row .login-input {
+    min-width: 140px;
+}
+
+.corrections-row .corrections-inline-label {
+    width: auto;
+    padding-left: 8px;
+}
+
+@media (max-width: 600px) {
+    /* Stacked: each select claims most of a line, so the second label has
+       to start the next one and takes the column the first has - the two
+       lines read as two rows of the same form. */
+    .corrections-row .login-input {
+        flex: 1 1 55%;
+        min-width: 0;
+    }
+
+    .corrections-row .corrections-inline-label {
+        width: 30%;
+        padding-left: 0;
+    }
+}
+
 /* Notification item label override (singular for notifications page) */
 #notifications-body .notification-section::before {
     content: "Notification";
