@@ -717,6 +717,13 @@ if [[ -n "$HELPER_ONLY" ]]; then
       permissions)
         apply_permissions
         install_root_conf
+        # The provider defaults for an installation that predates them. This
+        # used to sit only under --permissions-only, which the updater has not
+        # run since it stopped being root (1.38.0) - so an updated install kept
+        # BANK_PROVIDER=null and showed "no bank provider configured" after
+        # the release that added the bank. The helper can write .env: its
+        # unit lists the env directory among the paths it may change.
+        upgrade_env_defaults
         ;;
       units)
         if command -v systemctl >/dev/null; then
