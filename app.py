@@ -17519,16 +17519,17 @@ def confirm_transaction():
         log_warning(app.logger, 'MISMATCH', f"Mismatch detection failed (non-blocking): {mismatch_err}")
 
     remaining = bank_import.count_pending(current_user.id)
-    note = ''
     if remaining == 0:
         bank_import.clear_notification_if_none(current_user.id)
-        try:
-            note = bank_import.reconcile_summary(bank_import.reconcile_from_stored(current_user.id))
-        except Exception as e:
-            log_exception(app.logger, 'CONFIRM_TXN',
-                          f"reconcile after the last answer failed for user {current_user.id}: {e}")
+    # No reconcile here. The balances were matched to the bank after the
+    # pull, and nothing the modal does moves anything dated before today:
+    # a row keeps the bank's amount and date whichever category it goes to,
+    # and the forecasts it hands back or consumes are dated tomorrow. So a
+    # second measurement found nothing - except when the person had typed
+    # something dated yesterday since the morning, and then, measured
+    # against the morning's stored figures, it "corrected" that entry away.
     return jsonify({'status': 'success', 'message': message, 'change': change,
-                    'remaining': remaining, 'note': note})
+                    'remaining': remaining, 'note': ''})
 
 
 

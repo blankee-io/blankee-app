@@ -8,6 +8,25 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.3 — 2026-09-15
+
+### Changed
+- The balances are no longer matched to the bank a second time when the last
+  bank row in the confirm modal is answered. The morning's match after the
+  pull stands: nothing the modal does moves anything dated before today - a
+  row keeps the bank's amount and date whichever category it goes to, and
+  the forecasts handed back or consumed are dated tomorrow - so the second
+  measurement found nothing, except an entry the person had typed for
+  yesterday since the morning, which it then corrected away against the
+  morning's stored figures. The typed-balance flow for accounts no feed
+  covers is unchanged.
+- In the bank rows' category list, the guess sits on top with an icon for
+  where it came from - a robot for Claude, a brain for the merchant memory,
+  a target for a forecast matched by amount - above the search matches. A
+  category with a forecast the row would draw on shows the forecast the way
+  the dashboard does: its date, what is left of it, and the spent/remaining
+  bar underneath.
+
 ## 1.42.2 — 2026-09-15
 
 ### Fixed
