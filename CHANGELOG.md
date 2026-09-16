@@ -8,6 +8,18 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.2 — 2026-09-15
+
+### Fixed
+- An installation updated from a release before the bank connection kept
+  `BANK_PROVIDER=null` and `ENRICHMENT_PROVIDER=null`, and its Settings page
+  said no bank provider was configured. The installer's step that switches
+  those two defaults on ran only in the mode the updater stopped using when
+  it stopped being root (1.38.0); the permissions helper runs it now. Lands
+  with this update: the helper runs the installer from the tree it has just
+  checked out. Until then, set the two keys to `simplefin` and `claude` in
+  `.env` by hand and reload the application.
+
 ## 1.42.1 — 2026-09-15
 
 ### Fixed
