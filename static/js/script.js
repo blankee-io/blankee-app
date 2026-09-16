@@ -1950,7 +1950,12 @@ function _bankItemHtml(item, symbol) {
         choices: (item.choices || []).slice(),
         symbol: symbol,
         entryType: item.entry_type,
-        creditAccountId: item.credit_account_id == null ? null : item.credit_account_id
+        creditAccountId: item.credit_account_id == null ? null : item.credit_account_id,
+        // The guess and where it came from: the list pins it on top, with
+        // an icon for its source.
+        guessId: item.category_id == null ? null : String(item.category_id),
+        source: item.source || null,
+        amount: Number(item.amount) || 0
     };
     var guessId = item.category_id == null ? "" : String(item.category_id);
     return "" +
@@ -2020,13 +2025,41 @@ function _bankDropdownPlace(input) {
     _bankDropdown.style.maxHeight = Math.max(150, window.innerHeight - r.bottom - 20) + "px";
 }
 
-function _bankChoiceHtml(c, symbol) {
+function _bankShortDate(iso) {
+    // "2026-09-18" -> "Sep 18", in the viewer's language; the raw date if
+    // it does not parse.
+    var d = iso ? new Date(String(iso).slice(0, 10) + "T00:00:00") : null;
+    if (!d || isNaN(d.getTime())) { return escapeHtml(iso || ""); }
+    return escapeHtml(d.toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+}
+
+function _bankSourceIcon(source) {
+    // Who made the guess. The robot is Claude; the memory is what the
+    // person confirmed before; the target is a forecast matched by amount.
+    if (source === "claude") { return '<i class="fa-regular fa-robot category-icon bucket-prompt-guess-icon" title="Claude\'s guess"></i>'; }
+    if (source === "memory") { return '<i class="fa-regular fa-brain category-icon bucket-prompt-guess-icon" title="Remembered from last time"></i>'; }
+    if (source === "amount") { return '<i class="fa-regular fa-bullseye category-icon bucket-prompt-guess-icon" title="Matched a forecast by amount"></i>'; }
+    return "";
+}
+
+function _bankChoiceHtml(c, symbol, source) {
     // Name and note in one box, so a search row (a flex row) cannot wrap
-    // the name around the note.
-    var html = getCategoryIcon(c) + ' <span class="bucket-prompt-choice">' + escapeHtml(c.name);
-    if (c.forecast && c.forecast.amount != null) {
-        html += '<span class="bucket-prompt-forecast">forecast ' + escapeHtml(symbol) +
-            Number(c.forecast.amount).toFixed(2) + ' on ' + escapeHtml(c.forecast.date) + '</span>';
+    // the name around the note. A category with a forecast this row would
+    // draw on shows the forecast as the dashboard does: its date and what
+    // is left of it, with the spent/remaining bar underneath.
+    var icon = source ? _bankSourceIcon(source) : getCategoryIcon(c);
+    var html = icon + ' <span class="bucket-prompt-choice">' + escapeHtml(c.name);
+    var f = c.forecast;
+    if (f && f.amount != null) {
+        var left = Number(f.amount) || 0;
+        var original = Number(f.original) || left;
+        var spent = original > 0 ? Math.min(100, Math.max(0, (original - left) / original * 100)) : 0;
+        html += '<span class="bucket-prompt-forecast">' + _bankShortDate(f.date) + ' · ' +
+            escapeHtml(symbol) + left.toFixed(2) +
+            (original > left + 0.005 ? ' of ' + escapeHtml(symbol) + original.toFixed(2) : '') +
+            ' left</span>' +
+            '<span class="bucket-prompt-bucketbar"><span class="bucket-prompt-bucketbar-spent" style="width:' +
+            spent.toFixed(1) + '%"></span><span class="bucket-prompt-bucketbar-left"></span></span>';
     }
     return html + '</span>';
 }
@@ -2065,11 +2098,17 @@ function showBankCategoryDropdown(row, searchText) {
 
     var typed = (searchText || "").trim();
     var q = typed.toLowerCase();
-    var matching = q ? cats.filter(function (c) { return String(c.name).toLowerCase().indexOf(q) !== -1; }) : [];
+    // The guess sits on top, whatever is typed, and leaves the lists below
+    // so it is not offered twice. Only a real guess: the plain default
+    // (Uncategorized, no source) is just a category like the others.
+    var guess = info.source && info.guessId
+        ? cats.filter(function (c) { return String(c.category_id) === info.guessId; })[0] : null;
+    var others = guess ? cats.filter(function (c) { return c !== guess; }) : cats;
+    var matching = q ? others.filter(function (c) { return String(c.name).toLowerCase().indexOf(q) !== -1; }) : [];
     var matched = {};
     matching.forEach(function (c) { matched[String(c.category_id)] = true; });
-    var rest = q ? cats.filter(function (c) { return !matched[String(c.category_id)]; }) : cats;
-    var exact = matching.some(function (c) { return String(c.name).toLowerCase() === q; });
+    var rest = q ? others.filter(function (c) { return !matched[String(c.category_id)]; }) : others;
+    var exact = cats.some(function (c) { return String(c.name).toLowerCase() === q; });
 
     var list = document.createElement("div");
     list.className = "category-dropdown bucket-prompt-dropdown";
@@ -2079,15 +2118,16 @@ function showBankCategoryDropdown(row, searchText) {
         hidden.value = String(c.category_id);
         _bankDropdownHide();
     }
-    function add(c, isMatch) {
+    function add(c, isMatch, source) {
         var d = document.createElement("div");
-        d.className = "category-dropdown-item" + (isMatch ? " search-result" : "");
+        d.className = "category-dropdown-item" + (isMatch ? " search-result" : "") + (source ? " bucket-prompt-guess" : "");
         d.innerHTML = (isMatch ? '<i class="fa-solid fa-magnifying-glass search-icon"></i> ' : "") +
-            _bankChoiceHtml(c, info.symbol);
+            _bankChoiceHtml(c, info.symbol, source);
         d.addEventListener("click", function () { pick(c); });
         list.appendChild(d);
     }
 
+    if (guess) { add(guess, false, info.source); }
     matching.forEach(function (c) { add(c, true); });
     if (typed && !exact) {
         var create = document.createElement("div");
@@ -2096,7 +2136,7 @@ function showBankCategoryDropdown(row, searchText) {
         create.addEventListener("click", function () { createBankRowCategory(row, typed); });
         list.appendChild(create);
     }
-    if (q && list.children.length && rest.length) {
+    if ((q || guess) && list.children.length && rest.length) {
         var sep = document.createElement("div");
         sep.className = "dropdown-separator";
         list.appendChild(sep);
