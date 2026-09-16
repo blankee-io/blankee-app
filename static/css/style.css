@@ -18685,6 +18685,37 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     font-weight: 400;
 }
 
+/* The guess, pinned above everything else, with its source's icon. */
+.bucket-prompt-dropdown .bucket-prompt-guess {
+    background-color: var(--primary-lighter);
+}
+
+.bucket-prompt-dropdown .bucket-prompt-guess-icon {
+    color: var(--primary);
+}
+
+/* The forecast's spent/remaining bar, as the dashboard draws under a cell
+   (.bucket-progress-container): red for what is used, green for what is
+   left. Inline here, under the figures, rather than pinned to a cell edge. */
+.bucket-prompt-bucketbar {
+    display: flex;
+    height: 3px;
+    margin-top: 4px;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.bucket-prompt-bucketbar-spent {
+    background-color: var(--danger);
+    height: 100%;
+}
+
+.bucket-prompt-bucketbar-left {
+    background-color: var(--success);
+    height: 100%;
+    flex: 1;
+}
+
 
 
 /* A caller with nothing to say leaves the paragraph empty; collapse it so
