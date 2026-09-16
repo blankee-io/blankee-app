@@ -16,6 +16,12 @@ this file; the admin console links to it, it does not read it.
   "Uncategorized, high confidence" and the confirm modal called it Claude's
   guess. It is no longer offered: such a row falls through to the other
   guesses and is shown as having none.
+- The balance modal that opens the moment the last entry is confirmed showed
+  the balance from before the answers, until the page was reloaded: it asked
+  before the page's own recalculation had run, and read the stored figure
+  before the flush had carried it to the database. Raising the balance now
+  recalculates and flushes first, so the figure on the modal is the one the
+  answers produced.
 
 ## 1.42.0 — 2026-09-14
 
