@@ -414,9 +414,9 @@ category - the merchant memory first, Claude if it is on, else a forecast
 nearby of the same amount, else Uncategorized - and waits in the "Did these
 come through?" modal to be confirmed or moved. Forecasts on a linked account
 are no longer asked about in the evening: a transaction that matches one
-fulfils it, and one nothing matches is moved to tomorrow. After each pull, and
-again when the last bank row is confirmed, the checking, savings and card
-balances are matched to the bank's as of yesterday. **Sync now** in the Bank
+fulfils it, and one nothing matches is moved to tomorrow. After each pull the
+checking, savings and card balances are matched to the bank's as of
+yesterday. **Sync now** in the Bank
 Connection section runs the same pull by hand (it keeps two of the day's
 requests back for the morning). Import starts at the moment an account is linked -
 history is not fetched.
