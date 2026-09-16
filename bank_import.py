@@ -43,11 +43,14 @@ The rules that are not obvious from the code:
     names a category writes a new entry and lets it deplete the category's
     forecast the way a typed entry would.
 
-  * A forecast on a bank-fed table that has passed unmatched is moved to
-    tomorrow on each pull, exactly as a "No" in the evening prompt moves
-    it. The bank now answers for those tables, so the prompt stops asking
-    about them; this is what keeps an unmatched forecast from being
-    counted as spent.
+  * A forecast on a bank-fed table dated today or earlier that nothing
+    matched is moved to tomorrow on each pull, exactly as a "No" in the
+    evening prompt moves it. The bank now answers for those tables, so the
+    prompt stops asking about them; this is what keeps an unmatched
+    forecast from being counted as spent. Today's move too: the day's
+    remainder then shows what the bank has actually reported, and a bill
+    that posts later today is matched to its forecast on tomorrow's pull
+    just the same - the guess looks a week either side.
 
 Redis-first, like the rest of the app: linked_transactions is written
 through bank_redis and the flush persists it. The user is hydrated first
@@ -861,10 +864,11 @@ def fed_tables(user_id: int) -> Dict[str, Optional[set]]:
 
 def defer_unmatched(user_id: int) -> Tuple[int, Optional[str]]:
     """
-    Move every forecast on a bank-fed table that has passed unmatched to
-    tomorrow - exactly what "No, ask me tomorrow" does in the evening
-    prompt, and through the same code. Returns (moved, earliest date any
-    of them sat on), the latter so the totals can be recomputed from there.
+    Move every forecast on a bank-fed table dated today or earlier that
+    nothing matched to tomorrow - exactly what "No, ask me tomorrow" does
+    in the evening prompt, and through the same code. Returns (moved,
+    earliest date any of them sat on), the latter so the totals can be
+    recomputed from there.
     """
     import redis_manager
     from bucket_confirmation import resolve
@@ -885,7 +889,7 @@ def defer_unmatched(user_id: int) -> Tuple[int, Optional[str]]:
             if amount <= 0 or (allowed is not None and cid not in allowed):
                 continue
             d = _iso(e.get('date'))
-            if d and d < today:
+            if d and d <= today:
                 due.append((e.get('id'), d))
         for eid, d in due:
             ok, msg, change = resolve(user_id, table, eid, 'defer')
@@ -1001,9 +1005,13 @@ def _restore_forecast(user_id: int, table: str, entry_type: str, snap: Dict[str,
 
     Still there (an allowance partly spent): the amount goes back into it.
     Gone (a bill settled in full, or the forecast that became this very
-    entry): re-created, dated tomorrow, as "No, ask me tomorrow" would have
-    left it. Its record gets the amount back either way. Returns the row as
-    the page needs to draw it, 'added' saying whether it is new.
+    entry): re-created where it was - on its own date when that is still
+    ahead, or tomorrow when it had come due, as "No, ask me tomorrow" would
+    have left it. A guess consumes a category's next forecast wherever it
+    sits (next month's bill, next year's renewal), and putting that back
+    on tomorrow made a bill due in October ask for money next week. Its
+    record gets the amount back either way. Returns the row as the page
+    needs to draw it, 'added' saying whether it is new.
     """
     import redis_manager
     from redis_crud import add_entry
@@ -1035,7 +1043,8 @@ def _restore_forecast(user_id: int, table: str, entry_type: str, snap: Dict[str,
                 'original_date': _iso(live.get('original_date')), 'added': False}
 
     tomorrow = (_user_today(user_id) + timedelta(days=1)).isoformat()
-    data = {'category_id': int(cid), 'date': tomorrow, 'original_date': origin, 'amount': forecast_amount,
+    back_on = max(tomorrow, _iso(snap.get('date')) or tomorrow)
+    data = {'category_id': int(cid), 'date': back_on, 'original_date': origin, 'amount': forecast_amount,
             'recurring_id': snap.get('recurring_id'), 'is_bucket': 1,
             'original_amount': snap.get('original_amount') or forecast_amount,
             'processed': 0, 'auto_confirmed': 0, 'is_auto_adjustment': 0, 'pending': 0}
@@ -1048,7 +1057,7 @@ def _restore_forecast(user_id: int, table: str, entry_type: str, snap: Dict[str,
         restore_bucket_for_category_change(bucket_table, cid, origin, forecast_amount, user_id, entry_type)
     except Exception as e:
         log_warning(logger, TAG, f'user {user_id}: could not restore the record for {table}/{cid}: {e}')
-    return {'table': table, 'entry_id': int(eid), 'category_id': int(cid), 'date': tomorrow,
+    return {'table': table, 'entry_id': int(eid), 'category_id': int(cid), 'date': back_on,
             'amount': forecast_amount, 'is_bucket': 1, 'processed': 0, 'removed': False,
             'original_date': origin, 'original_amount': data['original_amount'], 'added': True}
 
