@@ -574,6 +574,12 @@ def _claude_picks(user_id: int, todo: List[Tuple[Dict[str, Any], Dict[str, Any],
         else:
             options = {'outgoing': _category_options(user_id, 'expense_entries', None),
                        'incoming': _category_options(user_id, 'income_entries', None)}
+        # Uncategorized is where a row goes when nobody has an answer, so it is
+        # not an answer to offer. Listed, Claude picked it - with high
+        # confidence - for anything the person's categories did not cover,
+        # and the row then said "Claude's guess" for what was really no guess.
+        options = {d: [o for o in lst if (o.get('name') or '').strip().lower() != 'uncategorized']
+                   for d, lst in options.items()}
         items = []
         for i, (row, plan) in enumerate(members):
             items.append({'i': i,

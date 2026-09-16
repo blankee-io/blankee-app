@@ -18423,6 +18423,17 @@ def api_autobalance_raise():
         settings = auto_balance.get_settings(current_user.id) or {}
         pending = (settings.get('pending_date') is not None
                    and auto_balance.anything_to_reconcile(current_user.id))
+        if pending:
+            # The modal that follows shows what the app thinks the balance
+            # is, and it asks the moment the last entry is answered - before
+            # the page's own recalculation has run, and before the flush has
+            # carried it to MySQL, which is where the figure is read from.
+            # So it showed the balance from before the answers, until a
+            # reload. Recalculate and flush here, as apply() does before it
+            # measures, so the figure on the modal is the one the answers
+            # produced.
+            _recalc_totals_remainders(current_user.id)
+            auto_balance._flush(current_user.id)
     except Exception as e:
         log_exception(logger, 'AUTOBALANCE',
                       f"Could not raise a balance: {e}")

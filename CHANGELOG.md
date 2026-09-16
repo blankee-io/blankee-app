@@ -8,6 +8,21 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.1 — 2026-09-15
+
+### Fixed
+- Uncategorized was on the list of categories offered to Claude, so a
+  transaction none of the person's categories fitted came back as
+  "Uncategorized, high confidence" and the confirm modal called it Claude's
+  guess. It is no longer offered: such a row falls through to the other
+  guesses and is shown as having none.
+- The balance modal that opens the moment the last entry is confirmed showed
+  the balance from before the answers, until the page was reloaded: it asked
+  before the page's own recalculation had run, and read the stored figure
+  before the flush had carried it to the database. Raising the balance now
+  recalculates and flushes first, so the figure on the modal is the one the
+  answers produced.
+
 ## 1.42.0 — 2026-09-14
 
 The bank's transactions come in. 1.41.0 connected the bank; this release
