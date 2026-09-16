@@ -8,6 +8,20 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.4 — 2026-09-16
+
+### Fixed
+- On a linked account, a forecast dated today that the morning pull found
+  nothing for stayed where it was; only earlier ones moved to tomorrow. Now
+  today's move too, so the day's remainder shows what the bank has reported,
+  and a bill that posts later in the day is still matched to its forecast on
+  the next pull.
+- Changing a bank row's category put the forecast the guess had consumed
+  back on tomorrow regardless of when it was due. A guess takes a category's
+  next forecast wherever that sits, so a bill due next month came back
+  asking for money next week. A restored forecast now returns to its own
+  date when that is still ahead, and to tomorrow when it had come due.
+
 ## 1.42.3 — 2026-09-15
 
 ### Changed
