@@ -469,8 +469,12 @@ def candidates(user_id: int, table: str, txn_date: str,
         gap = abs((_parse(d) - when).days)
         if gap > CANDIDATE_DAYS:
             continue
+        try:
+            original = float(e.get('original_amount') or 0) or amount
+        except (TypeError, ValueError):
+            original = amount
         out.append({'entry_id': e.get('id'), 'category_id': cid, 'category_name': names.get(cid, ''),
-                    'forecast_amount': amount, 'forecast_date': d, 'gap': gap})
+                    'forecast_amount': amount, 'forecast_date': d, 'gap': gap, 'original_amount': original})
     out.sort(key=lambda c: (c['gap'], c['forecast_date']))
     return out
 
@@ -918,7 +922,8 @@ def _choices(user_id: int, table: str, txn_date: str, credit_account_id: Optiona
     """
     nearby: Dict[int, Dict[str, Any]] = {}
     for c in candidates(user_id, table, txn_date, credit_account_id):
-        nearby.setdefault(c['category_id'], {'amount': c['forecast_amount'], 'date': c['forecast_date']})
+        nearby.setdefault(c['category_id'], {'amount': c['forecast_amount'], 'date': c['forecast_date'],
+                                             'original': c.get('original_amount') or c['forecast_amount']})
     out = [dict(o, category_id=o['id'], forecast=nearby.get(o['id']))
            for o in _category_options(user_id, table, credit_account_id)]
     out.sort(key=lambda o: o['name'].lower())
@@ -1245,17 +1250,6 @@ def reconcile(user_id: int, balances: List[Dict[str, Any]]) -> Optional[Dict[str
     result['as_of'] = yesterday
     result['stale'] = stale
     return result
-
-
-def reconcile_from_stored(user_id: int) -> Optional[Dict[str, Any]]:
-    """The same, from the balances the last pull recorded - when the modal is completed."""
-    from bank_redis import _get_all_linked_accounts_raw
-    balances = []
-    for a in _get_all_linked_accounts_raw(user_id) or []:
-        if _flag(a.get('is_active', 1)) and a.get('current_balance') is not None:
-            balances.append({'account_id': a.get('account_id'), 'current_balance': a.get('current_balance'),
-                             'available_balance': a.get('available_balance'), 'balance_date': None})
-    return reconcile(user_id, balances)
 
 
 def reconcile_summary(result: Optional[Dict[str, Any]]) -> str:
