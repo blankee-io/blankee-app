@@ -793,14 +793,13 @@
          */
         function isEntryLockedByBankSync(entryDate, categoryId, entryType, accountId = null) {
             // If no bank_sync flags or no last txn date, nothing is locked
-            if (!bank_sync_flags || !bank_last_txn_date) return false;
+            if (!bank_sync_flags) return false;
             
             // Get today's date at midnight for comparison
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             
             // Parse the lock cutoff date (last synced transaction date)
-            const lockDate = new Date(bank_last_txn_date + 'T00:00:00');
             
             // Parse entry date
             const entryDateObj = typeof entryDate === 'string' ? new Date(entryDate) : new Date(entryDate);
@@ -810,7 +809,7 @@
             if (entryDateObj >= today) return false;
             
             // Lock entries on or before the last synced transaction date
-            if (entryDateObj > lockDate) return false;
+            // Every earlier day on a fed account is the bank's (see dashboard.html).
             
             // Credit account entries - check if this specific account is bank-linked
             if (entryType === 'ca' && accountId !== null) {

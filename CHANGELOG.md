@@ -8,6 +8,18 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.5 — 2026-09-16
+
+### Changed
+- On a bank-linked account, every day before today belongs to the bank:
+  the daily view offers no Income/Expense (or that card) to add there, the
+  weekly and three-month grids show those cells read-only, and the server
+  refuses an add, edit, delete or drag onto such a day - the feed fills
+  those days in, and an entry typed there would be counted again when the
+  bank posts it. This used to stop at the last synced transaction, which
+  left the days since it open. Today and the future are unchanged: the
+  forecasts are yours to plan. Accounts no feed covers are unchanged.
+
 ## 1.42.4 — 2026-09-16
 
 ### Fixed
