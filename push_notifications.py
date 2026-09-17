@@ -167,7 +167,8 @@ def send_apns_notification(device_token, title, body, badge=None, sound="default
         return {"sent": False, "reason": "apns_exception", "error": str(exc)}
 
 
-def push_to_user(user_id, body, title='Blankee', badge=None, url=None, action=None):
+def push_to_user(user_id, body, title='Blankee', badge=None, url=None, action=None,
+                 notification_id=None):
     """Send one alert to every device this user has registered.
 
     This is the push half of a notification, and it is the only way a
@@ -185,24 +186,37 @@ def push_to_user(user_id, body, title='Blankee', badge=None, url=None, action=No
     `url` is a relative app path the phone opens when the alert is tapped;
     `action` names something the app does instead (the bucket prompt). Both
     ride along as custom keys. Returns how many devices were sent to.
+
+    Two ways out. With APNS_ settings of its own - the app maker's server, or
+    an installation that signs its own build - the server talks to Apple
+    directly and the alert carries its text. Otherwise it asks the relay
+    (relay/README.md), which carries only `notification_id`; the phone fetches
+    the text itself. A notification with no row (the evening reminder raised
+    before its row exists) still gets a nudge, and the phone shows its generic
+    text for it.
     """
-    if not apns_enabled():
+    direct = apns_enabled()
+    relay = (os.environ.get('PUSH_RELAY_URL') or '').strip().rstrip('/')
+    if not direct and not relay:
         return 0
 
     from db_connections import get_db_pool
     try:
-        with get_db_pool().get_cursor() as cursor:
+        with get_db_pool().get_cursor(dictionary=True) as cursor:
             cursor.execute(
-                "SELECT device_token FROM device_tokens WHERE user_id = %s", (user_id,))
+                "SELECT device_token, relay_secret FROM device_tokens WHERE user_id = %s", (user_id,))
             rows = cursor.fetchall() or []
     except Exception as exc:
         log_warning(logger, 'PUSH', f"Could not load device tokens for user {user_id}: {exc}")
         return 0
 
-    tokens = [r['device_token'] if isinstance(r, dict) else r[0] for r in rows]
-    tokens = [t for t in tokens if t]
-    if not tokens:
+    devices = [(r['device_token'], r.get('relay_secret')) for r in rows if r.get('device_token')]
+    if not devices:
         return 0
+    if not direct:
+        return _push_via_relay(relay, user_id, devices, notification_id,
+                               'reminder' if action else 'notification')
+    tokens = [t for t, _ in devices]
 
     custom = {}
     if url:
@@ -234,6 +248,50 @@ def push_to_user(user_id, body, title='Blankee', badge=None, url=None, action=No
         # Success is logged too, so "no PUSH lines" reads as "nothing was
         # attempted" rather than leaving delivery and silence looking alike.
         log_info(logger, 'PUSH', f"Pushed to {sent} device(s) for user {user_id}")
+    return sent
+
+
+def _forget_device(user_id, token, why):
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            cursor.execute(
+                "DELETE FROM device_tokens WHERE device_token = %s AND user_id = %s",
+                (token, user_id))
+        log_info(logger, 'PUSH', f"Dropped a dead device token for user {user_id}", reason=why)
+    except Exception as exc:
+        log_warning(logger, 'PUSH', f"Could not drop a dead device token for user {user_id}: {exc}")
+
+
+def _push_via_relay(relay, user_id, devices, notification_id, kind):
+    """The relay half of push_to_user. A device the phone never registered
+    with the relay (no secret stored) is skipped, not an error: an older app,
+    or one that has not signed in since the relay existed."""
+    sent = 0
+    for token, secret in devices:
+        if not secret:
+            continue
+        try:
+            response = httpx.post(f"{relay}/v1/push",
+                                  json={'token': token, 'secret': secret,
+                                        'id': int(notification_id or 0), 'kind': kind},
+                                  timeout=httpx.Timeout(10.0, connect=5.0))
+        except Exception as exc:
+            log_warning(logger, 'PUSH', f"Relay unreachable for user {user_id}: {exc}")
+            return sent
+        if response.status_code == 200:
+            sent += 1
+        elif response.status_code == 410:
+            _forget_device(user_id, token, 'relay says the device is gone')
+        else:
+            detail = None
+            try:
+                detail = response.json()
+            except Exception:
+                pass
+            log_warning(logger, 'PUSH', f"Relay refused a push for user {user_id}",
+                        status=response.status_code, detail=detail)
+    if sent:
+        log_info(logger, 'PUSH', f"Pushed to {sent} device(s) for user {user_id} via the relay")
     return sent
 
 

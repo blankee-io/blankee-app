@@ -8,6 +8,23 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.44.0 — 2026-09-17
+
+### Added
+- Push notifications for every installation, through a relay. Apple only
+  accepts a push from the key of the account that signed the app, which a
+  self-hosted server cannot have; without `APNS_` settings of its own the
+  server now asks the relay at `PUSH_RELAY_URL` (the installer's default is
+  `https://push.blankee.io`) to send the nudge. The relay is told the
+  notification's id and nothing else - no text, no amounts, no server
+  address - and the phone fetches the notification from its own server
+  before showing it, with the widget token. The relay's own code and
+  installer are in `relay/`. Set `PUSH_RELAY_URL` empty to send no pushes.
+- `GET /api/widget/notification?id=` returns one notification's plain text,
+  link and the unread count, for the phone. Migration `add_device_relay.sql`:
+  `device_tokens` gains the relay secret and the Apple environment the phone
+  registers with.
+
 ## 1.43.9 — 2026-09-17
 
 ### Added

@@ -258,6 +258,8 @@ CREATE TABLE `device_tokens` (
   `device_token` varchar(255) NOT NULL,
   `platform` varchar(20) DEFAULT 'ios',
   `device_info` json DEFAULT NULL,
+  `relay_secret` varchar(255) DEFAULT NULL,
+  `apns_environment` varchar(20) NOT NULL DEFAULT 'production',
   `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),

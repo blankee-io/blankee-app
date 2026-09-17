@@ -16530,6 +16530,45 @@ def widget_day_box():
     })
 
 
+@app.route('/api/widget/notification', methods=['GET'])
+@login_required
+def widget_notification():
+    """One notification, for the phone's notification service extension.
+
+    A push that came through the relay carries only the notification's id -
+    the relay is not trusted with the text - so the extension asks here, with
+    its widget token, for what to show: the message as plain text, where a
+    tap should land, and the unread count for the badge.
+    """
+    try:
+        notification_id = int(request.args.get('id') or 0)
+    except ValueError:
+        notification_id = 0
+    if notification_id <= 0:
+        return jsonify({'error': 'id required'}), 400
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT id, message, date FROM notifications WHERE id = %s AND user_id = %s",
+                       (notification_id, current_user.id))
+        row = cursor.fetchone()
+        cursor.execute("SELECT COUNT(*) AS total FROM notifications WHERE user_id = %s AND is_read = 0",
+                       (current_user.id,))
+        unread = (cursor.fetchone() or {}).get('total', 0)
+        cursor.close()
+    if not row:
+        return jsonify({'error': 'not found'}), 404
+    message = row.get('message') or ''
+    text = re.sub(r'<[^>]+>', '', message)
+    text = (text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<')
+                .replace('&gt;', '>').replace('&quot;', '"').replace('&#39;', "'"))
+    return jsonify({
+        'id': row['id'],
+        'message': ' '.join(text.split()).strip(),
+        'url': deep_link_from(message),
+        'unread_count': int(unread or 0),
+    })
+
+
 @app.route('/api/widget/trends', methods=['GET'])
 @login_required
 def widget_trends():
@@ -16961,12 +17000,20 @@ def register_device_token():
     device_token = (payload.get('deviceToken') or payload.get('device_token') or '').strip()
     platform = (payload.get('platform') or 'ios').lower()
     device_info = payload.get('deviceInfo') or payload.get('device_info')
+    # What the phone also told the relay: the secret that lets this server,
+    # and nobody else, ask for a push to it, and which of Apple's two
+    # environments its token belongs to. Older apps send neither.
+    relay_secret = (payload.get('relaySecret') or '').strip() or None
+    environment = (payload.get('environment') or 'production').strip().lower()
+    if environment not in ('sandbox', 'production'):
+        environment = 'production'
 
     if not device_token:
         return jsonify({'success': False, 'error': 'deviceToken required'}), 400
 
     try:
-        upsert_device_token(current_user.id, device_token, platform, device_info)
+        upsert_device_token(current_user.id, device_token, platform, device_info,
+                            relay_secret=relay_secret, environment=environment)
     except Exception as exc:
         log_error(app.logger, 'AUTH', f"Failed to register device token for user {current_user.id}: {exc}")
         return jsonify({'success': False, 'error': 'server_error'}), 500
@@ -22988,8 +23035,13 @@ def add_bundle_item():
     
     return jsonify({'status': 'success', 'item_id': new_item_id})
 
-def upsert_device_token(user_id, device_token, platform='ios', device_info=None):
-    """Store or update a device token for push notifications."""
+def upsert_device_token(user_id, device_token, platform='ios', device_info=None,
+                        relay_secret=None, environment='production'):
+    """Store or update a device token for push notifications.
+
+    A registration without a relay secret (an older app) keeps whatever secret
+    is stored, so a phone that once registered with one does not lose its
+    pushes to a later, older-shaped call."""
     serialized_info = None
     if device_info is not None:
         try:
@@ -23000,15 +23052,18 @@ def upsert_device_token(user_id, device_token, platform='ios', device_info=None)
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute(
             """
-            INSERT INTO device_tokens (user_id, device_token, platform, device_info)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO device_tokens (user_id, device_token, platform, device_info,
+                                       relay_secret, apns_environment)
+            VALUES (%s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 user_id = VALUES(user_id),
                 platform = VALUES(platform),
                 device_info = VALUES(device_info),
+                relay_secret = COALESCE(VALUES(relay_secret), relay_secret),
+                apns_environment = VALUES(apns_environment),
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (user_id, device_token, platform, serialized_info)
+            (user_id, device_token, platform, serialized_info, relay_secret, environment)
         )
         conn.commit()
         cursor.close()
@@ -23122,7 +23177,8 @@ def add_notification(user_id, message, notification_date=None, kind=None, notifi
     # the unread count so the app icon agrees with the list; the link is the
     # message's own, so tapping the alert lands where the notification does.
     try:
-        push_to_user(user_id, message, badge=unread_count, url=deep_link_from(message))
+        push_to_user(user_id, message, badge=unread_count, url=deep_link_from(message),
+                     notification_id=notification_id)
     except Exception as push_err:
         log_warning(app.logger, 'NOTIFICATION', f"APNs push failed for user {user_id}: {push_err}")
 
