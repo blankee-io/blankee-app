@@ -24794,6 +24794,25 @@ def update_credit_account():
                 _redis_client.setex(exp_redis_key, PERSISTENT_CACHE_TTL, json.dumps(expense_categories, cls=DecimalEncoder))
                 _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
         
+        # A rename reaches the "<name> payment" category whether or not the
+        # recurring payment was touched. The branches above renamed it only
+        # while switching the recurring payment on, so a card renamed on its
+        # own went on paying a category that still carried the old name -
+        # and, through the mirrors, so did every other card's copy of it.
+        if payment_category and old_account_name and old_account_name != name:
+            cats = _get_categories_from_redis('expense_categories', current_user.id) or []
+            old_cat_name = None
+            for cat in cats:
+                if cat.get('id') == payment_category['id'] and cat.get('name') != new_payment_cat_name:
+                    old_cat_name = cat.get('name')
+                    cat['name'] = new_payment_cat_name
+                    break
+            if old_cat_name:
+                _redis_client.setex(f"expense_categories:v1:{current_user.id}", PERSISTENT_CACHE_TTL,
+                                    json.dumps(cats, cls=DecimalEncoder))
+                _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+                _sync_rename_to_credit_accounts(current_user.id, old_cat_name, new_payment_cat_name)
+
         # Recalculate the card. Editing an account can now change the billing
         # cycle or the rate, which move every projected balance on it - and
         # unlike add_credit_account this route has never recalculated, so the

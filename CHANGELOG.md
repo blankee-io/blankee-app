@@ -15,6 +15,15 @@ this file; the admin console links to it, it does not read it.
   it, the card can be named there and then - the field starts with the
   bank's name and shows only while "Create a new card" is chosen. Linking
   to an existing card keeps that card's name.
+- A linked card can be edited on the Credit Accounts page like any other -
+  name, interest rate, statement and due days - which it could not be
+  before, so a card created from the bank was stuck at 0% with no dates.
+  Only deleting stays behind the bank icon: unlink it in Settings first.
+
+### Fixed
+- Renaming a card renamed its "<name> payment" category only while the
+  recurring payment was being switched on; a plain rename left the category
+  - and every card's copy of it - under the old name. It follows now.
 
 ## 1.42.5 — 2026-09-16
 
