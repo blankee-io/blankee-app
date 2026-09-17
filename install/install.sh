@@ -977,6 +977,18 @@ SETTINGS_ENCRYPTION_KEY=$ENCRYPTION_KEY
 # defaults change nothing by themselves. 'null' turns the features off.
 BANK_PROVIDER=simplefin
 ENRICHMENT_PROVIDER=claude
+
+# Push notifications for the iOS app. All four are needed, or no push is
+# sent - the in-app list and the emails carry on regardless. The key is an
+# APNs key from developer.apple.com (Certificates, Identifiers & Profiles >
+# Keys); put the .p8 somewhere www-data can read and point APNS_KEY_PATH at
+# it. APNS_TOPIC is the app's bundle identifier. APNS_USE_SANDBOX is true for
+# builds installed from Xcode or TestFlight and false for the App Store one.
+#APNS_KEY_PATH=/etc/blankee/apns.p8
+#APNS_KEY_ID=
+#APNS_TEAM_ID=
+#APNS_TOPIC=io.blankee.blankee
+#APNS_USE_SANDBOX=false
 EOF
   info "created $ENV_FILE with generated secrets"
 fi
