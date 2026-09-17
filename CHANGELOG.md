@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.9 — 2026-09-16
+
+### Fixed
+- The week and three-month dashboards failed to load on a bank-linked
+  account since 1.42.7: the confirmation shown before clearing a period
+  that straddles the last sync had an unescaped apostrophe in its text
+  ("the bank's days"), which ended the page's script early with
+  `Unexpected identifier 's'`. The daily view was not affected.
+
 ## 1.42.8 — 2026-09-16
 
 ### Fixed
