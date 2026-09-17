@@ -8815,6 +8815,11 @@ transform: scale(1.2);
     overflow: visible;
 }
 
+/* A card that opens something reads as one. */
+.notification-item-linked {
+    cursor: pointer;
+}
+
 .notification-item.notification-read .notification-date,
 .notification-item.notification-read .notification-message {
     opacity: 0.6;
