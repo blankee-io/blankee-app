@@ -228,31 +228,12 @@ def _raise_balance_prompt(user_id, local_now):
 def _push_balance(user_id, body, action='autobalance'):
     """Best-effort APNs nudge. A failure must not lose the in-app prompt."""
     try:
-        from push_notifications import apns_enabled, send_apns_notification
-        if not apns_enabled():
-            return False
-    except Exception:
-        return False
-
-    sent = False
-    try:
-        with get_db_pool().get_cursor() as cursor:
-            cursor.execute(
-                "SELECT device_token FROM device_tokens WHERE user_id = %s", (user_id,))
-            tokens = [r[0] if not isinstance(r, dict) else r['device_token']
-                      for r in (cursor.fetchall() or [])]
-        for token in tokens:
-            try:
-                send_apns_notification(token, 'Blankee', body, None, 'default',
-                                       {'action': action})
-                sent = True
-            except Exception as e:
-                log_warning(logger, 'AUTOBALANCE',
-                            f"Push failed for user {user_id}: {e}")
+        from push_notifications import push_to_user
+        return push_to_user(user_id, body, action=action) > 0
     except Exception as e:
         log_warning(logger, 'AUTOBALANCE',
                     f"Could not push to user {user_id}: {e}")
-    return sent
+        return False
 
 
 def _email_balance(user_id, body):

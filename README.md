@@ -229,6 +229,39 @@ registration closes permanently behind it — after that, accounts are created
 from the admin console. That console is also where email delivery is set up,
 which is what enables notifications and the Forgot Password link.
 
+### Push notifications for the iOS app
+
+The iOS app registers each phone with the server, and from then on every
+notification that is emailed is also pushed to it - if the server can reach
+Apple. That takes an APNs key, which Blankee cannot ship: it is tied to the
+Apple developer account the app is signed with.
+
+1. At developer.apple.com, under **Certificates, Identifiers & Profiles > Keys**,
+   create a key with **Apple Push Notifications service (APNs)** enabled and
+   download the `.p8` file. It can be downloaded once; keep it somewhere safe.
+   Note the **Key ID** shown beside it and the **Team ID** at the top right of
+   the account.
+2. Put the file where the web server can read it:
+
+   ```bash
+   sudo install -o www-data -g www-data -m 400 AuthKey_XXXXXXXXXX.p8 /etc/blankee/apns.p8
+   ```
+
+3. Fill in the four `APNS_` lines in `/var/www/budget_env/.env` (they are there,
+   commented out) and reload:
+
+   ```bash
+   sudo systemctl reload apache2
+   ```
+
+`APNS_USE_SANDBOX` has to match how the app was installed on the phone: `true`
+for a build from Xcode or TestFlight, `false` for the App Store. Apple issues a
+different device token for each, and a token sent to the wrong environment is
+refused as `BadDeviceToken` - which the server takes as a dead device and
+forgets. The log (`/var/log/blankee/blankee_error.log`, tag `PUSH`) says which.
+Under Docker the same four settings go in `.env` and the key is mounted into
+the container.
+
 ### Upgrading
 
 The admin console has an **Updates** section: it shows the running version and a

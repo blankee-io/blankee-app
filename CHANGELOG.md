@@ -8,6 +8,33 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.43.0 — 2026-09-17
+
+### Added
+- `GET /api/widget/trends`, for the iOS app's new Balance trend widget: the
+  summary page's graphs - the balance, each credit account, savings - reduced
+  to a point a month, in the page's order, so the widget can page through
+  them. Read with a widget token like the day box.
+
+### Fixed
+- Push notifications never left the server: the APNs client needs HTTP/2,
+  which `httpx` only speaks with the `h2` package, and that was never a
+  declared requirement. The client failed to start, logged it once, and
+  every push was dropped. `h2` is now installed with the rest.
+- An allowance running out was emailed but never pushed to the phone. Every
+  notification now goes through one push helper (`push_to_user`), so the
+  push half cannot be forgotten by the next sender either. The same
+  notification also ignored the per-type email switch for it; it reads the
+  opt-out now.
+- A tap on a push opens the page the notification is about, once the app
+  carrying that change is installed; the server sends the link with the
+  alert, as it already did.
+
+### Documentation
+- How to set up push notifications - the APNs key, the four `APNS_` settings,
+  sandbox versus production - in the README, the generated `.env` and the
+  Docker example.
+
 ## 1.42.9 — 2026-09-16
 
 ### Fixed
