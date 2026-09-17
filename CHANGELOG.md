@@ -8,6 +8,25 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.5 — 2026-09-16
+
+### Changed
+- The daily pull runs at ten to midnight in each person's own timezone
+  instead of six in the morning. The day is over by then: what posted
+  today comes in while it is still today, today's forecasts that nothing
+  matched are moved on before the day closes, and the balances are
+  compared as of yesterday. Anything the bank posts after midnight arrives
+  with the next evening's pull. Sync now keeps two of the day's requests
+  back for it.
+- On a bank-linked account, every day before today belongs to the bank:
+  the daily view offers no Income/Expense (or that card) to add there, the
+  weekly and three-month grids show those cells read-only, and the server
+  refuses an add, edit, delete or drag onto such a day - the feed fills
+  those days in, and an entry typed there would be counted again when the
+  bank posts it. This used to stop at the last synced transaction, which
+  left the days since it open. Today and the future are unchanged: the
+  forecasts are yours to plan. Accounts no feed covers are unchanged.
+
 ## 1.42.4 — 2026-09-16
 
 ### Fixed
