@@ -842,6 +842,39 @@ def create_entries(user_id: int) -> Dict[str, Any]:
     return {'imported': len(updates), 'skipped': skipped, 'cards': cards, 'earliest': earliest}
 
 
+def locked_day(user_id: int, entry_type: str, category_id, when) -> bool:
+    """
+    Whether a day on this account is the bank's rather than the person's:
+    any day before today, on the current account when a checking account
+    is linked, or on a card that is. Those days are filled from the feed;
+    an entry typed there would be counted again when the bank posts it.
+    Today and the future stay the person's - forecasts are theirs to plan.
+    """
+    try:
+        d = _iso(when)
+        if not d or d >= _user_today(user_id).isoformat():
+            return False
+        from bank_redis import get_user_linked_account_flags
+        flags = get_user_linked_account_flags(user_id) or {}
+        if entry_type in ('income', 'expense'):
+            return bool(flags.get('has_checking'))
+        if entry_type == 'ca':
+            linked = {int(i) for i in (flags.get('linked_credit_ids') or [])}
+            if not linked or category_id is None:
+                return False
+            import redis_manager
+            for c in redis_manager.get_table_cache('c_expense_categories', user_id) or []:
+                if c.get('id') is not None and int(c['id']) == int(category_id):
+                    return int(c.get('account_id') or 0) in linked
+        return False
+    except Exception as e:
+        log_warning(logger, TAG, f'user {user_id}: could not tell whether {when} is locked: {e}')
+        return False
+
+
+LOCKED_MESSAGE = 'Days before today on a bank-linked account come from the bank; the feed fills them in.'
+
+
 def fed_tables(user_id: int) -> Dict[str, Optional[set]]:
     """
     {table: category ids, or None for all of them} for the entry tables a

@@ -3534,6 +3534,9 @@ def dashboard_d_add_entry():
 
     if not all([entry_type, category_id, amount, entry_date]):
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
+    locked = _bank_locked_reply(entry_type, category_id, entry_date)
+    if locked:
+        return locked
 
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -9991,6 +9994,11 @@ def move_entry_d():
                 
                 amount = Decimal(entry_to_move.get('amount', 0))
                 old_date = entry_to_move.get('date')
+                locked = (_bank_locked_reply(entry_type, category_id, old_date)
+                          or _bank_locked_reply(entry_type, category_id, new_date))
+                if locked:
+                    cursor.close()
+                    return locked
                 
                 # Check if entry exists at new date
                 existing_at_new_date = None
@@ -10083,6 +10091,11 @@ def move_entry_d():
                 
                 amount = Decimal(entry_to_move.get('amount', 0))
                 old_date = entry_to_move.get('date')
+                locked = (_bank_locked_reply(entry_type, category_id, old_date)
+                          or _bank_locked_reply(entry_type, category_id, new_date))
+                if locked:
+                    cursor.close()
+                    return locked
                 
                 # Check if entry exists at new date
                 existing_at_new_date = None
@@ -10183,6 +10196,11 @@ def move_entry_d():
                 
                 amount = Decimal(entry_to_move.get('amount', 0))
                 old_date = entry_to_move.get('date')
+                locked = (_bank_locked_reply(entry_type, category_id, old_date)
+                          or _bank_locked_reply(entry_type, category_id, new_date))
+                if locked:
+                    cursor.close()
+                    return locked
                 
                 # Check if entry exists at new date
                 existing_at_new_date = None
@@ -12884,6 +12902,9 @@ def update_entry():
 
     if not category_id or not date or amount is None:
         return jsonify({"status": "error", "message": "Missing required parameters"}), 400
+    locked = _bank_locked_reply(entry_type, category_id, date)
+    if locked:
+        return locked
 
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -13243,6 +13264,10 @@ def delete_entry():
     end_date = data.get('end_date')
     entry_type = data.get('type')
     entry_id = data.get('entry_id')  # Optional: specific entry ID for precise targeting
+
+    locked = _bank_locked_reply(entry_type, category_id, start_date)
+    if locked:
+        return locked
 
     ca_triggered = False
     payment_category_name = None
@@ -16513,6 +16538,18 @@ def profile():
         currency_type=currency_type,
         mfa_enabled=mfa_enabled,
     )
+
+def _bank_locked_reply(entry_type, category_id, when):
+    """
+    The refusal for a write onto a day the bank owns (see
+    bank_import.locked_day), or None when the day is the person's. One
+    helper so the four entry routes refuse the same way.
+    """
+    import bank_import
+    if bank_import.locked_day(current_user.id, entry_type, category_id, when):
+        return jsonify({'status': 'error', 'message': bank_import.LOCKED_MESSAGE}), 403
+    return None
+
 
 def _bank_page_context(user_id):
     """
@@ -26238,7 +26275,7 @@ def bank_update_account():
 @login_required
 def bank_sync():
     """
-    Sync now: one pull, the same one the morning runs. Refused while the
+    Sync now: one pull, the same one the end of the day runs. Refused while the
     connection needs a new token (the page already says so), and refused
     near the day's ceiling so that tonight's automatic pull keeps its
     request - the button is a convenience, the schedule is the feature.

@@ -419,7 +419,7 @@ tomorrow. After each pull the
 checking, savings and card balances are matched to the bank's as of
 yesterday. **Sync now** in the Bank
 Connection section runs the same pull by hand (it keeps two of the day's
-requests back for the morning). Import starts at the moment an account is linked -
+requests back for the end-of-day pull). Import starts at the moment an account is linked -
 history is not fetched.
 
 Disconnecting in Blankee forgets the connection here; to stop SimpleFIN sharing
