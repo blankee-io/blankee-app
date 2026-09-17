@@ -8,6 +8,13 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.43.8 — 2026-09-17
+
+### Fixed
+- The projected-shortfall notification names the first day the remainder is
+  below zero, today included. The check used to start at tomorrow, so a
+  remainder already under zero today was announced as tomorrow's shortfall.
+
 ## 1.43.7 — 2026-09-17
 
 ### Changed
