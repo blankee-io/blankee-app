@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.43.2 — 2026-09-17
+
+### Fixed
+- On the daily dashboard, an amount field could only be edited once per page
+  load: the guard against double submits was set on the first edit and never
+  cleared, so a second edit of the same field - including clearing it to
+  delete the entry - sent nothing and said nothing. The guard now lifts on
+  every way out.
+
 ## 1.43.1 — 2026-09-17
 
 ### Fixed
