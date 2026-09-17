@@ -8,6 +8,17 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.43.6 — 2026-09-17
+
+### Fixed
+- A new entry gets its permanent id the moment it is created. It used to be
+  given a temporary negative id in Redis and its real one by the flush worker
+  up to fifteen seconds later, so any page holding the temporary id was then
+  holding an id that no longer existed - the cause behind 1.43.5's symptom.
+  The row is now written to MySQL first for its id, as bank imports already
+  did; Redis remains what is read and edited. 1.43.5's fallback stays as a
+  safety net for any temporary id still in flight.
+
 ## 1.43.5 — 2026-09-17
 
 ### Fixed
