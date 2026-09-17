@@ -230,6 +230,10 @@ def push_to_user(user_id, body, title='Blankee', badge=None, url=None, action=No
             log_warning(logger, 'PUSH', f"Push to user {user_id} not sent",
                         reason=result.get('reason'), status=result.get('status'),
                         apns_reason=result.get('apns_reason'), error=result.get('error'))
+    if sent:
+        # Success is logged too, so "no PUSH lines" reads as "nothing was
+        # attempted" rather than leaving delivery and silence looking alike.
+        log_info(logger, 'PUSH', f"Pushed to {sent} device(s) for user {user_id}")
     return sent
 
 

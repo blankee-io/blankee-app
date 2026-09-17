@@ -23094,6 +23094,27 @@ def check_negative_remainders(user_id):
         pass
         return
     
+    formatted_date = first_negative_date.strftime('%B %d, %Y')
+
+    # The same warning again is not news. This runs on every recalculation -
+    # each entry saved, each bundle toggled - and used to delete the standing
+    # notification and raise a fresh one every time, which meant an email and
+    # a push for every keystroke that touched the forecast: three in ten
+    # seconds, for one fact. If the notification already names this date, it
+    # stands, unread or not, and nothing is sent. Only a *different* first
+    # shortfall replaces it.
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) FROM notifications
+            WHERE user_id = %s
+            AND message LIKE %s
+        """, (user_id, f'%remainder shows below $0 on {formatted_date}.%'))
+        (already_raised,) = cursor.fetchone() or (0,)
+        cursor.close()
+    if already_raised:
+        return
+
     # Delete any previous negative remainder notifications for this user
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor()
@@ -23115,7 +23136,6 @@ def check_negative_remainders(user_id):
                     pass
     
     # Create new notification
-    formatted_date = first_negative_date.strftime('%B %d, %Y')
     message = f'Based on your current entries, your remainder shows below $0 on {formatted_date}. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
     try:
         notification_id = add_notification(user_id, message, kind='low_balance')
