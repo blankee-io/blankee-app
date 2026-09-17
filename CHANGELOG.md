@@ -19,6 +19,9 @@ this file; the admin console links to it, it does not read it.
   dated later than the pull, that day is the bank's too. Before the first
   pull nothing is locked. The server refuses writes by the same rule, and
   the "last bank sync" marker on the dashboards sits on the last locked day.
+  A week or month cell that straddles the sync keeps the bank's days and
+  applies the edit or the delete to the rest - decided on the server, so a
+  stale page cannot reach the bank's days either.
 
 ## 1.42.6 — 2026-09-16
 

@@ -13456,6 +13456,13 @@ def delete_week_entry():
     friday_date = data.get('friday_date')  # You may need to pass this from frontend
     bank_partial = data.get('bank_partial', False)
     today_date = data.get('today_date')
+    # The bank's days are kept whatever the page asked for.
+    _boundary, _refused = _bank_period_boundary(entry_type, category_id, start_date, end_date)
+    if _refused:
+        return _refused
+    if _boundary:
+        bank_partial = True
+        today_date = _boundary
 
     if not all([category_id, entry_type, start_date, end_date]):
         return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
@@ -13555,6 +13562,13 @@ def update_week_entry():
     end_date = data.get('end_date')
     bank_partial = data.get('bank_partial', False)
     today_date = data.get('today_date')
+    # The bank's days are kept whatever the page asked for.
+    _boundary, _refused = _bank_period_boundary(entry_type, category_id, start_date, end_date)
+    if _refused:
+        return _refused
+    if _boundary:
+        bank_partial = True
+        today_date = _boundary
     entry_date = data.get('entry_date', friday_date)
 
 
@@ -16548,6 +16562,34 @@ def _bank_last_sync_date():
     """The current user's local date of the last bank pull, for the pages' lock rule."""
     import bank_import
     return bank_import.last_sync_date(current_user.id)
+
+
+def _bank_period_boundary(entry_type, category_id, start_date, end_date):
+    """
+    For a write that covers a period (a week's or a month's cell): the first
+    day of the period that is the person's, or a refusal when none is.
+
+    Returns (boundary, reply). boundary is the day after the last bank sync
+    when the period starts on or before it and ends after it - the routes
+    then keep everything before the boundary and apply the edit to the rest.
+    reply is the 403 when the whole period is the bank's. Both None when the
+    account is not fed or the period is entirely the person's. Decided here,
+    on the server, whatever the page sent.
+    """
+    import bank_import
+    try:
+        if not start_date or not end_date:
+            return None, None
+        if not bank_import.locked_day(current_user.id, entry_type, category_id, start_date):
+            return None, None
+        synced = bank_import.last_sync_date(current_user.id)
+        if not synced or str(end_date)[:10] <= synced:
+            return None, (jsonify({'status': 'error', 'message': bank_import.LOCKED_MESSAGE}), 403)
+        from datetime import date as _date, timedelta as _td
+        return (_date.fromisoformat(synced) + _td(days=1)).isoformat(), None
+    except Exception as e:
+        log_warning(app.logger, 'BANK', f"could not decide the period boundary: {e}")
+        return None, None
 
 
 def _bank_locked_reply(entry_type, category_id, when):

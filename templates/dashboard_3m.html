@@ -5194,11 +5194,12 @@
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const todayStr = today.toISOString().split('T')[0];
+            // The bank's days run up to the last sync; a period that straddles
+            // it keeps those days and the edit applies to the rest.
             let useBankPartial = false;
-            if (bank_sync_flags && startDate < todayStr && endDate >= todayStr) {
-                // Period spans today - check if this category/account is bank-protected
-                const yesterday = new Date(today);
-                yesterday.setDate(yesterday.getDate() - 1);
+            let bankBoundary = null;
+            if (bank_sync_flags && bank_last_sync_date && startDate <= bank_last_sync_date && endDate > bank_last_sync_date) {
+                const yesterday = new Date(bank_last_sync_date + 'T00:00:00');
                 // For CA entries, get the accountId from the table
                 let accountIdForLock = null;
                 if (type === 'ca') {
@@ -5206,6 +5207,11 @@
                     accountIdForLock = caTable ? caTable.id.replace('ca-categories-table-', '') : null;
                 }
                 useBankPartial = isEntryLockedByBankSync(yesterday, categoryId, type, accountIdForLock);
+                if (useBankPartial) {
+                    const b = new Date(bank_last_sync_date + 'T00:00:00');
+                    b.setDate(b.getDate() + 1);
+                    bankBoundary = b.toLocaleDateString('en-CA');
+                }
             }
 
             if (newValue === "") {
@@ -5220,7 +5226,7 @@
                     };
                     if (useBankPartial) {
                         data.bank_partial = true;
-                        data.today_date = todayStr;
+                        data.today_date = bankBoundary;
                     }
                 $.ajax({
                     url: "/delete-week-entry",
@@ -5385,7 +5391,7 @@
                     showDashboardSpinner(false);
                     const confirmed = await showConfirmModal({
                         title: 'Bank-Connected Account',
-                        message: 'You have your bank connected for this account. This will delete entries from today forward. Past bank transactions will remain.\n\nAre you sure you want to proceed?',
+                        message: 'You have your bank connected for this account. This will delete entries after the last bank sync. The bank's days will remain.\n\nAre you sure you want to proceed?',
                         confirmText: 'Confirm',
                         cancelText: 'Cancel',
                         danger: true
@@ -5428,7 +5434,7 @@
                 };
                 if (useBankPartial) {
                     data.bank_partial = true;
-                    data.today_date = todayStr;
+                    data.today_date = bankBoundary;
                 }
                 $.ajax({
                     url: "/update-week-entry",
