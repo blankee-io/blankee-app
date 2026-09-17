@@ -16573,6 +16573,20 @@ def widget_trends():
         except (TypeError, ValueError):
             return 0.0
 
+    def _low(rows, value_key, since):
+        """The lowest daily row on or after `since`, as {date, value}, or None.
+        The exact day, not the month's last: the widget draws a point a month
+        but names the day the balance actually bottoms out."""
+        best = None
+        for row in rows or []:
+            day = _day_of(row.get('date'))
+            if len(day) < 10 or day < since:
+                continue
+            value = _num(row.get(value_key))
+            if best is None or value < best['value'] or (value == best['value'] and day < best['date']):
+                best = {'date': day, 'value': value}
+        return best
+
     def _monthly(rows, value_key):
         """The last row of each month, as {date, value}, oldest first."""
         by_month = {}
@@ -16607,7 +16621,9 @@ def widget_trends():
     }
     currency_symbol = currency_symbols.get(currency_type, '$')
 
-    # --- Checking: the monthly remainder table ---
+    today_str = _user_today_for(user_id).isoformat()
+
+    # --- Checking: the monthly remainder table, and the daily one for the low ---
     totals_m = _get_entries_from_redis('totals_remainders_m', user_id)
     if totals_m is None:
         with get_db_pool().get_connection() as conn:
@@ -16617,11 +16633,21 @@ def widget_trends():
             totals_m = list(cursor.fetchall())
             cursor.close()
 
+    totals_d = _get_totals_remainders_from_redis('totals_remainders_d', user_id, today_str)
+    if not totals_d:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT date, remainder FROM totals_remainders_d "
+                           "WHERE user_id = %s AND date >= %s", (user_id, today_str))
+            totals_d = list(cursor.fetchall())
+            cursor.close()
+
     series = [{
         'id': 'checking',
         'kind': 'checking',
         'name': 'Balance',
         'points': _monthly(totals_m, 'remainder'),
+        'low': _low(totals_d, 'remainder', today_str),
     }]
 
     # --- One per credit account, in the page's order ---
@@ -16652,6 +16678,7 @@ def widget_trends():
             'kind': 'credit',
             'name': account.get('name') or 'Credit account',
             'points': _monthly(rows, 'balance'),
+            'low': _low(rows, 'balance', today_str),
         })
 
     # --- Savings ---
@@ -16669,6 +16696,7 @@ def widget_trends():
         'kind': 'savings',
         'name': 'Savings',
         'points': _monthly(savings, 'amount'),
+        'low': _low(savings, 'amount', today_str),
     })
 
     return jsonify({
