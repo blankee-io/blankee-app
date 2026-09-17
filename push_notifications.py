@@ -166,3 +166,85 @@ def send_apns_notification(device_token, title, body, badge=None, sound="default
         log_warning(logger, 'PUSH', "APNs send failed", error=str(exc))
         return {"sent": False, "reason": "apns_exception", "error": str(exc)}
 
+
+def push_to_user(user_id, body, title='Blankee', badge=None, url=None, action=None):
+    """Send one alert to every device this user has registered.
+
+    This is the push half of a notification, and it is the only way a
+    notification should reach a device. It used to live inline in
+    add_notification, which meant the two other senders - the allowance-spent
+    notification in bucket_utils and the evening reminder in the scheduler -
+    each had to remember to push as well, and one of them did not: an
+    allowance running out arrived by email and never on the phone.
+
+    Best effort throughout. A device that has gone (APNs says the token is bad
+    or unregistered) is dropped from device_tokens so it is not tried again;
+    anything else is logged and skipped, because a push that fails must never
+    lose the in-app notification or the email that go with it.
+
+    `url` is a relative app path the phone opens when the alert is tapped;
+    `action` names something the app does instead (the bucket prompt). Both
+    ride along as custom keys. Returns how many devices were sent to.
+    """
+    if not apns_enabled():
+        return 0
+
+    from db_connections import get_db_pool
+    try:
+        with get_db_pool().get_cursor() as cursor:
+            cursor.execute(
+                "SELECT device_token FROM device_tokens WHERE user_id = %s", (user_id,))
+            rows = cursor.fetchall() or []
+    except Exception as exc:
+        log_warning(logger, 'PUSH', f"Could not load device tokens for user {user_id}: {exc}")
+        return 0
+
+    tokens = [r['device_token'] if isinstance(r, dict) else r[0] for r in rows]
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return 0
+
+    custom = {}
+    if url:
+        custom['url'] = url
+    if action:
+        custom['action'] = action
+
+    sent = 0
+    for token in tokens:
+        result = send_apns_notification(token, title, body, badge, 'default', custom or None)
+        if result.get('sent'):
+            sent += 1
+            continue
+        if result.get('reason') == 'invalid_token':
+            try:
+                with get_db_pool().get_cursor(commit=True) as cursor:
+                    cursor.execute(
+                        "DELETE FROM device_tokens WHERE device_token = %s AND user_id = %s",
+                        (token, user_id))
+                log_info(logger, 'PUSH', f"Dropped a dead device token for user {user_id}",
+                         apns_reason=result.get('apns_reason'))
+            except Exception as exc:
+                log_warning(logger, 'PUSH', f"Could not drop a dead device token for user {user_id}: {exc}")
+        else:
+            log_warning(logger, 'PUSH', f"Push to user {user_id} not sent",
+                        reason=result.get('reason'), status=result.get('status'),
+                        apns_reason=result.get('apns_reason'), error=result.get('error'))
+    return sent
+
+
+def deep_link_from(message):
+    """The relative app path a notification's first link points at, if any.
+
+    Notification messages carry their link as HTML; the phone cannot follow
+    that from an alert, so the path travels as its own key. Only a relative
+    path is accepted - an absolute URL in a message must never become
+    somewhere the app is sent.
+    """
+    import re
+    match = re.search(r'href=["\']([^"\']+)["\']', message or '')
+    if match:
+        candidate = match.group(1).strip()
+        if candidate.startswith('/'):
+            return candidate
+    return '/notifications'

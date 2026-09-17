@@ -52,7 +52,7 @@ from redis_crud import (
     upsert_recurring_suggestion, delete_recurring_suggestion
 )
 from bucket_utils import process_manual_entry_with_bucket, restore_bucket_for_category_change
-from push_notifications import apns_enabled, send_apns_notification
+from push_notifications import apns_enabled, send_apns_notification, push_to_user, deep_link_from
 
 app = Flask(__name__)
 
@@ -16452,6 +16452,155 @@ def widget_day_box():
     })
 
 
+@app.route('/api/widget/trends', methods=['GET'])
+@login_required
+def widget_trends():
+    """JSON API for the iOS trend widget: the balance graphs from dashboard_summary.
+
+    One series per graph the summary page draws, in the page's order - the
+    checking balance, then one per credit account, then savings - so the widget
+    can page through them with its arrows and come back round to the first.
+    Every series is reduced to one point per month, the last day recorded in
+    that month, which is what the page's filterToMonthly() does; the checking
+    series is the monthly remainder table the page reads directly.
+
+    Dates are YYYY-MM-DD strings whatever shape Redis holds them in, values are
+    plain floats. The widget picks the window around today; the whole series is
+    small enough - a point a month - that sending all of it is cheaper than
+    agreeing on a window.
+    """
+    from datetime import date as date_cls
+    from email.utils import parsedate_to_datetime
+
+    user_id = current_user.id
+
+    def _day_of(value):
+        if value is None:
+            return ''
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date_cls):
+            return value.isoformat()
+        text = str(value)
+        if 'GMT' in text:
+            try:
+                return parsedate_to_datetime(text).date().isoformat()
+            except Exception:
+                return ''
+        return text[:10]
+
+    def _num(value):
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _monthly(rows, value_key):
+        """The last row of each month, as {date, value}, oldest first."""
+        by_month = {}
+        for row in rows or []:
+            day = _day_of(row.get('date'))
+            if len(day) < 7:
+                continue
+            key = day[:7]
+            if key not in by_month or day > by_month[key][0]:
+                by_month[key] = (day, _num(row.get(value_key)))
+        return [{'date': d, 'value': v} for d, v in sorted(by_month.values())]
+
+    # --- Currency, the same table the day box uses ---
+    user_data = None
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(f"users:v1:{user_id}")
+            if cached:
+                user_data = json.loads(cached)
+        except Exception:
+            pass
+    if not user_data:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT currency_type FROM users WHERE id = %s", (user_id,))
+            user_data = cursor.fetchone() or {}
+            cursor.close()
+    currency_type = (user_data.get('currency_type') or 'USD') if user_data else 'USD'
+    currency_symbols = {
+        'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CAD': 'C$',
+        'AUD': 'A$', 'CHF': 'Fr', 'CNY': '¥', 'INR': '₹', 'MXN': 'Mex$'
+    }
+    currency_symbol = currency_symbols.get(currency_type, '$')
+
+    # --- Checking: the monthly remainder table ---
+    totals_m = _get_entries_from_redis('totals_remainders_m', user_id)
+    if totals_m is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT date, remainder FROM totals_remainders_m WHERE user_id = %s",
+                           (user_id,))
+            totals_m = list(cursor.fetchall())
+            cursor.close()
+
+    series = [{
+        'id': 'checking',
+        'kind': 'checking',
+        'name': 'Balance',
+        'points': _monthly(totals_m, 'remainder'),
+    }]
+
+    # --- One per credit account, in the page's order ---
+    accounts = _get_credit_accounts_from_redis(user_id)
+    if accounts is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT id, name FROM credit_accounts WHERE user_id = %s "
+                           "ORDER BY display_order DESC", (user_id,))
+            accounts = list(cursor.fetchall())
+            cursor.close()
+
+    ca_balances = _get_ca_balances_from_redis('c_a_balances_d', user_id)
+    if ca_balances is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT account_id, date, balance FROM c_a_balances_d "
+                           "WHERE account_id IN (SELECT id FROM credit_accounts WHERE user_id = %s)",
+                           (user_id,))
+            ca_balances = list(cursor.fetchall())
+            cursor.close()
+
+    for account in accounts or []:
+        account_id = account.get('id')
+        rows = [b for b in (ca_balances or []) if str(b.get('account_id')) == str(account_id)]
+        series.append({
+            'id': f'credit:{account_id}',
+            'kind': 'credit',
+            'name': account.get('name') or 'Credit account',
+            'points': _monthly(rows, 'balance'),
+        })
+
+    # --- Savings ---
+    savings = _get_savings_entries_from_redis(user_id)
+    if savings is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT date, amount FROM savings_entries WHERE user_id = %s "
+                           "ORDER BY date DESC LIMIT 365", (user_id,))
+            savings = list(cursor.fetchall())
+            cursor.close()
+
+    series.append({
+        'id': 'savings',
+        'kind': 'savings',
+        'name': 'Savings',
+        'points': _monthly(savings, 'amount'),
+    })
+
+    return jsonify({
+        'currency_symbol': currency_symbol,
+        'series': series,
+        'data_version': _get_data_version(user_id),
+        'dashboard_path': '/dashboard_summary',
+    })
+
+
 ############################################################################################
 ############################### PROFILE PAGE ###############################################
 ############################################################################################
@@ -22863,43 +23012,14 @@ def add_notification(user_id, message, notification_date=None, kind=None, notifi
         except Exception as e:
             log_error(app.logger, 'NOTIFICATION', f"Failed to send notification email to user {user_id}: {str(e)}")
 
-    # Send APNs push notification if configured
-    if apns_enabled():
-        try:
-            tokens = get_user_device_tokens(user_id, platform='ios')
-            if tokens:
-                # Extract first href from message HTML to use as deep-link target.
-                # Falls back to /notifications when message has no link.
-                deep_link_url = '/notifications'
-                try:
-                    href_match = re.search(r'href=["\']([^"\']+)["\']', message or '')
-                    if href_match:
-                        candidate = href_match.group(1).strip()
-                        # Only accept relative app paths (security: avoid external URLs)
-                        if candidate.startswith('/'):
-                            deep_link_url = candidate
-                except Exception:
-                    pass
+    # The push half, through the one helper every sender uses. The badge is
+    # the unread count so the app icon agrees with the list; the link is the
+    # message's own, so tapping the alert lands where the notification does.
+    try:
+        push_to_user(user_id, message, badge=unread_count, url=deep_link_from(message))
+    except Exception as push_err:
+        log_warning(app.logger, 'NOTIFICATION', f"APNs push failed for user {user_id}: {push_err}")
 
-                for token_row in tokens:
-                    token_value = token_row.get('device_token')
-                    if not token_value:
-                        continue
-                    result = send_apns_notification(
-                        device_token=token_value,
-                        title="Blankee",
-                        body=message,
-                        badge=unread_count,
-                        custom={"url": deep_link_url}
-                    )
-                    if not result.get('sent') and result.get('reason') == 'invalid_token':
-                        try:
-                            remove_device_token(user_id, token_value)
-                        except Exception as cleanup_err:
-                            log_warning(app.logger, 'NOTIFICATION', f"Failed to prune invalid token for user {user_id}: {cleanup_err}")
-        except Exception as push_err:
-            log_warning(app.logger, 'NOTIFICATION', f"APNs push failed for user {user_id}: {push_err}")
-    
     # Invalidate Redis cache so new notification appears on reload
     if app.config.get('REDIS_OK'):
         try:
