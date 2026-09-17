@@ -8,6 +8,17 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.43.7 — 2026-09-17
+
+### Changed
+- A link that names a date - the projected-shortfall notification's, and a
+  tap on its push - now lands on that day: the daily dashboard scrolls it into
+  view and lights it for a moment, instead of opening the right week scrolled
+  to today.
+- On the notifications page, the whole card opens what it is about when it
+  has a link, not only the words in its text, and marks itself read on the
+  way. The envelope and bin buttons keep their own jobs.
+
 ## 1.43.6 — 2026-09-17
 
 ### Fixed
