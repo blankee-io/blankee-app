@@ -1353,6 +1353,12 @@
         function updateEntry(input, type) {
             if (input._updating) return; // Prevent double update
             input._updating = true;
+            // The guard is cleared on every way out, whichever request ran or
+            // did not. It used to be set and never reset, so the first edit on
+            // a row went through and every later one on the same field was
+            // dropped before any request left - clearing an amount to delete
+            // an entry just edited did nothing, with no error to say so.
+            const done = function () { input._updating = false; };
 
             showDashboardSpinner(true);
             const newValue = input.value.trim();
@@ -1477,19 +1483,24 @@
                     error: function() {
                         // If delete failed due to an error, restore the UI by refreshing
                         updateDashboardDView();
-                    }
+                    },
+                    complete: done
                 });
             } else {
                 // Validate and update the entry for the specific date
                 const validValue = newValue.match(/^\d*(\.\d{0,2})?$/);
                 if (!validValue) {
                     input.value = '';
+                    showDashboardSpinner(false);
+                    done();
                     return;
                 }
 
                 const amount = parseFloat(newValue);
                 if (isNaN(amount)) {
                     input.value = '';
+                    showDashboardSpinner(false);
+                    done();
                     return;
                 }
 
@@ -1569,7 +1580,8 @@
                         }
                     },
                     error: function(xhr) {
-                    }
+                    },
+                    complete: done
                 });
             }
         }
