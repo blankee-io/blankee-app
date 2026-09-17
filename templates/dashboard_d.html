@@ -208,6 +208,7 @@
         // bank account flags for entry locking
         let bank_sync_flags = {{ bank_sync_flags | tojson | safe }};
         let bank_last_txn_date = {{ bank_last_txn_date | tojson | safe }};
+        let bank_last_sync_date = {{ bank_last_sync_date | tojson | safe }};
 
         /**
          * Check if an entry should be locked due to bank account sync.
@@ -226,12 +227,11 @@
             const today = new Date();
             const todayStr = today.toLocaleDateString('en-CA'); // Returns YYYY-MM-DD in local time
             
-            // Today is always editable
-            if (entryDate >= todayStr) return false;
-            
-            // Every earlier day on a fed account is the bank's: the feed fills
-            // it in, and an entry typed there would be counted again when the
-            // bank posts it.
+            // Every day up to the last sync on a fed account is the bank's: the
+            // feed has filled it in, and an entry typed there would be counted
+            // again when the bank posts it. The days since are still the
+            // person's - the bank has not spoken for them yet.
+            if (!bank_last_sync_date || entryDate > bank_last_sync_date) return false;
             
             // Credit account entries - check if this specific account is bank-linked
             if (entryType === 'ca' && accountId !== null) {
@@ -273,9 +273,9 @@
             const today = new Date();
             const todayStr = today.toLocaleDateString('en-CA'); // Returns YYYY-MM-DD
             
-            // Simple string comparison works because YYYY-MM-DD sorts correctly
-            // Future dates and today - always show add button
-            if (dateStr >= todayStr) return true;
+            // Simple string comparison works because YYYY-MM-DD sorts correctly.
+            // Days since the last sync (and before the first) are the person's.
+            if (!bank_last_sync_date || dateStr > bank_last_sync_date) return true;
             
             
             // For locked past dates, check if there are any valid entry options
@@ -876,8 +876,8 @@
                 dayHeader.innerHTML = `${formattedDate} ${addButton}${memberSinceIcon}`;
                 
                 // Add bank sync marker above the date (absolute positioned)
-                if (bank_last_txn_date && date === bank_last_txn_date) {
-                    const txnDate = new Date(bank_last_txn_date + 'T00:00:00');
+                if (bank_last_sync_date && date === bank_last_sync_date) {
+                    const txnDate = new Date(bank_last_sync_date + 'T00:00:00');
                     const marker = document.createElement('span');
                     marker.className = 'bank-sync-marker';
                     marker.title = `Last bank sync: ${txnDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
@@ -2757,11 +2757,11 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             dashboardDEntryTypeHidden.value = '';
             dashboardDEntryTypeDropdown.style.display = 'none';
             
-            // A day before today is the bank's on a fed account; today and the
-            // future are the person's.
+            // A day up to the last sync is the bank's on a fed account; the days
+            // since are the person's.
             let isLockedDate = false;
-            if (bank_sync_flags && dateStr) {
-                isLockedDate = dateStr < new Date().toLocaleDateString('en-CA');
+            if (bank_sync_flags && dateStr && bank_last_sync_date) {
+                isLockedDate = dateStr <= bank_last_sync_date;
             }
             
             // For future dates or if no checking linked, show Income/Expense options
