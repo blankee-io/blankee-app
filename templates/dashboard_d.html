@@ -1776,6 +1776,13 @@
                     parseInt(dateParts[2], 10)
                 );
                 storeLastViewedFriday(selectedDate);
+                // The week is the right one, but the eye still has to find
+                // the day: a notification's link names a date, and landing
+                // on its week scrolled to today is not landing on it. Same
+                // hand-off the calendar's year/month/day link uses below -
+                // scrolled into view and lit for a moment once the week has
+                // rendered.
+                sessionStorage.setItem('scrollToDate', dateParam);
             } else if (yearParam !== null && monthParam !== null && dayParam !== null) {
                 // Handle year/month/day parameters
                 const year = parseInt(yearParam);
