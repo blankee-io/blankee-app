@@ -1939,6 +1939,7 @@ function _bankItemHtml(item, symbol) {
     var source = item.source === "memory" ? "remembered"
                : item.source === "claude" ? "Claude's guess"
                : item.source === "amount" ? "matched a forecast"
+               : item.source === "record" ? "an entry you recorded"
                : "no guess";
     var note = "";
     if (item.forecast && item.forecast.amount != null &&
@@ -2039,6 +2040,7 @@ function _bankSourceIcon(source) {
     if (source === "claude") { return '<i class="fa-regular fa-robot category-icon bucket-prompt-guess-icon" title="Claude\'s guess"></i>'; }
     if (source === "memory") { return '<i class="fa-regular fa-brain category-icon bucket-prompt-guess-icon" title="Remembered from last time"></i>'; }
     if (source === "amount") { return '<i class="fa-regular fa-bullseye category-icon bucket-prompt-guess-icon" title="Matched a forecast by amount"></i>'; }
+    if (source === "record") { return '<i class="fa-regular fa-pen-to-square category-icon bucket-prompt-guess-icon" title="An entry you recorded yourself"></i>'; }
     return "";
 }
 
