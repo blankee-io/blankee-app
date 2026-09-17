@@ -5298,6 +5298,39 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
             existing_ids = [e.get('id', 0) for e in entries if e.get('id')]
             min_id = min(existing_ids) if existing_ids else 0
             temp_id = min(min_id, 0) - 1  # Always negative: -1, -2, -3, etc.
+            # The row is written to MySQL now, for its real id, and Redis
+            # carries that id from the first moment - the same as
+            # redis_crud.add_entry. It used to get a temporary negative id
+            # here and its real one from the flush worker fifteen seconds
+            # later, and every page that had been handed the temporary id
+            # was then holding an id that no longer existed: a delete sent
+            # after the swap matched nothing and reported success. Redis is
+            # still what is read and what is edited; MySQL only lends the id.
+            # The temporary id remains the fallback for a failed insert.
+            if entry_id is None:
+                try:
+                    columns = {
+                        'category_id': int(category_id),
+                        'date': entry_date_str,
+                        'amount': float(amount),
+                        'recurring_id': int(recurring_id) if recurring_id is not None else None,
+                        'processed': int(processed) if processed is not None else 0,
+                        'is_bucket': 1 if is_bucket else 0,
+                        'is_auto_adjustment': 1 if is_auto_adjustment else 0,
+                        'original_amount': float(original_amount) if original_amount is not None else None,
+                    }
+                    if table_name in ['expense_entries', 'c_expense_entries']:
+                        columns['bundle_item_id'] = int(bundle_item_id) if bundle_item_id is not None else None
+                    with get_db_pool().get_cursor(commit=True) as cursor:
+                        cursor.execute(
+                            f"INSERT INTO {table_name} ({', '.join(columns)}) "
+                            f"VALUES ({', '.join(['%s'] * len(columns))})",
+                            tuple(columns.values()))
+                        entry_id = cursor.lastrowid or None
+                except Exception as e:
+                    log_warning(app.logger, 'REDIS',
+                                f"Could not insert the new {table_name} row for its id; "
+                                f"using temporary id {temp_id}: {e}")
             new_entry = {
                 'id': entry_id or temp_id,
                 'category_id': int(category_id),
@@ -5473,6 +5506,27 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
         deleted_ids = []
         deleted_entries_for_bucket_restore = []  # Track entries that need bucket restoration
         deleted_bucket_entries = []  # Track bucket entries that need their bucket record deleted
+        # A page holds the id it was handed when the entry was added, and for
+        # the first few seconds that is a temporary negative one. The flush
+        # worker then writes the row to MySQL and gives it its real id in
+        # Redis - and a delete arriving after that, still carrying the
+        # temporary id, matched nothing and reported success. So a temporary
+        # id that no longer exists falls back to what the request also says:
+        # this category, this date. A real id that matches nothing is left
+        # alone - that entry is already gone.
+        if specific_entry_id is not None:
+            try:
+                wanted = int(specific_entry_id)
+            except (TypeError, ValueError):
+                wanted = None
+            if wanted is not None and wanted < 0 and not any(
+                    entry.get('id') is not None and int(entry.get('id')) == wanted
+                    for entry in entries):
+                log_info(app.logger, 'DELETE_ENTRY',
+                         f"Temp id {wanted} already replaced by the flush; deleting by "
+                         f"category {category_id} on {start_date_str}..{end_date_str} instead")
+                specific_entry_id = None
+
         filtered_entries = []
         for entry in entries:
             should_delete = False
