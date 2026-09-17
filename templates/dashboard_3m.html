@@ -781,6 +781,7 @@
         // bank account flags for entry locking
         let bank_sync_flags = {{ bank_sync_flags | tojson | safe }};
         let bank_last_txn_date = {{ bank_last_txn_date | tojson | safe }};
+        let bank_last_sync_date = {{ bank_last_sync_date | tojson | safe }};
 
         /**
          * Check if an entry should be locked due to bank account sync.
@@ -805,11 +806,10 @@
             const entryDateObj = typeof entryDate === 'string' ? new Date(entryDate) : new Date(entryDate);
             entryDateObj.setHours(0, 0, 0, 0);
             
-            // Today is always editable
-            if (entryDateObj >= today) return false;
-            
-            // Lock entries on or before the last synced transaction date
-            // Every earlier day on a fed account is the bank's (see dashboard.html).
+            // Every day up to the last sync on a fed account is the bank's (see
+            // dashboard.html); the days since are still the person's.
+            if (!bank_last_sync_date) return false;
+            if (entryDateObj > new Date(bank_last_sync_date + 'T00:00:00')) return false;
             
             // Credit account entries - check if this specific account is bank-linked
             if (entryType === 'ca' && accountId !== null) {

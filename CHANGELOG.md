@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.7 — 2026-09-16
+
+### Changed
+- On a bank-linked account the locked days now run up to the **last sync**
+  rather than up to yesterday: everything the bank has already reported is
+  the bank's, and the days since the last pull - which it has not spoken
+  for yet - stay yours to type into until it does. With the pull at ten to
+  midnight that is the current day. Before the first pull nothing is
+  locked. The server refuses writes by the same rule.
+
 ## 1.42.6 — 2026-09-16
 
 ### Added

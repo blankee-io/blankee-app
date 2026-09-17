@@ -842,17 +842,41 @@ def create_entries(user_id: int) -> Dict[str, Any]:
     return {'imported': len(updates), 'skipped': skipped, 'cards': cards, 'earliest': earliest}
 
 
+def last_sync_date(user_id: int) -> Optional[str]:
+    """
+    The person's local date of the last successful pull, or None before
+    the first. last_pull_at is written with NOW() in the database's own
+    clock, whatever zone that is, so it is read beside NOW() and the gap
+    between them is taken off the person's local now - which puts the
+    pull on the day they were having, wherever the server is.
+    """
+    try:
+        from auto_balance import _user_now
+        with get_db_pool().get_cursor(dictionary=True) as cursor:
+            cursor.execute("SELECT last_pull_at, NOW() AS now FROM simplefin_credentials "
+                           " WHERE user_id = %s AND last_pull_ok = 1 AND last_pull_at IS NOT NULL", (user_id,))
+            row = cursor.fetchone()
+        if not row or not row.get('last_pull_at'):
+            return None
+        return (_user_now(user_id) - (row['now'] - row['last_pull_at'])).date().isoformat()
+    except Exception as e:
+        log_warning(logger, TAG, f'user {user_id}: could not read the last sync date: {e}')
+        return None
+
+
 def locked_day(user_id: int, entry_type: str, category_id, when) -> bool:
     """
     Whether a day on this account is the bank's rather than the person's:
-    any day before today, on the current account when a checking account
-    is linked, or on a card that is. Those days are filled from the feed;
-    an entry typed there would be counted again when the bank posts it.
-    Today and the future stay the person's - forecasts are theirs to plan.
+    any day up to the last sync, on the current account when a checking
+    account is linked, or on a card that is. Those days are filled from
+    the feed; an entry typed there would be counted again when the bank
+    posts it. Days since the last sync are still the person's - the bank
+    has not spoken for them yet - and so are the forecasts ahead.
     """
     try:
         d = _iso(when)
-        if not d or d >= _user_today(user_id).isoformat():
+        synced = last_sync_date(user_id)
+        if not d or not synced or d > synced:
             return False
         from bank_redis import get_user_linked_account_flags
         flags = get_user_linked_account_flags(user_id) or {}
@@ -872,7 +896,7 @@ def locked_day(user_id: int, entry_type: str, category_id, when) -> bool:
         return False
 
 
-LOCKED_MESSAGE = 'Days before today on a bank-linked account come from the bank; the feed fills them in.'
+LOCKED_MESSAGE = 'Days up to the last bank sync on a linked account come from the bank; the feed has filled them in.'
 
 
 def fed_tables(user_id: int) -> Dict[str, Optional[set]]:

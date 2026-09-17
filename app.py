@@ -3519,7 +3519,8 @@ def dashboard_d():
         recurring_expense_buckets=recurring_expense_buckets,
         recurring_c_expense_buckets=recurring_c_expense_buckets,
         bank_sync_flags=bank_sync_flags,
-        bank_last_txn_date=bank_last_txn_date
+        bank_last_txn_date=bank_last_txn_date,
+        bank_last_sync_date=_bank_last_sync_date()
     )
 
 @app.route('/dashboard-d/add_entry', methods=['POST'])
@@ -11573,7 +11574,8 @@ def dashboard():
         c_expense_entries=c_expense_entries,
         c_a_balances=c_a_balances,
         bank_sync_flags=bank_sync_flags,
-        bank_last_txn_date=bank_last_txn_date
+        bank_last_txn_date=bank_last_txn_date,
+        bank_last_sync_date=_bank_last_sync_date()
     )
 
 
@@ -14359,7 +14361,8 @@ def dashboard_3m():
         c_expense_entries=c_expense_entries,
         c_a_balances_m=c_a_balances_m,
         bank_sync_flags=bank_sync_flags,
-        bank_last_txn_date=bank_last_txn_date
+        bank_last_txn_date=bank_last_txn_date,
+        bank_last_sync_date=_bank_last_sync_date()
     )
 
 @app.route('/get_ca_balance_3m', methods=['GET'])
@@ -14983,7 +14986,8 @@ def dashboard_m():
         c_expense_entries=c_expense_entries,
         c_a_balances_d=c_a_balances_d,
         bank_sync_flags=get_user_linked_account_flags(current_user.id),
-        bank_last_txn_date=get_last_linked_transaction_date(current_user.id)
+        bank_last_txn_date=get_last_linked_transaction_date(current_user.id),
+        bank_last_sync_date=_bank_last_sync_date()
     )
 
 @app.route('/get_dashboard_m_data', methods=['GET'])
@@ -15340,7 +15344,8 @@ def dashboard_y():
         c_expense_entries=c_expense_entries,
         c_a_balances_d=c_a_balances_d,
         bank_sync_flags=get_user_linked_account_flags(current_user.id),
-        bank_last_txn_date=get_last_linked_transaction_date(current_user.id)
+        bank_last_txn_date=get_last_linked_transaction_date(current_user.id),
+        bank_last_sync_date=_bank_last_sync_date()
     )
 
 @app.route('/get_dashboard_y_data', methods=['GET'])
@@ -16538,6 +16543,12 @@ def profile():
         currency_type=currency_type,
         mfa_enabled=mfa_enabled,
     )
+
+def _bank_last_sync_date():
+    """The current user's local date of the last bank pull, for the pages' lock rule."""
+    import bank_import
+    return bank_import.last_sync_date(current_user.id)
+
 
 def _bank_locked_reply(entry_type, category_id, when):
     """

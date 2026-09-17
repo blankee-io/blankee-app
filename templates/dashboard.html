@@ -772,6 +772,7 @@
         // bank account flags for entry locking
         let bank_sync_flags = {{ bank_sync_flags | tojson | safe }};
         let bank_last_txn_date = {{ bank_last_txn_date | tojson | safe }};
+        let bank_last_sync_date = {{ bank_last_sync_date | tojson | safe }};
 
         /**
          * Check if an entry should be locked due to bank account sync.
@@ -803,13 +804,12 @@
                 compareDate.setDate(compareDate.getDate() + 6);
             }
             
-            // Today is always editable
-            if (compareDate >= today) return false;
-            
-            // Every earlier day on a fed account is the bank's: the feed fills
-            // it in, and an entry typed there would be counted again when the
-            // bank posts it. (This used to stop at the last synced row, which
-            // left the days since it open.)
+            // Every day up to the last sync on a fed account is the bank's: the
+            // feed has filled it in, and an entry typed there would be counted
+            // again when the bank posts it. The days since are still the
+            // person's - the bank has not spoken for them yet.
+            if (!bank_last_sync_date) return false;
+            if (compareDate > new Date(bank_last_sync_date + 'T00:00:00')) return false;
             
             // Credit account entries - check if this specific account is bank-linked
             if (entryType === 'ca' && accountId !== null) {
