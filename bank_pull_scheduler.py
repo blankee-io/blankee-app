@@ -108,8 +108,14 @@ def run_once(now_utc=None):
         # so the day is not consumed - connect at noon and tomorrow's pull
         # comes round normally.
         if not _wanted(user_id):
+            log_info(logger, TAG, f"User {user_id} is due but has nothing to pull for today")
             continue
         if not _claim(user_id, local_date):
+            # Said out loud, because a silent skip reads as a scheduler that
+            # never woke. The night the pull moved from 06:00 to 23:50, the
+            # morning run had already claimed that date, so the evening one
+            # was skipped without a word and looked like a missed pull.
+            log_info(logger, TAG, f"User {user_id}: {local_date} already pulled or being pulled; skipping")
             continue
 
         import bank_import
