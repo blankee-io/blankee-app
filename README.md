@@ -232,9 +232,17 @@ which is what enables notifications and the Forgot Password link.
 ### Push notifications for the iOS app
 
 The iOS app registers each phone with the server, and from then on every
-notification that is emailed is also pushed to it - if the server can reach
-Apple. That takes an APNs key, which Blankee cannot ship: it is tied to the
-Apple developer account the app is signed with.
+notification that is emailed is also pushed to it. Nothing to set up: Apple
+only accepts a push from the key of the account that signed the app, which is
+blankee.io's, so the server asks the relay at `PUSH_RELAY_URL` (set by the
+installer) to send the nudge. The relay is told the notification's id and
+nothing else - no text, no amounts, not even the server's address - and the
+phone fetches the notification from your server itself before showing it.
+`relay/README.md` in the source describes it, and it is the one piece of Blankee
+that is not self-hosted. Set `PUSH_RELAY_URL` empty to send no pushes at all.
+
+**If you sign your own build of the app**, you have your own APNs key and can
+push directly, bypassing the relay:
 
 1. At developer.apple.com, under **Certificates, Identifiers & Profiles > Keys**,
    create a key with **Apple Push Notifications service (APNs)** enabled and
