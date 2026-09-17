@@ -101,6 +101,33 @@
             }
         }
 
+        // The whole card opens what the notification is about, not only the
+        // link buried in its text - a tap on a phone lands on the card far
+        // more often than on the words "Click here". Only cards with a link
+        // do it; the envelope and the bin keep their own jobs. Opening it is
+        // reading it, so an unread card is marked read on the way.
+        $(function () {
+            $('.notification-item').each(function () {
+                const item = $(this);
+                const link = item.find('.notification-message a[href^="/"]').first();
+                if (!link.length) return;
+                item.addClass('notification-item-linked');
+                item.on('click', function (e) {
+                    if ($(e.target).closest('button, a').length) return;
+                    const href = link.attr('href');
+                    const go = function () { window.location.href = href; };
+                    if (item.hasClass('notification-read')) { go(); return; }
+                    $.ajax({
+                        url: '/mark-notification-read',
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ notification_id: item.data('notification-id') }),
+                        complete: go
+                    });
+                });
+            });
+        });
+
         function toggleReadStatus(notificationId) {
             $.ajax({
                 url: '/mark-notification-read',
