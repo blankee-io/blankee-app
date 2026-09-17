@@ -90,12 +90,14 @@ def _worker():
         _shutdown.wait(CHECK_INTERVAL)
 
 
-def _is_due(tz_name, now_utc, hour=PROMPT_HOUR, window=WINDOW_MINUTES):
+def _is_due(tz_name, now_utc, hour=PROMPT_HOUR, window=WINDOW_MINUTES, minute=0):
     """
-    (due, local_date) for a user in `tz_name` right now.
+    (due, local_date) for a user in `tz_name` right now: local time is
+    within `window` minutes from hour:minute.
 
-    hour and window are parameters so the bank pull scheduler, which runs
-    the same walk at a different hour, asks the same question the same way.
+    hour, minute and window are parameters so the bank pull scheduler,
+    which runs the same walk at a different time, asks the same question
+    the same way.
     """
     try:
         local = now_utc.astimezone(ZoneInfo(tz_name))
@@ -106,7 +108,7 @@ def _is_due(tz_name, now_utc, hour=PROMPT_HOUR, window=WINDOW_MINUTES):
         return False, None
     if local.hour != hour:
         return False, local.date()
-    return local.minute < window, local.date()
+    return minute <= local.minute < minute + window, local.date()
 
 
 def run_once(now_utc=None):

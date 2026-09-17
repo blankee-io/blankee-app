@@ -219,8 +219,8 @@
          * @returns {boolean} - True if entry should be locked
          */
         function isEntryLockedByBankSync(entryDate, categoryId, entryType, accountId = null) {
-            // If no bank_sync flags or no last txn date, nothing is locked
-            if (!bank_sync_flags || !bank_last_txn_date) return false;
+            // Nothing is locked for a person with no bank connection.
+            if (!bank_sync_flags) return false;
             
             // Get today's date string for reliable comparison (avoids UTC vs local timezone bugs)
             const today = new Date();
@@ -229,8 +229,9 @@
             // Today is always editable
             if (entryDate >= todayStr) return false;
             
-            // Lock entries on or before the last synced transaction date
-            if (entryDate > bank_last_txn_date) return false;
+            // Every earlier day on a fed account is the bank's: the feed fills
+            // it in, and an entry typed there would be counted again when the
+            // bank posts it.
             
             // Credit account entries - check if this specific account is bank-linked
             if (entryType === 'ca' && accountId !== null) {
@@ -276,8 +277,6 @@
             // Future dates and today - always show add button
             if (dateStr >= todayStr) return true;
             
-            // Dates after the last synced transaction date are not locked
-            if (!bank_last_txn_date || dateStr > bank_last_txn_date) return true;
             
             // For locked past dates, check if there are any valid entry options
             
@@ -2758,12 +2757,11 @@ function updateLocalEntryAfterAdd(entryType, formData, isAdd = false, updatedBuc
             dashboardDEntryTypeHidden.value = '';
             dashboardDEntryTypeDropdown.style.display = 'none';
             
-            // A date is "locked" only when it falls on or before the latest synced
-            // (posted) bank transaction date — dates after that, including today
-            // and any future date, are unlocked.
+            // A day before today is the bank's on a fed account; today and the
+            // future are the person's.
             let isLockedDate = false;
-            if (bank_sync_flags && dateStr && bank_last_txn_date) {
-                isLockedDate = dateStr <= bank_last_txn_date;
+            if (bank_sync_flags && dateStr) {
+                isLockedDate = dateStr < new Date().toLocaleDateString('en-CA');
             }
             
             // For future dates or if no checking linked, show Income/Expense options
