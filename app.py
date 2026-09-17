@@ -24794,6 +24794,25 @@ def update_credit_account():
                 _redis_client.setex(exp_redis_key, PERSISTENT_CACHE_TTL, json.dumps(expense_categories, cls=DecimalEncoder))
                 _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
         
+        # A rename reaches the "<name> payment" category whether or not the
+        # recurring payment was touched. The branches above renamed it only
+        # while switching the recurring payment on, so a card renamed on its
+        # own went on paying a category that still carried the old name -
+        # and, through the mirrors, so did every other card's copy of it.
+        if payment_category and old_account_name and old_account_name != name:
+            cats = _get_categories_from_redis('expense_categories', current_user.id) or []
+            old_cat_name = None
+            for cat in cats:
+                if cat.get('id') == payment_category['id'] and cat.get('name') != new_payment_cat_name:
+                    old_cat_name = cat.get('name')
+                    cat['name'] = new_payment_cat_name
+                    break
+            if old_cat_name:
+                _redis_client.setex(f"expense_categories:v1:{current_user.id}", PERSISTENT_CACHE_TTL,
+                                    json.dumps(cats, cls=DecimalEncoder))
+                _redis_client.sadd(f"dirty_tables:{current_user.id}", 'expense_categories')
+                _sync_rename_to_credit_accounts(current_user.id, old_cat_name, new_payment_cat_name)
+
         # Recalculate the card. Editing an account can now change the billing
         # cycle or the rate, which move every projected balance on it - and
         # unlike add_credit_account this route has never recalculated, so the
@@ -26101,9 +26120,21 @@ def bank_simplefin_link_accounts():
                     if acc.get('current_balance') is not None:
                         feed['cards'][int(card['credit_account_id'])] = abs(float(acc['current_balance']))
                 elif (was.get('account_subtype') or '') != 'credit_card' or card.get('mode') == 'new':
-                    display = (was.get('alias') or name)
+                    # The name the person gave the new card, else the bank's; and
+                    # the terms the bank does not send, if they filled them in.
+                    display = (str(card.get('name') or '').strip()[:60]
+                               or was.get('alias') or name)
+                    try:
+                        rate = float(card.get('interest_rate')) if card.get('interest_rate') not in (None, '') else None
+                        if rate is not None and not (0 <= rate <= 100):
+                            rate = None
+                    except (TypeError, ValueError):
+                        rate = None
                     if create_linked_credit_account(user_id, display, aid, mask=acc.get('mask'),
-                                                    starting_balance=acc.get('current_balance')) is not None:
+                                                    starting_balance=acc.get('current_balance'),
+                                                    interest_rate=rate,
+                                                    statement_day=_clean_cycle_day(card.get('statement_day')),
+                                                    payment_due_day=_clean_cycle_day(card.get('payment_due_day'))) is not None:
                         cards_made += 1
             elif (was.get('account_subtype') or '') == 'credit_card':
                 unlink_credit_account(user_id, aid)
