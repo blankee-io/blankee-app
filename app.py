@@ -166,6 +166,30 @@ def ordinal_filter(value):
 
 app.jinja_env.filters['ordinal'] = ordinal_filter
 
+# A notification's message may carry one kind of markup: a link into the app,
+# written by the server ("<a href="/dashboard_d?date=...">Click here to view</a>").
+# It also carries text a person typed - a category name, a bundle name - which
+# must never be rendered as markup. So the page neither escapes the whole
+# message (the link shows as its source, which is what happened when `| safe`
+# was dropped) nor trusts it whole (a category called "<script>" would run).
+# Only an anchor with a relative href survives, its text escaped like the rest.
+_NOTIFICATION_LINK = re.compile(r'<a href="(/[^"<>\s]*)">([^<]*)</a>')
+
+
+def notification_html(message):
+    from markupsafe import escape
+    text = str(message or '')
+    parts, pos = [], 0
+    for m in _NOTIFICATION_LINK.finditer(text):
+        parts.append(escape(text[pos:m.start()]))
+        parts.append(Markup('<a href="%s">%s</a>') % (m.group(1), m.group(2)))
+        pos = m.end()
+    parts.append(escape(text[pos:]))
+    return Markup('').join(parts)
+
+
+app.jinja_env.filters['notification_html'] = notification_html
+
 # Define the upload folder and allowed file extensions
 UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')  # Relative to application root
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}

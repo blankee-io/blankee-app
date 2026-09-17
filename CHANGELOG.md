@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.43.3 — 2026-09-17
+
+### Fixed
+- The notifications page showed a message's link as its source (`<a href=...`)
+  instead of a link. A message is now rendered with exactly one kind of markup
+  allowed - a link to a page inside the app - and everything else escaped,
+  including the names people type into categories and bundles, which is why
+  the page could not simply trust the whole message.
+
 ## 1.43.2 — 2026-09-17
 
 ### Fixed
