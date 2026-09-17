@@ -80,7 +80,9 @@ def unlink_credit_account(user_id: int, linked_account_id: str) -> bool:
 
 def create_linked_credit_account(user_id: int, name: str, linked_account_id: str,
                                  mask: Optional[str] = None,
-                                 starting_balance: Optional[float] = None) -> Optional[int]:
+                                 starting_balance: Optional[float] = None,
+                                 interest_rate: Optional[float] = None,
+                                 statement_day=None, payment_due_day=None) -> Optional[int]:
     """
     Create a Blankee card for a bank credit-card account and link it.
 
@@ -96,11 +98,15 @@ def create_linked_credit_account(user_id: int, name: str, linked_account_id: str
                      _copy_expense_categories_to_new_credit_account, _add_category_to_redis,
                      _get_categories_from_redis, _next_display_order)
     owed = abs(float(starting_balance)) if starting_balance is not None else 0.0
+    # The terms the bank does not send - the person can give them at link
+    # time now; the statement and due days only mean anything together, as
+    # the edit form treats them.
+    both = bool(statement_day and payment_due_day)
     account_data = {
         'name': name,
-        'interest_rate': 0.0,
-        'statement_day': None,
-        'payment_due_day': None,
+        'interest_rate': float(interest_rate) if interest_rate is not None else 0.0,
+        'statement_day': statement_day if both else None,
+        'payment_due_day': payment_due_day if both else None,
         'is_card': 1,
         'is_line': 0,
         'starting_balance': owed,
