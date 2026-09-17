@@ -850,7 +850,8 @@ def _create_bucket_depleted_notification(user_id, table, category_id, bucket_dat
         # one notification that emailed and never pushed.
         try:
             from push_notifications import push_to_user, deep_link_from
-            push_to_user(user_id, message, badge=unread_count, url=deep_link_from(message))
+            push_to_user(user_id, message, badge=unread_count, url=deep_link_from(message),
+                         notification_id=notification_id)
         except Exception as e:
             log_warning(logger, 'BUCKET_NOTIFICATION', f"Failed to push: {e}")
 

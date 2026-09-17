@@ -62,6 +62,8 @@ EXPECTED_COLUMNS = (
     ('simplefin_credentials', 'access_url_encrypted'),
     ('user_ai_settings', 'verified_fingerprint'),
     ('linked_transactions', 'matched_pending_id'),
+    ('device_tokens', 'relay_secret'),
+    ('device_tokens', 'apns_environment'),
     ('linked_transactions', 'depleted_bucket'),
     ('bank_pulls', 'pull_date'),
     ('users', 'member_since'),

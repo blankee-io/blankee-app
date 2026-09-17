@@ -549,7 +549,7 @@ migrate_old_logs() {
 upgrade_env_defaults() {
   [[ -f "$ENV_FILE" ]] || return 0
   local pair key
-  for pair in "BANK_PROVIDER=simplefin" "ENRICHMENT_PROVIDER=claude"; do
+  for pair in "BANK_PROVIDER=simplefin" "ENRICHMENT_PROVIDER=claude" "PUSH_RELAY_URL=https://push.blankee.io"; do
     key="${pair%%=*}"
     if grep -qE "^${key}=null[[:space:]]*$" "$ENV_FILE"; then
       sed -i "s|^${key}=null[[:space:]]*$|${pair}|" "$ENV_FILE"
@@ -984,6 +984,11 @@ ENRICHMENT_PROVIDER=claude
 # Keys); put the .p8 somewhere www-data can read and point APNS_KEY_PATH at
 # it. APNS_TOPIC is the app's bundle identifier. APNS_USE_SANDBOX is true for
 # builds installed from Xcode or TestFlight and false for the App Store one.
+# Without APNS_ settings of its own, the server asks the relay at
+# PUSH_RELAY_URL to push instead; the relay never sees the notification's
+# text (see relay/README.md in the source). Set it empty to send no pushes.
+PUSH_RELAY_URL=https://push.blankee.io
+
 #APNS_KEY_PATH=/etc/blankee/apns.p8
 #APNS_KEY_ID=
 #APNS_TEAM_ID=
