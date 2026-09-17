@@ -5473,6 +5473,27 @@ def _delete_entry_in_redis(table_name, user_id, category_id, start_date, end_dat
         deleted_ids = []
         deleted_entries_for_bucket_restore = []  # Track entries that need bucket restoration
         deleted_bucket_entries = []  # Track bucket entries that need their bucket record deleted
+        # A page holds the id it was handed when the entry was added, and for
+        # the first few seconds that is a temporary negative one. The flush
+        # worker then writes the row to MySQL and gives it its real id in
+        # Redis - and a delete arriving after that, still carrying the
+        # temporary id, matched nothing and reported success. So a temporary
+        # id that no longer exists falls back to what the request also says:
+        # this category, this date. A real id that matches nothing is left
+        # alone - that entry is already gone.
+        if specific_entry_id is not None:
+            try:
+                wanted = int(specific_entry_id)
+            except (TypeError, ValueError):
+                wanted = None
+            if wanted is not None and wanted < 0 and not any(
+                    entry.get('id') is not None and int(entry.get('id')) == wanted
+                    for entry in entries):
+                log_info(app.logger, 'DELETE_ENTRY',
+                         f"Temp id {wanted} already replaced by the flush; deleting by "
+                         f"category {category_id} on {start_date_str}..{end_date_str} instead")
+                specific_entry_id = None
+
         filtered_entries = []
         for entry in entries:
             should_delete = False
