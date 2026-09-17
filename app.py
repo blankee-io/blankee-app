@@ -26101,7 +26101,9 @@ def bank_simplefin_link_accounts():
                     if acc.get('current_balance') is not None:
                         feed['cards'][int(card['credit_account_id'])] = abs(float(acc['current_balance']))
                 elif (was.get('account_subtype') or '') != 'credit_card' or card.get('mode') == 'new':
-                    display = (was.get('alias') or name)
+                    # The name the person gave the new card, else the bank's.
+                    display = (str(card.get('name') or '').strip()[:60]
+                               or was.get('alias') or name)
                     if create_linked_credit_account(user_id, display, aid, mask=acc.get('mask'),
                                                     starting_balance=acc.get('current_balance')) is not None:
                         cards_made += 1

@@ -20713,10 +20713,12 @@ label.loaf-holiday {
     flex-shrink: 0;
     min-width: 170px;
 }
-.sf-account-controls select.login-input {
+.sf-account-controls select.login-input,
+.sf-account-controls input.login-input {
     width: 100%;
     padding: 8px 10px;
     font-size: 13px;
+    box-sizing: border-box;
 }
 .sf-intro,
 .sf-meta {

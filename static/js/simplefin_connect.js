@@ -70,7 +70,7 @@
         });
         html += '</select>' +
               '<select class="login-input sf-card" aria-label="Blankee card"' + (chosen === 'credit_card' ? '' : ' hidden') + '>' +
-                '<option value="new">Create a card named "' + esc(acc.account_name) + '"</option>';
+                '<option value="new">Create a new card</option>';
         (cards || []).forEach(function (c) {
             var taken = c.linked_account_id && c.linked_account_id !== acc.account_id;
             var sel = (c.linked_account_id === acc.account_id) ? ' selected' : '';
@@ -78,10 +78,24 @@
                     'Link to ' + esc(c.name) + (c.mask ? ' ····' + esc(c.mask) : '') +
                     (taken ? ' (already linked)' : '') + '</option>';
         });
+        // The new card's name in Blankee, the bank's name to start with. Only
+        // while "Create a new card" is chosen: an existing card keeps its own.
+        var newCard = chosen === 'credit_card' && !(cards || []).some(function (c) { return c.linked_account_id === acc.account_id; });
         html += '</select>' +
+              '<input type="text" class="login-input sf-card-name" aria-label="Card name in Blankee" ' +
+                'placeholder="Card name in Blankee" maxlength="60" value="' + esc(acc.account_name) + '"' +
+                (newCard ? '' : ' hidden') + '>' +
             '</div>' +
           '</div>';
         return html;
+    }
+
+    function syncCardName(row) {
+        var sub = row.querySelector('.sf-subtype');
+        var card = row.querySelector('.sf-card');
+        var nameField = row.querySelector('.sf-card-name');
+        if (!nameField) return;
+        nameField.hidden = !(sub.value === 'credit_card' && card.value === 'new');
     }
 
     function render(root, payload) {
@@ -112,8 +126,12 @@
             sel.addEventListener('change', function () {
                 var card = sel.parentElement.querySelector('.sf-card');
                 card.hidden = sel.value !== 'credit_card';
+                syncCardName(sel.closest('.sf-account'));
                 enforceSingletons(list.querySelectorAll('.sf-subtype'));
             });
+        });
+        list.querySelectorAll('.sf-card').forEach(function (sel) {
+            sel.addEventListener('change', function () { syncCardName(sel.closest('.sf-account')); });
         });
         enforceSingletons(list.querySelectorAll('.sf-subtype'));
     }
@@ -145,7 +163,12 @@
                 subtype: subtype
             };
             if (subtype === 'credit_card') {
-                entry.card = cardSel.value === 'new' ? { mode: 'new' } : { mode: 'existing', credit_account_id: Number(cardSel.value) };
+                if (cardSel.value === 'new') {
+                    var nameField = row.querySelector('.sf-card-name');
+                    entry.card = { mode: 'new', name: nameField ? nameField.value.trim() : '' };
+                } else {
+                    entry.card = { mode: 'existing', credit_account_id: Number(cardSel.value) };
+                }
             }
             rows.push(entry);
         });

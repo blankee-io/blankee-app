@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.6 — 2026-09-16
+
+### Added
+- When a bank credit card is linked and a new Blankee card is created for
+  it, the card can be named there and then - the field starts with the
+  bank's name and shows only while "Create a new card" is chosen. Linking
+  to an existing card keeps that card's name.
+
 ## 1.42.5 — 2026-09-16
 
 ### Changed
