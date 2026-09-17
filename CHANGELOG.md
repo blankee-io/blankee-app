@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.43.5 — 2026-09-17
+
+### Fixed
+- Deleting an entry added moments earlier could report success and remove
+  nothing. The page holds the temporary id it was handed on adding; the flush
+  worker then gives the row its real id; a delete arriving after that, still
+  carrying the temporary id, matched nothing. Such a delete now falls back to
+  the category and date the request also names.
+
 ## 1.43.4 — 2026-09-17
 
 ### Changed
