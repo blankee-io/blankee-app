@@ -23162,8 +23162,10 @@ def check_negative_remainders(user_id):
         
         remainder = float(row.get('remainder', 0))
         
-        # Only check future dates (tomorrow onwards)
-        if row_date > today and remainder < 0:
+        # Today counts. It used to start at tomorrow, so a remainder already
+        # below zero today was announced as tomorrow's shortfall - the wrong
+        # date, and a day late for the one place the money has already gone.
+        if row_date >= today and remainder < 0:
             first_negative_date = row_date
             first_negative_remainder = remainder
             break  # Stop at the first negative remainder
