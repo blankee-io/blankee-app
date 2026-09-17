@@ -26,6 +26,11 @@ python-dotenv==1.1.1
 PyYAML==6.0.2
 qrcode==8.2
 httpx==0.28.1
+# HTTP/2, which APNs requires and httpx only speaks with this installed.
+# push_notifications.py opened its client with http2=True from the start and
+# httpx raised ImportError on every install that lacked it - caught, logged
+# once as "Failed to initialize APNs client", and every push silently dropped.
+h2==4.2.0
 requests==2.32.5
 requests-toolbelt==0.9.1
 SQLAlchemy==2.0.44

@@ -807,13 +807,21 @@ def _create_bucket_depleted_notification(user_id, table, category_id, bucket_dat
             """, (user_id, notification_date, message))
             notification_id = cursor.lastrowid
             
-            # Check if user has email notifications enabled
+            # Check if user has email notifications enabled. The opt-out column
+            # has to come along: without it the per-type switch for this kind
+            # reads as "on" whatever the user chose.
             cursor.execute("""
-                SELECT email, email_notifications, first_name
+                SELECT email, email_notifications, first_name, email_notify_disabled
                 FROM users
                 WHERE id = %s
             """, (user_id,))
             user = cursor.fetchone()
+
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM notifications WHERE user_id = %s AND is_read = 0",
+                (user_id,))
+            unread_row = cursor.fetchone() or {}
+            unread_count = unread_row.get('total', 0)
             
             conn.commit()
             cursor.close()
@@ -837,7 +845,15 @@ def _create_bucket_depleted_notification(user_id, table, category_id, bucket_dat
                     log_info(logger, 'BUCKET_NOTIFICATION', 'Notification email sent')
             except Exception as e:
                 log_error(logger, 'BUCKET_NOTIFICATION', f"Failed to send email: {e}")
-                
+
+        # And the push, so the phone hears what the mailbox does. This was the
+        # one notification that emailed and never pushed.
+        try:
+            from push_notifications import push_to_user, deep_link_from
+            push_to_user(user_id, message, badge=unread_count, url=deep_link_from(message))
+        except Exception as e:
+            log_warning(logger, 'BUCKET_NOTIFICATION', f"Failed to push: {e}")
+
     except Exception as e:
         log_error(logger, 'BUCKET_NOTIFICATION', f"Error creating notification: {e}")
 
