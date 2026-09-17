@@ -8,6 +8,17 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.43.1 — 2026-09-17
+
+### Fixed
+- The projected-shortfall notification was raised afresh on every
+  recalculation - each entry saved, each bundle toggled - deleting the one
+  standing and sending its email and push again: three of each in ten
+  seconds, for one fact. It now stands while it names the same date, and is
+  only replaced, and re-sent, when the first shortfall moves.
+- A delivered push is logged (tag `PUSH`), so an empty log means nothing was
+  attempted rather than leaving delivery and silence looking alike.
+
 ## 1.43.0 — 2026-09-17
 
 ### Added
