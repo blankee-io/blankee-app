@@ -98,14 +98,17 @@
                                     {% endif %}
                                 </td>
                                 <td class="credit-account-action-cell">
+                                    {# A linked card's transactions and balance come from the bank; its
+                                       name, rate and dates are still the person's to edit. Deleting it
+                                       means unlinking it first, in Settings. #}
+                                    <button class="edit-credit-account-btn" data-account-id="{{ account.id }}">
+                                        <i class="fa-solid fa-pen-to-square"></i>
+                                    </button>
                                     {% if account.is_linked == 1 %}
-                                        <button class="bank-linked-btn" title="Linked to bank account">
+                                        <button class="bank-linked-btn" title="Linked to your bank - unlink it in Settings before deleting it">
                                             <i class="fa-solid fa-building-columns"></i>
                                         </button>
                                     {% else %}
-                                        <button class="edit-credit-account-btn" data-account-id="{{ account.id }}">
-                                            <i class="fa-solid fa-pen-to-square"></i>
-                                        </button>
                                         <button class="delete-credit-account-btn" data-account-id="{{ account.id }}">
                                             <i class="fa-solid fa-trash"></i>
                                         </button>
@@ -437,13 +440,9 @@
                 e.preventDefault();
                 e.stopPropagation();
                 const $row = $(this).closest('tr');
-                const isBankLinked = $row.data('bank-linked') == 1;
-                
-                // Don't allow editing bank-linked accounts
-                if (isBankLinked) {
-                    return;
-                }
-                
+                // A linked card is edited like any other: its name, rate and
+                // dates are the person's; only its transactions and balance
+                // come from the bank.
                 const accountId = $row.data('account-id');
                 const name = $row.data('name');
                 const interest = $row.data('interest');
@@ -791,7 +790,7 @@
                         },
                         {
                             selector: '.tutorial-temp-row .bank-linked-btn',
-                            text: 'The <b>bank icon</b> means this account is linked to your bank. Linked accounts sync automatically and cannot be manually edited.',
+                            text: 'The <b>bank icon</b> means this account is linked to your bank: its transactions and balance come from the feed. You can still edit its name, interest rate and dates; to delete it, unlink it in Settings first.',
                             padding: 6
                         }
                     ], { delay: 500, onComplete: cleanup });
