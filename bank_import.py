@@ -495,6 +495,91 @@ def _canonical(user_id: int, entry_type: str, category_id: Optional[int]) -> Opt
         return None
 
 
+RECORD_DAYS = 5
+
+
+def _record_pick(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
+                 taken: set) -> Optional[Dict[str, Any]]:
+    """
+    An entry the person already recorded that this transaction is: same
+    table (a card's own categories for a card), not a forecast, not one the
+    bank brought in, the same amount to the cent, dated within RECORD_DAYS
+    of the transaction. The nearest wins. Such a transaction is that entry
+    posting, not a new one - a bill confirmed by hand on the 14th and posted
+    by the bank on the 16th is one bill. `taken` holds entry ids already
+    claimed by another row of this pull.
+    """
+    import redis_manager
+    table, card = plan['table'], plan['credit_account_id']
+    when = _iso(row.get('date'))
+    if not when:
+        return None
+    try:
+        amount = round(float(row.get('amount') or 0), 2)
+    except (TypeError, ValueError):
+        return None
+    allowed = _card_category_ids(user_id, card) if table == 'c_expense_entries' else None
+    day = _parse(when)
+    best = None
+    for e in redis_manager.get_table_cache(table, user_id) or []:
+        if e.get('id') is None or str(e['id']) in taken:
+            continue
+        if _flag(e.get('is_bucket')) == 1 or _flag(e.get('pending')) == 1 or _flag(e.get('is_auto_adjustment')) == 1:
+            continue
+        try:
+            cid = int(e.get('category_id'))
+            if allowed is not None and cid not in allowed:
+                continue
+            if abs(round(float(e.get('amount') or 0), 2) - amount) > 0.005:
+                continue
+            d = _iso(e.get('date'))
+            gap = abs((_parse(d) - day).days) if d else None
+        except (TypeError, ValueError):
+            continue
+        if gap is None or gap > RECORD_DAYS:
+            continue
+        if best is None or gap < best[0]:
+            best = (gap, e)
+    return best[1] if best else None
+
+
+def absorb_record(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
+                  record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    The transaction is `record` posting: the entry moves to the bank's day
+    (the amount already agrees), waits in the modal like any bank row, and
+    the linked row points at it. Nothing is depleted - the record did that
+    when it was made - so there is nothing to hand back if the category is
+    changed later.
+    """
+    from redis_crud import update_entry
+    entry_type, table = plan['entry_type'], plan['table']
+    when = _iso(row['date'])
+    old_day = _iso(record.get('date'))
+    amount = float(record.get('amount') or 0)
+    cid = int(record['category_id'])
+    if not update_entry(table, record['id'], {'date': when, 'pending': 1, 'auto_confirmed': 0}, user_id):
+        return None
+    if old_day and old_day != when and entry_type == 'expense':
+        # A payment towards a card moves with its expense (see app._shift_payment_in_redis).
+        try:
+            import redis_manager
+            from app import _shift_payment_in_redis
+            cat = next((c for c in (redis_manager.get_table_cache('expense_categories', user_id) or [])
+                        if c.get('id') is not None and int(c['id']) == cid), None)
+            if cat and _flag(cat.get('is_credit_account')) and cat.get('credit_account_id'):
+                _shift_payment_in_redis(user_id, int(cat['credit_account_id']), old_day, when, amount, amount)
+        except Exception as e:
+            log_warning(logger, TAG, f'user {user_id}: could not move the card payment with the record: {e}')
+    names = _category_names(user_id, table)
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    return {'transaction_id': row['transaction_id'], 'imported_entry_type': entry_type, 'imported_at': now,
+            'imported_to_entry_id': int(record['id']), 'depleted_bucket': None,
+            'custom_category_suggestion': names.get(cid), 'custom_category_id': _canonical(user_id, entry_type, cid),
+            'custom_category_type': 'incoming' if entry_type == 'income' else 'outgoing',
+            'custom_category_confidence': 'record', 'custom_suggestion_at': now}
+
+
 def _memory_pick(user_id: int, row: Dict[str, Any], plan: Dict[str, Any]) -> Optional[int]:
     """The canonical category the merchant memory holds for this row, or None."""
     from redis_crud import lookup_category_memory
@@ -558,7 +643,7 @@ def _claude_picks(user_id: int, todo: List[Tuple[Dict[str, Any], Dict[str, Any],
     provider = get_enrichment_provider()
     if getattr(provider, 'name', '') != 'claude' or not hasattr(provider, 'suggest_categories_batch'):
         return {}
-    asks = [(row, plan) for row, plan, mem in todo if mem is None and plan['entry_type'] != 'c_payment']
+    asks = [(row, plan) for row, plan, mem, rec in todo if mem is None and rec is None and plan['entry_type'] != 'c_payment']
     if not asks:
         return {}
     try:
@@ -809,7 +894,8 @@ def create_entries(user_id: int) -> Dict[str, Any]:
     # Two passes: what each row is and what the memory says, then one
     # request to Claude for the rows the memory had nothing for, then the
     # writing. Asking per row would be a request per transaction.
-    todo: List[Tuple[Dict[str, Any], Dict[str, Any], Optional[int]]] = []
+    todo: List[Tuple[Dict[str, Any], Dict[str, Any], Optional[int], Optional[Dict[str, Any]]]] = []
+    taken: set = {str(r.get('imported_to_entry_id')) for r in stored if r.get('imported_to_entry_id')}
     for row in stored:
         if _flag(row.get('pending')) or row.get('imported_to_entry_id'):
             continue
@@ -820,17 +906,25 @@ def create_entries(user_id: int) -> Dict[str, Any]:
         if not plan:
             skipped += 1
             continue
-        mem = None if plan['entry_type'] == 'c_payment' else _memory_pick(user_id, row, plan)
-        todo.append((row, plan, mem))
+        # First: is this an entry the person already recorded? Then no guess
+        # is needed and nothing new is written.
+        rec = None if plan['entry_type'] == 'c_payment' else _record_pick(user_id, row, plan, taken)
+        if rec is not None:
+            taken.add(str(rec['id']))
+        mem = None if (rec is not None or plan['entry_type'] == 'c_payment') else _memory_pick(user_id, row, plan)
+        todo.append((row, plan, mem, rec))
     picks = _claude_picks(user_id, todo)
-    for row, plan, mem in todo:
+    for row, plan, mem, rec in todo:
         when = _iso(row.get('date'))
-        if plan['entry_type'] == 'c_payment':
-            g: Dict[str, Any] = {}
+        if rec is not None:
+            update = absorb_record(user_id, dict(row, date=when), plan, rec)
         else:
-            g = guess(user_id, row, plan, candidates(user_id, plan['table'], when, plan['credit_account_id']),
-                      mem=mem, ai=picks.get(str(row.get('transaction_id'))))
-        update = apply_guess(user_id, dict(row, date=when), plan, g)
+            if plan['entry_type'] == 'c_payment':
+                g: Dict[str, Any] = {}
+            else:
+                g = guess(user_id, row, plan, candidates(user_id, plan['table'], when, plan['credit_account_id']),
+                          mem=mem, ai=picks.get(str(row.get('transaction_id'))))
+            update = apply_guess(user_id, dict(row, date=when), plan, g)
         if not update:
             skipped += 1
             continue
@@ -978,7 +1072,7 @@ def recalc(user_id: int, since: Optional[str], cards: bool) -> None:
 
 def _source(confidence: Optional[str]) -> Optional[str]:
     """Where a guess came from, for the row's small tag."""
-    return {'memory': 'memory', 'amount': 'amount',
+    return {'memory': 'memory', 'amount': 'amount', 'record': 'record',
             'high': 'claude', 'medium': 'claude', 'low': 'claude'}.get(confidence or '')
 
 

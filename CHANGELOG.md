@@ -8,6 +8,19 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.42.8 — 2026-09-16
+
+### Fixed
+- A bank transaction that was an entry the person had already recorded -
+  a bill confirmed by hand on the 14th, posted by the bank on the 16th -
+  was imported as a second entry, and consumed the category's next
+  forecast for it: September's bill ate October's. The importer now looks
+  first for such an entry (same account side, same amount to the cent,
+  within five days, not a forecast, not itself from the bank) and takes it
+  over: the entry moves to the bank's day, waits in the modal marked "an
+  entry you recorded", and nothing new is written or depleted. Migration
+  `add_bank_record_match.sql`.
+
 ## 1.42.7 — 2026-09-16
 
 ### Changed

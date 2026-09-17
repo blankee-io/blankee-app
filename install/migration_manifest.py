@@ -54,6 +54,7 @@ MIGRATIONS = [
     'add_user_ai_settings.sql',
     'add_users_ai_categorization.sql',
     'add_bank_import.sql',
+    'add_bank_record_match.sql',
 ]
 
 # install/sql/ holds only what a fresh install applies. The rollback scripts and
