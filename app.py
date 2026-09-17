@@ -26275,7 +26275,7 @@ def bank_update_account():
 @login_required
 def bank_sync():
     """
-    Sync now: one pull, the same one the morning runs. Refused while the
+    Sync now: one pull, the same one the end of the day runs. Refused while the
     connection needs a new token (the page already says so), and refused
     near the day's ceiling so that tonight's automatic pull keeps its
     request - the button is a convenience, the schedule is the feature.

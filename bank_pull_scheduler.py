@@ -1,5 +1,6 @@
 """
-Pulls each user's bank once a day, at PULL_HOUR in their own timezone.
+Pulls each user's bank once a day, at PULL_HOUR:PULL_MINUTE in their own
+timezone.
 
 The shape of bucket_prompt_scheduler, and for the same reasons - read its
 docstring for the two that matter: it must not assume it is the only one
@@ -11,9 +12,12 @@ Its own thread rather than a job on the bucket prompt's walk. A pull is a
 network request that the Bridge can take minutes to answer; the 20:00 walk
 has to stay quick, and a slow bank should not delay anyone's prompt.
 
-Six in the morning, local: the bank's overnight posting is done, and the
-day's forecasts are still ahead - so what comes in is matched to them and
-the balances are compared as of yesterday, when nothing was still open.
+Ten to midnight, local: the day is over, so what posted today comes in
+while it is still today, today's forecasts that nothing matched are moved
+on before the day closes, and the balances are compared as of yesterday,
+when nothing was still open. (It used to run at six in the morning; the
+overnight postings the bank makes after midnight now arrive a day later,
+and the day's own transactions a day earlier.)
 """
 
 import threading
@@ -30,14 +34,16 @@ TAG = 'BANK_PULL'
 _thread = None
 _shutdown = threading.Event()
 
-# The local hour the pull runs at.
-PULL_HOUR = 6
+# The local time the pull runs at: from 23:50 to the end of the day.
+PULL_HOUR = 23
+PULL_MINUTE = 50
 
 # How often to look, and how wide the window is - wider than the interval,
 # so a slow pass cannot step over anyone; the daily claim stops the overlap
-# from pulling twice.
+# from pulling twice. The window ends at midnight: past it the local date
+# has turned and the claim would be for the wrong day.
 CHECK_INTERVAL = 300
-WINDOW_MINUTES = 30
+WINDOW_MINUTES = 10
 
 
 def start():
@@ -93,7 +99,8 @@ def run_once(now_utc=None):
         user_id = row[0] if not isinstance(row, dict) else row['id']
         tz_name = row[1] if not isinstance(row, dict) else row['timezone']
 
-        due, local_date = _is_due(tz_name, now_utc, hour=PULL_HOUR, window=WINDOW_MINUTES)
+        due, local_date = _is_due(tz_name, now_utc, hour=PULL_HOUR, window=WINDOW_MINUTES,
+                                  minute=PULL_MINUTE)
         if not due:
             continue
         # Nothing to pull for: no connection, no accounts chosen, a token the
