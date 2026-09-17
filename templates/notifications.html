@@ -64,7 +64,7 @@
                                     </div>
                                 </div>
                                 <div class="notification-message">
-                                    {{ notification.message }}
+                                    {{ notification.message | notification_html }}
                                 </div>
                             </div>
                         {% endfor %}
