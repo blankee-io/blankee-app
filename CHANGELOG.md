@@ -13,8 +13,10 @@ this file; the admin console links to it, it does not read it.
 ### Added
 - When a bank credit card is linked and a new Blankee card is created for
   it, the card can be named there and then - the field starts with the
-  bank's name and shows only while "Create a new card" is chosen. Linking
-  to an existing card keeps that card's name.
+  bank's name and shows only while "Create a new card" is chosen, with the
+  card's terms beside it - interest rate, statement day, payment due day -
+  so the card is complete from the start (SimpleFIN sends only the name and
+  balance). Linking to an existing card keeps that card's own name and terms.
 - A linked card can be edited on the Credit Accounts page like any other -
   name, interest rate, statement and due days - which it could not be
   before, so a card created from the bank was stuck at 0% with no dates.

@@ -20720,6 +20720,31 @@ label.loaf-holiday {
     font-size: 13px;
     box-sizing: border-box;
 }
+/* The new card's name and terms, stacked like the controls above them.
+   Once they are showing the row wraps: the account's name and balance
+   keep the top line to themselves and the controls take the full width
+   below, rather than squeezing the name into a sliver. */
+.sf-account.account-selection-item:has(.sf-card-new:not([hidden])) {
+    flex-wrap: wrap;
+}
+.sf-account-controls:has(.sf-card-new:not([hidden])) {
+    flex: 1 1 100%;
+    min-width: 0;
+}
+.sf-card-new {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.sf-card-terms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.sf-card-terms .login-input {
+    min-width: 0;
+    flex: 1 1 88px;
+}
 .sf-intro,
 .sf-meta {
     color: var(--secondary-dark);

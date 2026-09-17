@@ -81,10 +81,24 @@
         // The new card's name in Blankee, the bank's name to start with. Only
         // while "Create a new card" is chosen: an existing card keeps its own.
         var newCard = chosen === 'credit_card' && !(cards || []).some(function (c) { return c.linked_account_id === acc.account_id; });
+        // What the Add Credit Account form asks for, so the card is complete
+        // from the start: the bank sends only its name and balance.
+        var days = '<option value="">not set</option>';
+        for (var d = 1; d <= 31; d++) days += '<option value="' + d + '">' + d + '</option>';
+        days += '<option value="LAST_DAY">last day of the month</option>';
         html += '</select>' +
-              '<input type="text" class="login-input sf-card-name" aria-label="Card name in Blankee" ' +
-                'placeholder="Card name in Blankee" maxlength="60" value="' + esc(acc.account_name) + '"' +
-                (newCard ? '' : ' hidden') + '>' +
+              '<div class="sf-card-new"' + (newCard ? '' : ' hidden') + '>' +
+                '<input type="text" class="login-input sf-card-name" aria-label="Card name in Blankee" ' +
+                  'placeholder="Card name in Blankee" maxlength="60" value="' + esc(acc.account_name) + '">' +
+                '<div class="sf-card-terms">' +
+                  '<input type="number" class="login-input sf-card-rate" aria-label="Interest rate (%)" ' +
+                    'placeholder="Rate %" min="0" max="100" step="0.001" inputmode="decimal">' +
+                  '<select class="login-input sf-card-statement" aria-label="Statement closes on">' +
+                    days.replace('not set', 'Statement: not set') + '</select>' +
+                  '<select class="login-input sf-card-due" aria-label="Payment due on">' +
+                    days.replace('not set', 'Due: not set') + '</select>' +
+                '</div>' +
+              '</div>' +
             '</div>' +
           '</div>';
         return html;
@@ -93,9 +107,9 @@
     function syncCardName(row) {
         var sub = row.querySelector('.sf-subtype');
         var card = row.querySelector('.sf-card');
-        var nameField = row.querySelector('.sf-card-name');
-        if (!nameField) return;
-        nameField.hidden = !(sub.value === 'credit_card' && card.value === 'new');
+        var block = row.querySelector('.sf-card-new');
+        if (!block) return;
+        block.hidden = !(sub.value === 'credit_card' && card.value === 'new');
     }
 
     function render(root, payload) {
@@ -165,7 +179,14 @@
             if (subtype === 'credit_card') {
                 if (cardSel.value === 'new') {
                     var nameField = row.querySelector('.sf-card-name');
-                    entry.card = { mode: 'new', name: nameField ? nameField.value.trim() : '' };
+                    var rate = row.querySelector('.sf-card-rate');
+                    entry.card = {
+                        mode: 'new',
+                        name: nameField ? nameField.value.trim() : '',
+                        interest_rate: rate && rate.value !== '' ? rate.value : null,
+                        statement_day: (row.querySelector('.sf-card-statement') || {}).value || null,
+                        payment_due_day: (row.querySelector('.sf-card-due') || {}).value || null
+                    };
                 } else {
                     entry.card = { mode: 'existing', credit_account_id: Number(cardSel.value) };
                 }
