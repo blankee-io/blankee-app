@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.43.4 — 2026-09-17
+
+### Changed
+- The daily bank pull says why it skipped a user who was due - the day already
+  pulled, or nothing to pull for - instead of leaving the log empty. The night
+  the pull moved from 06:00 to 23:50, the morning run had already claimed the
+  date and the evening one skipped without a word, which read as a missed pull.
+
 ## 1.43.3 — 2026-09-17
 
 ### Fixed
