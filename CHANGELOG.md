@@ -15,8 +15,10 @@ this file; the admin console links to it, it does not read it.
   rather than up to yesterday: everything the bank has already reported is
   the bank's, and the days since the last pull - which it has not spoken
   for yet - stay yours to type into until it does. With the pull at ten to
-  midnight that is the current day. Before the first pull nothing is
-  locked. The server refuses writes by the same rule.
+  midnight that is the current day. Should the bank report a transaction
+  dated later than the pull, that day is the bank's too. Before the first
+  pull nothing is locked. The server refuses writes by the same rule, and
+  the "last bank sync" marker on the dashboards sits on the last locked day.
 
 ## 1.42.6 — 2026-09-16
 

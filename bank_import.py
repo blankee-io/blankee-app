@@ -844,8 +844,10 @@ def create_entries(user_id: int) -> Dict[str, Any]:
 
 def last_sync_date(user_id: int) -> Optional[str]:
     """
-    The person's local date of the last successful pull, or None before
-    the first. last_pull_at is written with NOW() in the database's own
+    The last day the bank has spoken for: the person's local date of the
+    last successful pull, or the latest transaction date it reported if
+    that is later; None before the first pull. last_pull_at is written
+    with NOW() in the database's own
     clock, whatever zone that is, so it is read beside NOW() and the gap
     between them is taken off the person's local now - which puts the
     pull on the day they were having, wherever the server is.
@@ -856,9 +858,15 @@ def last_sync_date(user_id: int) -> Optional[str]:
             cursor.execute("SELECT last_pull_at, NOW() AS now FROM simplefin_credentials "
                            " WHERE user_id = %s AND last_pull_ok = 1 AND last_pull_at IS NOT NULL", (user_id,))
             row = cursor.fetchone()
-        if not row or not row.get('last_pull_at'):
-            return None
-        return (_user_now(user_id) - (row['now'] - row['last_pull_at'])).date().isoformat()
+        pulled = None
+        if row and row.get('last_pull_at'):
+            pulled = (_user_now(user_id) - (row['now'] - row['last_pull_at'])).date().isoformat()
+        # Or the latest day the bank has reported a transaction for, when that
+        # is later: a bank whose posting dates run ahead of the person's clock
+        # has spoken for that day too.
+        from bank_redis import get_last_linked_transaction_date
+        latest_txn = get_last_linked_transaction_date(user_id)
+        return max(d for d in (pulled, latest_txn) if d) if (pulled or latest_txn) else None
     except Exception as e:
         log_warning(logger, TAG, f'user {user_id}: could not read the last sync date: {e}')
         return None

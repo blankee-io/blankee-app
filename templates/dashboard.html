@@ -1494,8 +1494,8 @@
                 }
                 
                 // Add bank sync marker if last synced transaction date falls within this week
-                if (bank_last_txn_date && bank_sync_flags) {
-                    const lastTxnDate = new Date(bank_last_txn_date + 'T00:00:00');
+                if (bank_last_sync_date && bank_sync_flags) {
+                    const lastTxnDate = new Date(bank_last_sync_date + 'T00:00:00');
                     let wsStart, wsEnd;
                     if (goofyWeekMode) {
                         wsStart = new Date(friday);
