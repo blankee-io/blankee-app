@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.43.9 — 2026-09-17
+
+### Added
+- `GET /api/widget/trends` names each series' low: the exact day, from today
+  on, with the lowest value, read from the daily tables. The iOS trend widget
+  labels that day and points at the month it falls in; a widget on an older
+  server falls back to the lowest month point.
+
 ## 1.43.8 — 2026-09-17
 
 ### Fixed
