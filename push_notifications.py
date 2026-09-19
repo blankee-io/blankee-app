@@ -252,6 +252,7 @@ def push_to_user(user_id, body, title='Blankee', badge=None, url=None, action=No
 
 
 def _forget_device(user_id, token, why):
+    from db_connections import get_db_pool
     try:
         with get_db_pool().get_cursor(commit=True) as cursor:
             cursor.execute(
