@@ -938,29 +938,18 @@ def create_entries(user_id: int) -> Dict[str, Any]:
 
 def last_sync_date(user_id: int) -> Optional[str]:
     """
-    The last day the bank has spoken for: the person's local date of the
-    last successful pull, or the latest transaction date it reported if
-    that is later; None before the first pull. last_pull_at is written
-    with NOW() in the database's own
-    clock, whatever zone that is, so it is read beside NOW() and the gap
-    between them is taken off the person's local now - which puts the
-    pull on the day they were having, wherever the server is.
+    The last day the bank has spoken for: the date of the latest posted
+    transaction it has reported. None before the first one.
+
+    Not the day of the last pull. A pull at six in the morning that brings
+    back transactions dated yesterday has heard nothing about today, and
+    locking today on the strength of it took the day away from the person
+    while the bank had not spoken for it. The bank's own dates are the only
+    days it has vouched for.
     """
     try:
-        from auto_balance import _user_now
-        with get_db_pool().get_cursor(dictionary=True) as cursor:
-            cursor.execute("SELECT last_pull_at, NOW() AS now FROM simplefin_credentials "
-                           " WHERE user_id = %s AND last_pull_ok = 1 AND last_pull_at IS NOT NULL", (user_id,))
-            row = cursor.fetchone()
-        pulled = None
-        if row and row.get('last_pull_at'):
-            pulled = (_user_now(user_id) - (row['now'] - row['last_pull_at'])).date().isoformat()
-        # Or the latest day the bank has reported a transaction for, when that
-        # is later: a bank whose posting dates run ahead of the person's clock
-        # has spoken for that day too.
         from bank_redis import get_last_linked_transaction_date
-        latest_txn = get_last_linked_transaction_date(user_id)
-        return max(d for d in (pulled, latest_txn) if d) if (pulled or latest_txn) else None
+        return get_last_linked_transaction_date(user_id)
     except Exception as e:
         log_warning(logger, TAG, f'user {user_id}: could not read the last sync date: {e}')
         return None
@@ -1243,6 +1232,13 @@ def confirm(user_id: int, transaction_id: str, entry_id: int, entry_type: str,
     if table not in PENDING_TABLES:
         return False, 'Unknown entry type.', None
     entries = redis_manager.get_table_cache(table, user_id)
+    if entries is None:
+        # Not loaded is not a refusal. The prompt can arrive here straight
+        # after a request that dropped the cache - adding a recurring entry
+        # forces a flush and leaves the tables to be read back - so they are
+        # read back now, as a page load would.
+        _ensure_hydrated(user_id)
+        entries = redis_manager.get_table_cache(table, user_id)
     if entries is None:
         return False, 'Your data is not loaded yet. Try again in a moment.', None
     target = next((e for e in entries if str(e.get('id')) == str(entry_id)), None)

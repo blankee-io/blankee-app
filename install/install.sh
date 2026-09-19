@@ -992,7 +992,7 @@ PUSH_RELAY_URL=https://push.blankee.io
 #APNS_KEY_PATH=/etc/blankee/apns.p8
 #APNS_KEY_ID=
 #APNS_TEAM_ID=
-#APNS_TOPIC=io.blankee.blankee
+#APNS_TOPIC=io.blankee.app
 #APNS_USE_SANDBOX=false
 EOF
   info "created $ENV_FILE with generated secrets"

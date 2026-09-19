@@ -816,6 +816,13 @@
             if ($('#no-end-date-checkbox').is(':checked')) {
                 formData.end_date = getFiveYearsFromNowEndDateString();
             }
+            if (typeof document.getElementById('add-recurring-income-form').__recurringCapture === 'function') {
+                // A bank row in "Did these come through?" asked for this. Held,
+                // not sent: the row's Confirm is what creates it. See
+                // createBankRowRecurring in script.js.
+                document.getElementById('add-recurring-income-form').__recurringCapture(formData);
+                return;
+            }
             document.getElementById('add-income-modal').style.display = 'none';
             document.getElementById('loading-screen').style.display = 'flex';
             $.ajax({
@@ -1079,6 +1086,13 @@
         }
         if ($form.find('#expense-no-end-date-checkbox').is(':checked')) {
             formData.end_date = getFiveYearsFromNowEndDateString();
+        }
+        if (typeof document.getElementById('add-recurring-expense-form').__recurringCapture === 'function') {
+            // A bank row in "Did these come through?" asked for this. Held,
+            // not sent: the row's Confirm is what creates it. See
+            // createBankRowRecurring in script.js.
+            document.getElementById('add-recurring-expense-form').__recurringCapture(formData);
+            return;
         }
         document.getElementById('add-expense-modal').style.display = 'none';
         document.getElementById('loading-screen').style.display = 'flex';
@@ -1424,6 +1438,13 @@
         }
         if ($form.find('#ca-no-end-date-checkbox').is(':checked')) {
             formData.end_date = getFiveYearsFromNowEndDateString();
+        }
+        if (typeof document.getElementById('add-recurring-ca-form').__recurringCapture === 'function') {
+            // A bank row in "Did these come through?" asked for this. Held,
+            // not sent: the row's Confirm is what creates it. See
+            // createBankRowRecurring in script.js.
+            document.getElementById('add-recurring-ca-form').__recurringCapture(formData);
+            return;
         }
         document.getElementById('add-ca-modal').style.display = 'none';
         document.getElementById('loading-screen').style.display = 'flex';
