@@ -235,6 +235,7 @@ def normalize(fetched: List[Dict[str, Any]], accounts: Dict[str, Dict[str, Any]]
     on. The bank's posted epoch decides when it is known; the date alone when
     it is not.
     """
+    from bank_redis import linked_account_kind
     out = []
     for t in fetched:
         aid = str(t.get('account_ref') or '')
@@ -242,6 +243,17 @@ def normalize(fetched: List[Dict[str, Any]], accounts: Dict[str, Dict[str, Any]]
             continue
         txn_date = _iso(t.get('date'))
         if not txn_date or not t.get('provider_txn_id'):
+            continue
+        amount = t.get('amount')
+        if amount is None:
+            continue
+        transaction_type = t.get('transaction_type') or ('expense' if float(amount) < 0 else 'income')
+        # Money arriving on a card - a payment, a refund - is not imported.
+        # The payment reaches the card from the other side: the checking
+        # account's feed brings it in as an expense in the card's payment
+        # category, and that mirrors onto the card as it does when typed.
+        # Importing it here too would count the same payment twice.
+        if linked_account_kind(accounts[aid]) == 'credit' and transaction_type != 'expense':
             continue
         floor = floors.get(aid)
         if floor:
@@ -252,9 +264,6 @@ def normalize(fetched: List[Dict[str, Any]], accounts: Dict[str, Dict[str, Any]]
                     continue
             elif txn_date < link_day:
                 continue
-        amount = t.get('amount')
-        if amount is None:
-            continue
         description = (t.get('description') or '').strip()
         out.append({
             'transaction_id': str(t['provider_txn_id']),
@@ -265,7 +274,7 @@ def normalize(fetched: List[Dict[str, Any]], accounts: Dict[str, Dict[str, Any]]
             'merchant_name': (t.get('merchant_name') or '').strip() or description,
             'category': t.get('category') or '',
             'pending': 1 if t.get('pending') else 0,
-            'transaction_type': t.get('transaction_type') or ('expense' if float(amount) < 0 else 'income'),
+            'transaction_type': transaction_type,
             'provider_created_date': _iso(t.get('provider_created_at')),
         })
     return out
@@ -854,8 +863,9 @@ def _add_mirror_payment(user_id: int, entry_type: str, category_id: int, when: s
     """
     An expense in a card's mirror category ("Payment to Visa") is a payment
     towards that card, and the app records the c_payment when one is typed.
-    The same here - unless the card is bank-linked, in which case its own
-    feed brings the payment in and a second one would double it.
+    The same here, linked card or not: the card's own feed does not bring
+    payments in (see normalize), so this is the only place the payment
+    reaches the card.
     """
     if entry_type != 'expense':
         return
@@ -865,9 +875,6 @@ def _add_mirror_payment(user_id: int, entry_type: str, category_id: int, when: s
     if not cat or not _flag(cat.get('is_credit_account')) or not cat.get('credit_account_id'):
         return
     account_id = int(cat['credit_account_id'])
-    from bank_redis import get_linked_credit_account_ids
-    if account_id in {int(i) for i in (get_linked_credit_account_ids(user_id) or [])}:
-        return
     try:
         from app import _update_payment_entry_in_redis, _get_entries_from_redis
         existing = next((p for p in (_get_entries_from_redis('c_payment_entries', user_id) or [])
@@ -1606,7 +1613,12 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
         if made['imported'] or moved:
             since = min(d for d in (made['earliest'], moved_from) if d) if (made['earliest'] or moved_from) else None
             try:
-                recalc(user_id, since, made['cards'])
+                # Cards too when a forecast moved: a card's bucket deferred
+                # off yesterday changes yesterday's card balance, and the
+                # reconcile below reads that balance. Left stale, it was
+                # measured against a figure that still held the bucket, and
+                # the difference was written as a correction.
+                recalc(user_id, since, made['cards'] or bool(moved))
             except Exception as e:
                 log_exception(logger, TAG, f'user {user_id}: recalculation after the pull failed: {e}')
         if made['imported']:
