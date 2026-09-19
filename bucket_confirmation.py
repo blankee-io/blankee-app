@@ -649,7 +649,7 @@ def _apply_to_record(table, user_id, category_id, bucket_date, mutate,
     return touched
 
 
-def resolve(user_id, table, entry_id, action, amount=None):
+def resolve(user_id, table, entry_id, action, amount=None, defer_to=None):
     """
     Apply one of the four answers to one bucket.
 
@@ -766,7 +766,10 @@ def resolve(user_id, table, entry_id, action, amount=None):
         # be two days overdue and would ask again immediately - "not yet" has to
         # mean "ask me tomorrow", which is only true relative to today.
         tomorrow = (_user_today(user_id) + timedelta(days=1)).isoformat()
-
+        # A bank-fed forecast goes somewhere else: the first day the bank has
+        # not yet reported, which the importer works out and passes in.
+        if defer_to:
+            tomorrow = str(defer_to)[:10]
         # Two buckets for one category CAN now share a day, and this is the
         # change that allows it. They used to collide: the record moved with
         # the entry, records are keyed on (category_id, bucket_date), so a

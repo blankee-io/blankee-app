@@ -838,7 +838,7 @@ def apply_guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
     from bucket_utils import find_next_bucket_for_category, process_manual_entry_with_bucket
     snapshot = None
     try:
-        bucket = find_next_bucket_for_category(table, cid, user_id)
+        bucket = find_next_bucket_for_category(table, cid, user_id, as_of=_parse(when))
         if bucket:
             snapshot = _snapshot(table, bucket)
     except Exception as e:
@@ -852,7 +852,7 @@ def apply_guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
     if not eid:
         return None
     try:
-        process_manual_entry_with_bucket(table, cid, when, Decimal(str(amount)), user_id)
+        process_manual_entry_with_bucket(table, cid, when, Decimal(str(amount)), user_id, as_of=_parse(when))
     except Exception as e:
         log_exception(logger, TAG, f'user {user_id}: depleting the forecast for {table}/{cid} failed: {e}')
     _add_mirror_payment(user_id, entry_type, cid, when, amount)
@@ -1017,18 +1017,58 @@ def fed_tables(user_id: int) -> Dict[str, Optional[set]]:
     return out
 
 
-def defer_unmatched(user_id: int) -> Tuple[int, Optional[str]]:
+def _defer_day(user_id: int) -> str:
     """
-    Move every forecast on a bank-fed table dated today or earlier that
-    nothing matched to tomorrow - exactly what "No, ask me tomorrow" does
-    in the evening prompt, and through the same code. Returns (moved,
-    earliest date any of them sat on), the latter so the totals can be
-    recomputed from there.
+    Where a bank-fed forecast goes when it is put off: the day after the
+    last day the bank has reported, which is the first day that is still
+    the person's. Tomorrow before the first posted transaction.
+    """
+    synced = last_sync_date(user_id)
+    if synced:
+        return (_parse(synced) + timedelta(days=1)).isoformat()
+    return (_user_today(user_id) + timedelta(days=1)).isoformat()
+
+
+def _is_allowance(user_id: int, table: str, entry: Dict[str, Any]) -> bool:
+    """
+    Whether a forecast is an allowance (or, for income, variable): spent
+    down over its period rather than settled once. Only a recurring one - a
+    one-off planned purchase has no period to be spent down in, and is a
+    single obligation like a bill.
+    """
+    if entry.get('recurring_id') is None:
+        return False
+    from bucket_utils import _get_wage_bill_for_category
+    try:
+        return int(_get_wage_bill_for_category(table, int(entry.get('category_id')), user_id) or 0) == 0
+    except Exception:
+        return False
+
+
+def defer_unmatched(user_id: int) -> Tuple[int, int, Optional[str]]:
+    """
+    Settle every forecast on a bank-fed table dated on or before the last
+    day the bank has reported. The bank has spoken for those days, so
+    whatever it did not bring in did not happen then:
+
+    - A bill, a wage, a one-off purchase: not yet. Moved to the day after
+      the last transaction (_defer_day) - the first day still open - where
+      it waits for the bank, as "No, ask me tomorrow" does and through the
+      same code.
+    - An allowance: its period is over. Everything spent in it has come in
+      and been drawn from it, and what is left was not spent, so it is
+      released. Deferring it kept planning to spend money the person had
+      kept, and moved a week's groceries into the next week.
+
+    Days after the last transaction are left alone: the bank has not
+    spoken for them yet. Returns (moved, released, earliest date any of
+    them sat on), the last so the totals can be recomputed from there.
     """
     import redis_manager
     from bucket_confirmation import resolve
-    today = _user_today(user_id).isoformat()
-    moved = 0
+    cutoff = last_sync_date(user_id) or _user_today(user_id).isoformat()
+    defer_to = _defer_day(user_id)
+    moved = released = 0
     earliest = None
     for table, allowed in fed_tables(user_id).items():
         entries = redis_manager.get_table_cache(table, user_id) or []
@@ -1044,14 +1084,20 @@ def defer_unmatched(user_id: int) -> Tuple[int, Optional[str]]:
             if amount <= 0 or (allowed is not None and cid not in allowed):
                 continue
             d = _iso(e.get('date'))
-            if d and d <= today:
-                due.append((e.get('id'), d))
-        for eid, d in due:
-            ok, msg, change = resolve(user_id, table, eid, 'defer')
+            if d and d <= cutoff:
+                due.append((e.get('id'), d, _is_allowance(user_id, table, e)))
+        for eid, d, allowance in due:
+            if allowance:
+                ok, msg, change = resolve(user_id, table, eid, 'skip')
+                if ok and change:
+                    released += 1
+            else:
+                ok, msg, change = resolve(user_id, table, eid, 'defer', defer_to=defer_to)
+                if ok and change:
+                    moved += 1
             if ok and change:
-                moved += 1
                 earliest = d if earliest is None or d < earliest else earliest
-    return moved, earliest
+    return moved, released, earliest
 
 
 def recalc(user_id: int, since: Optional[str], cards: bool) -> None:
@@ -1197,8 +1243,17 @@ def _restore_forecast(user_id: int, table: str, entry_type: str, snap: Dict[str,
                 'amount': back, 'is_bucket': 1, 'processed': 0, 'removed': False,
                 'original_date': _iso(live.get('original_date')), 'added': False}
 
-    tomorrow = (_user_today(user_id) + timedelta(days=1)).isoformat()
-    back_on = max(tomorrow, _iso(snap.get('date')) or tomorrow)
+    # An allowance whose period the bank has already reported in full was
+    # released by the pull; putting money back into it would re-create a
+    # plan for a week that is over.
+    synced = last_sync_date(user_id)
+    if (snap.get('recurring_id') is not None and origin and synced and _iso(origin) <= synced
+            and _is_allowance(user_id, table, snap)):
+        return None
+    # Its own date when still ahead; otherwise the first day the bank has
+    # not reported, where a deferred forecast would sit.
+    first_open = _defer_day(user_id)
+    back_on = max(first_open, _iso(snap.get('date')) or first_open)
     data = {'category_id': int(cid), 'date': back_on, 'original_date': origin, 'amount': forecast_amount,
             'recurring_id': snap.get('recurring_id'), 'is_bucket': 1,
             'original_amount': snap.get('original_amount') or forecast_amount,
@@ -1282,13 +1337,14 @@ def confirm(user_id: int, transaction_id: str, entry_id: int, entry_type: str,
             restored = _restore_forecast(user_id, table, entry_type, snap, amount, str(entry_id))
         new_snap = None
         try:
-            bucket = find_next_bucket_for_category(table, new_cid, user_id)
+            bucket = find_next_bucket_for_category(table, new_cid, user_id, as_of=_parse(when))
             if bucket:
                 new_snap = _snapshot(table, bucket)
         except Exception as e:
             log_warning(logger, TAG, f'user {user_id}: could not look ahead at the forecast for {table}/{new_cid}: {e}')
         try:
-            process_manual_entry_with_bucket(table, new_cid, when, Decimal(str(amount)), user_id)
+            process_manual_entry_with_bucket(table, new_cid, when, Decimal(str(amount)), user_id,
+                                             as_of=_parse(when))
         except Exception as e:
             log_exception(logger, TAG, f'user {user_id}: depleting the forecast for {table}/{new_cid} failed: {e}')
         _add_mirror_payment(user_id, entry_type, new_cid, when, amount)
@@ -1552,7 +1608,7 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
     result: Dict[str, Any] = {
         'ok': False, 'error': None, 'message': '', 'source': source,
         'fetched': 0, 'new': 0, 'updated': 0, 'matched': 0, 'removed': 0, 'pending': 0,
-        'imported': 0, 'skipped': 0, 'deferred': 0, 'reconciled': None,
+        'imported': 0, 'skipped': 0, 'deferred': 0, 'released': 0, 'reconciled': None,
         'window_start': None, 'balances': [], 'errors': [],
     }
     provider = get_bank_provider()
@@ -1608,8 +1664,9 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
         # below can never outlive the transaction row it points at.
         redis_manager.flush_dirty_tables_for_user(user_id)
         made = create_entries(user_id)
-        moved, moved_from = defer_unmatched(user_id)
-        result.update(imported=made['imported'], skipped=made['skipped'], deferred=moved)
+        moved, released, moved_from = defer_unmatched(user_id)
+        result.update(imported=made['imported'], skipped=made['skipped'], deferred=moved, released=released)
+        moved = moved + released
         if made['imported'] or moved:
             since = min(d for d in (made['earliest'], moved_from) if d) if (made['earliest'] or moved_from) else None
             try:
@@ -1652,7 +1709,8 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
                               f'{result["fetched"]} fetched, {counts["new"]} new, {counts["updated"]} updated, '
                               f'{counts["matched"]} matched, {counts["removed"]} removed, '
                               f'{result["pending"]} pending; {made["imported"]} into the budget, '
-                              f'{made["skipped"]} waiting, {moved} forecast(s) moved on')
+                              f'{made["skipped"]} waiting, {result["deferred"]} forecast(s) moved on, '
+                              f'{result["released"]} allowance(s) released')
         return result
     except Exception as e:
         log_exception(logger, TAG, f'user {user_id}: pull failed: {e}')

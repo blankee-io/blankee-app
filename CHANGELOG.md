@@ -8,6 +8,26 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.44.3 — 2026-09-19
+
+### Fixed
+- A bank transaction drew down the forecast for the day of the pull rather than
+  its own day. The pull files yesterday's purchases this morning, so a Friday
+  grocery shop came out of next Friday's allowance. The pull and the confirm
+  modal now choose the forecast from the transaction's date.
+
+### Changed
+- On a bank-linked account, an allowance is no longer deferred. Once the bank
+  has reported every day of its week, what is left of it was not spent, and
+  it is released - deferring it kept planning to spend money that was kept,
+  and moved one week's allowance into the next. The same holds for variable
+  income.
+- An unmatched bill or wage on a bank-linked account is deferred to the day
+  after the last transaction the bank reported, the first day still open,
+  rather than to tomorrow. Only forecasts on days the bank has reported are
+  settled this way; later days are left alone until it has. A forecast put
+  back because a bank row was re-filed goes to the same day.
+
 ## 1.44.2 — 2026-09-18
 
 ### Changed
