@@ -8,6 +8,23 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.44.2 — 2026-09-18
+
+### Changed
+- Money arriving on a linked card - a payment, a refund - is no longer
+  imported from the card's feed. The payment reaches the card from the other
+  side: the checking feed brings it in as an expense in the card's payment
+  category, and that mirrors onto the card the way a typed payment does,
+  linked card or not. Both feeds importing it counted the payment twice.
+
+### Fixed
+- A card's balance could be "corrected" by the amount of a forecast the same
+  pull had just moved off yesterday: the reconcile read yesterday's balance
+  before it was recalculated, so the moved bucket was still in it, and the
+  difference was written as a negative entry in the card's Uncategorized.
+  Card balances are recalculated after deferrals now, before the reconcile.
+- Dropping a device token Apple reported dead failed with a missing import.
+
 ## 1.44.1 — 2026-09-18
 
 ### Changed
