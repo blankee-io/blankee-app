@@ -273,7 +273,7 @@ def get_interval_bounds(entry_date, cadence_unit, cadence_interval, start_date, 
     return (start_date, entry_date)
 
 
-def find_next_bucket_for_category(table, category_id, user_id, wage_bill=None):
+def find_next_bucket_for_category(table, category_id, user_id, wage_bill=None, as_of=None):
     """
     Find the bucket entry a manual entry should deplete.
 
@@ -326,16 +326,23 @@ def find_next_bucket_for_category(table, category_id, user_id, wage_bill=None):
             the depletion that follows it, and restoring a deleted entry cannot
             put money back into a bucket other than the one it came out of.
 
+        as_of: The day to look from, instead of today. The bank importer
+            passes the transaction's own date: it files yesterday's
+            purchases this morning, and looking from today put a Friday
+            purchase into NEXT Friday's allowance - today's forward look
+            had already stepped past the bucket it belonged to. Typed
+            entries leave it unset; for them today is the entry's day.
+
     Returns:
         Dictionary with bucket entry data, or None if no reducible bucket exists
     """
     from flask import current_app
-
     if wage_bill is None:
         wage_bill = _get_wage_bill_for_category(table, category_id, user_id)
     wage_bill = int(wage_bill or 0)
-
-    today = date.today()
+    if isinstance(as_of, str):
+        as_of = date.fromisoformat(as_of[:10])
+    today = as_of or date.today()
     forward_window = timedelta(days=45)
 
     log_info(logger, 'FIND_NEXT_BUCKET',
@@ -1363,7 +1370,8 @@ def _find_bucket_date_for_entry(entry_date, cadence_info):
     return None
 
 
-def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amount, user_id, cadence_info=None):
+def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amount, user_id, cadence_info=None,
+                                     as_of=None):
     """
     Process a manual entry by checking for and depleting bucket entries.
     
@@ -1415,8 +1423,10 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
     # Bills reach back for the occurrence they are paying late; allowances take
     # the next bucket forward. wage_bill is passed rather than looked up again:
     # cadence_info is the caller's own answer for this entry.
+    # as_of: see find_next_bucket_for_category. The importer passes the
+    # transaction's date so the bucket is chosen from that day, not this one.
     bucket = find_next_bucket_for_category(table, category_id, user_id,
-                                           wage_bill=wage_bill)
+                                           wage_bill=wage_bill, as_of=as_of)
     
     log_info(logger, 'BUCKET_DEBUG', f"Found next bucket: {bucket}")
     
