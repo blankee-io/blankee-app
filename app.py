@@ -5307,7 +5307,10 @@ def _update_entry_in_redis(table_name, user_id, category_id, entry_date, amount,
             # after the swap matched nothing and reported success. Redis is
             # still what is read and what is edited; MySQL only lends the id.
             # The temporary id remains the fallback for a failed insert.
-            if entry_id is None:
+            # A category that is itself still on a temporary id - made in this
+            # same request, not yet flushed - cannot be referenced from MySQL
+            # yet; the flush gives both their real ids together, as before.
+            if entry_id is None and int(category_id) > 0:
                 try:
                     columns = {
                         'category_id': int(category_id),
@@ -20558,7 +20561,8 @@ def add_recurring_income():
             log_error(app.logger, 'INCOME',
                       f"[add_recurring_income] flush before responding failed: {e}")
 
-        return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring income added successfully!'})
+        return jsonify({'status': 'success', 'recurring_id': recurring_id, 'category_id': category_id,
+                        'message': 'Recurring income added successfully!'})
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'An error occurred while adding the recurring income: {str(e)}'}), 500
@@ -21410,7 +21414,8 @@ def add_recurring_expense():
             log_error(app.logger, 'EXPENSE',
                       f"[add_recurring_expense] flush before responding failed: {e}")
 
-        return jsonify({'status': 'success', 'recurring_id': recurring_id, 'message': 'Recurring expense added successfully!'})
+        return jsonify({'status': 'success', 'recurring_id': recurring_id, 'category_id': category_id,
+                        'message': 'Recurring expense added successfully!'})
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'An error occurred while adding the recurring expense: {str(e)}'}), 500

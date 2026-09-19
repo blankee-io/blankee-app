@@ -34,14 +34,16 @@ TAG = 'BANK_PULL'
 _thread = None
 _shutdown = threading.Event()
 
-# The local time the pull runs at: from 23:50 to the end of the day.
-PULL_HOUR = 23
-PULL_MINUTE = 50
+# The local time the pull runs at: 06:00, so the night's postings are in
+# the budget before the day starts. It was 23:50 for a while, to catch the
+# day's own postings; in practice the bank posts overnight, and a morning pull
+# sees the same rows a day earlier from the person's point of view.
+PULL_HOUR = 6
+PULL_MINUTE = 0
 
 # How often to look, and how wide the window is - wider than the interval,
 # so a slow pass cannot step over anyone; the daily claim stops the overlap
-# from pulling twice. The window ends at midnight: past it the local date
-# has turned and the claim would be for the wrong day.
+# from pulling twice.
 CHECK_INTERVAL = 300
 WINDOW_MINUTES = 10
 

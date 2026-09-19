@@ -2006,6 +2006,12 @@ var _bankDropdownInput = null;
 // entry filed under a category it has never heard of - the page reloads once
 // the dialog closes instead.
 var bucketPromptCategoryCreated = false;
+// A bank row that asked for a recurring category: the add-recurring form's
+// answer is held here, keyed by transaction id, until the row is confirmed -
+// Confirm is what creates it. And which row the prompt should show as set to
+// that pending name when it opens again after the form.
+var _bankRowPending = {};
+var _bucketPromptPreselect = null;
 
 function _bankDropdownHide() {
     if (_bankDropdown) {
@@ -2135,7 +2141,31 @@ function showBankCategoryDropdown(row, searchText) {
         var create = document.createElement("div");
         create.className = "category-dropdown-item create-new-category";
         create.innerHTML = '<i class="fa-solid fa-plus"></i> Create "' + escapeHtml(typed) + '"';
-        create.addEventListener("click", function () { createBankRowCategory(row, typed); });
+        create.addEventListener("click", function (ev) {
+            // Not yet: a new category is one of two things, and the question
+            // is asked here in the list rather than in a dialog. The prompt
+            // is itself the shared dialog, and a second one would take its
+            // place - so the one item becomes two.
+            ev.stopPropagation();
+            var manual = document.createElement("div");
+            manual.className = "category-dropdown-item create-new-category";
+            manual.innerHTML = '<i class="fa-solid fa-plus"></i> Create "' + escapeHtml(typed) + '" as a manual category';
+            manual.addEventListener("click", function () {
+                // Not yet: the category is made when the row is confirmed
+                // (see _bankRowCategoryOrCreate), so a name typed and then
+                // abandoned creates nothing.
+                input.value = typed;
+                hidden.value = "";
+                input.dataset.createNew = "true";
+                _bankDropdownHide();
+            });
+            var recurring = document.createElement("div");
+            recurring.className = "category-dropdown-item create-new-category";
+            recurring.innerHTML = '<i class="fa-solid fa-rotate"></i> Create "' + escapeHtml(typed) + '" as a recurring category…';
+            recurring.addEventListener("click", function () { createBankRowRecurring(row, typed); });
+            list.replaceChild(manual, create);
+            list.insertBefore(recurring, manual.nextSibling);
+        });
         list.appendChild(create);
     }
     if ((q || guess) && list.children.length && rest.length) {
@@ -2150,6 +2180,228 @@ function showBankCategoryDropdown(row, searchText) {
     _bankDropdown = list;
     _bankDropdownInput = input;
     _bankDropdownPlace(input);
+}
+
+function createBankRowRecurring(row, name) {
+    // A recurring category from a bank row: the add-recurring form the
+    // dashboards carry, with the name and the transaction's amount filled
+    // in and the rest for the person. Its answer is not sent - it is held
+    // on the row (see _bankRowPending), and the row's Confirm creates the
+    // recurring entry and files the transaction in it, in that order.
+    var info = _bankRowInfo(row);
+    var type = info.entryType === "income" ? "income"
+             : info.entryType === "c_expense" ? "ca" : "expense";
+    var txn = row.getAttribute("data-transaction-id");
+    _bankDropdownHide();
+    if (!recurringModalAvailable(type)) {
+        // This page has no recurring form - the week and three-month
+        // dashboards carry it - so the week view opens it on arrival (see
+        // the DOMContentLoaded handler below) and the prompt continues there.
+        var q = new URLSearchParams({ recurring: type, category: name });
+        if (txn) { q.set("reopen", txn); }
+        if (type === "ca" && info.creditAccountId != null) { q.set("account", String(info.creditAccountId)); }
+        if (info.amount) { q.set("amount", String(info.amount)); }
+        window.location.href = "/dashboard?" + q.toString();
+        return;
+    }
+    // The prompt is the shared dialog, so it steps aside first - into its
+    // corner bubble, the way any close does - and the form takes the screen.
+    var body = document.getElementById("generic-confirm-body");
+    if (body && typeof body.__bucketClose === "function") { body.__bucketClose(false); }
+    openRecurringModalFor(type, name, info.creditAccountId, txn, null, info.amount);
+}
+
+function recurringModalAvailable(type) {
+    var id = type === "income" ? "add-income-modal" : type === "ca" ? "add-ca-modal" : "add-expense-modal";
+    return !!document.getElementById(id);
+}
+
+function openRecurringModalFor(type, name, accountId, reopenTxn, categoryId, amount) {
+    // The add-recurring form (templates/recurring_modal.html), opened the
+    // way the dashboards' own button opens it - reset, dated today - with
+    // the category name filled in. The name is enough: the route creates
+    // the category when no id comes with it.
+    var ids = type === "income"
+        ? { modal: "add-income-modal", form: "add-recurring-income-form", input: "category_name",
+            hidden: "income-category-id-hidden", start: "start_date", noEnd: "no-end-date-checkbox",
+            end: "end_date", state: "updateIncomeEndDateState" }
+        : type === "ca"
+        ? { modal: "add-ca-modal", form: "add-recurring-ca-form", input: "ca-category-input",
+            hidden: "ca-category-id-hidden", start: "ca-start-date", noEnd: "ca-no-end-date-checkbox",
+            end: "ca-end-date", state: "updateCaEndDateState" }
+        : { modal: "add-expense-modal", form: "add-recurring-expense-form", input: "expense-category_name",
+            hidden: "expense-category-id-hidden", start: "expense-start_date", noEnd: "expense-no-end-date-checkbox",
+            end: "expense-end_date", state: "updateExpenseEndDateState" };
+    var modal = document.getElementById(ids.modal);
+    var form = document.getElementById(ids.form);
+    if (!modal || !form) { return false; }
+    var el = function (id) { return document.getElementById(id); };
+    form.reset();
+    var now = new Date();
+    var today = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" +
+        String(now.getDate()).padStart(2, "0");
+    if (el(ids.start)) { el(ids.start).value = today; }
+    if (el(ids.noEnd)) { el(ids.noEnd).checked = false; }
+    if (el(ids.end)) { el(ids.end).value = ""; }
+    if (el(ids.hidden)) {
+        // A card's form insists on a category id, and its picker offers no
+        // Create: a placeholder gets the form past that check, and the
+        // row's Confirm makes the category and puts the real id in.
+        el(ids.hidden).value = categoryId != null ? String(categoryId)
+                             : (type === "ca" && reopenTxn ? "__pending__" : "");
+    }
+    if (el(ids.input)) {
+        el(ids.input).value = name || "";
+        // What the form's own Create "x" sets: without it, the field clears
+        // itself on blur as an abandoned search.
+        if (categoryId == null) { el(ids.input).dataset.createNew = "true"; }
+    }
+    if (type === "ca" && accountId != null && el("ca-account-id")) { el("ca-account-id").value = String(accountId); }
+    if (typeof window[ids.state] === "function") { window[ids.state](); }
+    if (reopenTxn) {
+        // The form hands its answer here instead of sending it (the hook is
+        // read in recurring_modal.html just before its request). It is held
+        // on the row, and the prompt opens again with the row showing the
+        // name; the row's Confirm is what creates it. A form closed without
+        // submitting is reset by whatever opens it next, which drops the hook.
+        form.__recurringCapture = function (formData) {
+            form.__recurringCapture = null;
+            modal.style.display = "none";
+            form.reset();
+            _bankRowPending[String(reopenTxn)] = { type: type, name: name, formData: formData };
+            _bucketPromptPreselect = { transaction_id: reopenTxn, name: name, pending: true };
+            if (typeof openBucketPrompt === "function") { openBucketPrompt(); }
+        };
+        form.addEventListener("reset", function () { form.__recurringCapture = null; }, { once: true });
+    } else {
+        form.__recurringCapture = null;
+    }
+    modal.style.display = "flex";
+    // The amount, not the category: focusing the category field opens its
+    // picker over a name that is already settled.
+    var amountEl = el(type === "income" ? "amount" : type === "ca" ? "ca-amount" : "expense-amount");
+    if (amountEl) {
+        // The amount is the transaction's, and stays so: the recurring
+        // entry is being made for a figure the bank has already reported,
+        // not for a guess at one. Locked, and unlocked again the next time
+        // the form is reset for its ordinary use.
+        var fixed = amount != null && !isNaN(Number(amount)) && Number(amount) > 0;
+        if (fixed) {
+            amountEl.value = Number(amount).toFixed(2);
+            amountEl.readOnly = true;
+            amountEl.setAttribute("tabindex", "-1");
+            form.addEventListener("reset", function () {
+                amountEl.readOnly = false;
+                amountEl.removeAttribute("tabindex");
+            }, { once: true });
+        }
+        var focusEl = fixed ? el(type === "income" ? "cadence-interval" : type === "ca" ? "ca-cadence-interval" : "expense-cadence-interval") : amountEl;
+        if (focusEl) { try { focusEl.focus(); } catch (e) {} }
+    }
+    return true;
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+    // Arriving from a bank row on a page that had no recurring form.
+    var params = new URLSearchParams(window.location.search);
+    if (params.get("recurring") && params.get("category")) {
+        if (openRecurringModalFor(params.get("recurring"), params.get("category"),
+                                  params.get("account"), params.get("reopen"), params.get("category_id"),
+                                  params.get("amount"))) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    }
+});
+
+function _postPendingRecurring(row, pending) {
+    // The held recurring form, sent now. Resolves to the id of the category
+    // it made - the one the row is then filed in - or null.
+    var url = pending.type === "income" ? "/add-recurring-income"
+            : pending.type === "ca" ? "/add-recurring-ca-expense" : "/add-recurring-expense";
+    var data = Object.assign({}, pending.formData);
+    var first = Promise.resolve(null);
+    if (pending.type === "ca") {
+        // The card's form only takes a category the card has, so the
+        // category is made first - now, at Confirm - and the form's
+        // placeholder replaced with it.
+        first = createBankRowCategory(row, pending.name).then(function (ok) {
+            if (!ok) { return null; }
+            var hidden = row.querySelector(".bucket-prompt-category-id");
+            return hidden && hidden.value ? hidden.value : null;
+        });
+    }
+    return first.then(function (cardCategoryId) {
+        if (pending.type === "ca") {
+            if (cardCategoryId == null) { return null; }
+            data.category_id = cardCategoryId;
+        }
+        return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(data) })
+          .then(function (r) { return r.json(); })
+          .then(function (res) {
+            if (!res || res.status !== "success") {
+                showToast((res && res.message) || "Could not create the recurring entry.", "error");
+                return null;
+            }
+            if (pending.type === "ca") { return cardCategoryId; }
+            // The route answers with the id it held at the time, which for a
+            // category made in that same request is a temporary one. The
+            // prompt's own listing is read again instead: by now the flush
+            // has given the category its real id, and the row's choices
+            // carry it under the name the form was filled in for.
+            var txn = String(row.getAttribute("data-transaction-id"));
+            return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
+              .then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (d) {
+                var item = ((d && d.bank_items) || []).filter(function (i) {
+                    return String(i.transaction_id) === txn; })[0];
+                if (item) {
+                    var info = _bankRowInfo(row);
+                    info.choices = (item.choices || []).slice();
+                }
+                var hit = item && (item.choices || []).filter(function (c) {
+                    return String(c.name).toLowerCase() === String(pending.name).toLowerCase(); })[0];
+                if (hit && Number(hit.category_id) > 0) { return String(hit.category_id); }
+                return res.category_id != null && Number(res.category_id) > 0 ? String(res.category_id) : null;
+              });
+          })
+          .catch(function () { showToast("Could not reach the server.", "error"); return null; });
+    });
+}
+
+function _bankRowCategoryOrCreate(row) {
+    // The id behind the field - or, when the field holds a name picked as
+    // Create "x", the id of the category made now for it. Creation waits
+    // for this moment on purpose: confirming the row is the act, and a
+    // name typed and abandoned creates nothing. Resolves to null when
+    // there is nothing to confirm with.
+    var chosen = _bankRowCategoryId(row);
+    if (chosen != null) { return Promise.resolve(chosen); }
+    var input = row.querySelector(".bucket-prompt-category-input");
+    var name = input ? input.value.trim() : "";
+    var mode = input ? input.dataset.createNew : "";
+    if (!input || !name || (mode !== "true" && mode !== "recurring")) { return Promise.resolve(null); }
+    if (mode === "recurring") {
+        var txn = String(row.getAttribute("data-transaction-id"));
+        var pending = _bankRowPending[txn];
+        if (!pending) { return Promise.resolve(null); }
+        return _postPendingRecurring(row, pending).then(function (categoryId) {
+            if (categoryId == null) { return null; }
+            delete _bankRowPending[txn];
+            input.dataset.createNew = "";
+            var hidden = row.querySelector(".bucket-prompt-category-id");
+            if (hidden) { hidden.value = String(categoryId); }
+            // The page cannot draw entries in a category it does not hold,
+            // let alone the recurring ones just made: reload on close.
+            bucketPromptCategoryCreated = true;
+            return String(categoryId);
+        });
+    }
+    return createBankRowCategory(row, name).then(function (ok) {
+        if (!ok) { return null; }
+        input.dataset.createNew = "";
+        return _bankRowCategoryId(row);
+    });
 }
 
 function createBankRowCategory(row, name) {
@@ -2303,15 +2555,16 @@ function resolveAllBucketRows(bodyEl, action, close) {
             }
             // And a row whose field was cleared and never resettled has no
             // answer to give; it stays for a per-row one.
-            var chosen = _bankRowCategoryId(row);
-            if (chosen == null) {
-                row.classList.remove("bucket-prompt-busy");
-                next();
-                return;
-            }
-            categoriseBankRow(row, chosen).then(function (ok) {
-                if (ok) { row.remove(); } else { row.classList.remove("bucket-prompt-busy"); }
-                next();
+            _bankRowCategoryOrCreate(row).then(function (chosen) {
+                if (chosen == null) {
+                    row.classList.remove("bucket-prompt-busy");
+                    next();
+                    return;
+                }
+                categoriseBankRow(row, chosen).then(function (ok) {
+                    if (ok) { row.remove(); } else { row.classList.remove("bucket-prompt-busy"); }
+                    next();
+                });
             });
             return;
         }
@@ -2440,6 +2693,33 @@ function showBucketPrompt(opts) {
                     startBucketOpenSequence();
                     // After the rows exist, before anyone reads them.
                     fitBucketTitles(bodyEl);
+                    // Back from making a recurring category for a row: that
+                    // row shows the new category, ready to confirm.
+                    if (_bucketPromptPreselect) {
+                        var want = _bucketPromptPreselect;
+                        _bucketPromptPreselect = null;
+                        var wantedRow = null;
+                        bodyEl.querySelectorAll(".bucket-prompt-bank").forEach(function (r) {
+                            if (String(r.getAttribute("data-transaction-id")) === String(want.transaction_id)) { wantedRow = r; }
+                        });
+                        if (wantedRow) {
+                            var choice = _bankRowInfo(wantedRow).choices.filter(function (c) {
+                                return String(c.name).toLowerCase() === String(want.name || "").toLowerCase();
+                            })[0];
+                            var wInput = wantedRow.querySelector(".bucket-prompt-category-input");
+                            var wHidden = wantedRow.querySelector(".bucket-prompt-category-id");
+                            if (choice && wInput && wHidden) {
+                                wInput.value = choice.name;
+                                wHidden.value = String(choice.category_id);
+                            } else if (want.pending && wInput && wHidden) {
+                                // Not a category yet: the name the form was
+                                // filled in for, made when the row is confirmed.
+                                wInput.value = want.name;
+                                wHidden.value = "";
+                                wInput.dataset.createNew = "recurring";
+                            }
+                        }
+                    }
                     // The body element is shared by every dialog and lives on
                     // between openings, so its handlers are wired once. What
                     // differs per opening - how to close - is kept on it, and
@@ -2486,6 +2766,7 @@ function showBucketPrompt(opts) {
                         var bankRow = f.closest(".bucket-prompt-item");
                         var hidden = bankRow && bankRow.querySelector(".bucket-prompt-category-id");
                         if (hidden) { hidden.value = ""; }
+                        f.dataset.createNew = "";
                         if (bankRow) { showBankCategoryDropdown(bankRow, f.value); }
                     });
                     bodyEl.addEventListener("focusin", function (ev) {
@@ -2526,14 +2807,15 @@ function showBucketPrompt(opts) {
                         var action = btn.getAttribute("data-action");
 
                         if (action === "categorise") {
-                            var chosen = _bankRowCategoryId(row);
-                            if (chosen == null) {
-                                showToast("Pick a category from the list first.", "error");
-                                return;
-                            }
                             _bankDropdownHide();
                             row.classList.add("bucket-prompt-busy");
-                            categoriseBankRow(row, chosen).then(function (ok) {
+                            _bankRowCategoryOrCreate(row).then(function (chosen) {
+                                if (chosen == null) {
+                                    showToast("Pick a category from the list first.", "error");
+                                    return false;
+                                }
+                                return categoriseBankRow(row, chosen);
+                            }).then(function (ok) {
                                 row.classList.remove("bucket-prompt-busy");
                                 if (!ok) { return; }
                                 row.remove();

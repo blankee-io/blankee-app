@@ -10520,6 +10520,15 @@ transform: scale(1.2);
 }
 
 /* Amount Input */
+/* Opened from a bank row, the amount is the transaction's and does not
+   move; it reads as settled rather than as a field waiting for typing. */
+.income-form-container input.recurring-amount[readonly],
+.expense-form-container input.recurring-amount[readonly],
+.ca-form-container input.recurring-amount[readonly] {
+    background-color: var(--secondary-lighter);
+    color: var(--text-dark);
+}
+
 .recurring-amount {
     padding-left: 24px;
     text-align: right;
