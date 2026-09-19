@@ -8,6 +8,26 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.44.1 — 2026-09-18
+
+### Changed
+- The daily bank pull runs at 06:00 in the person's timezone, not 23:50: the
+  bank posts overnight, and a morning pull has the night's postings in the
+  budget before the day starts.
+- The last sync date - the day up to which a fed account is the bank's - is
+  the date of the latest posted transaction the bank reported, not the day
+  of the last pull. A pull that brought back yesterday's rows has heard
+  nothing about today, and locked it anyway.
+- In "Did these come through?", a bank row's category picker offers to
+  create a typed name as a manual category or as a recurring one. Recurring
+  opens the add-recurring form with the name and the transaction's amount
+  filled in, the amount locked; the form's answer is held on the row, and the
+  prompt comes back with the row showing the name. Confirming the row is what
+  creates the recurring entry, and then files the transaction in it.
+- A category picked as Create "x" is made when the row is confirmed, or when
+  the daily view's entry is saved - not the moment it is picked. A name typed
+  and then abandoned creates nothing.
+
 ## 1.44.0 — 2026-09-17
 
 ### Added

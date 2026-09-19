@@ -52,7 +52,7 @@ if [ ! -f "$ENV_FILE" ]; then
 APNS_KEY_PATH=$ENV_DIR/apns.p8
 APNS_KEY_ID=
 APNS_TEAM_ID=
-APNS_TOPIC=io.blankee.blankee
+APNS_TOPIC=io.blankee.app
 
 RELAY_DB=$DATA_DIR/relay.db
 # Pushes one phone may receive in an hour, whoever asks.
