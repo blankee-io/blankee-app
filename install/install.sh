@@ -819,6 +819,25 @@ command -v apt-get >/dev/null || die "apt-get not found."
 [[ -f "$APP_DIR/app.py" ]] || die "Cannot find app.py - run this from inside the repository."
 
 info "repository:  $APP_DIR"
+
+# A release is a signed tag, and `main` is where development lands - so
+# installing from a branch tip installs whatever was merged last. Worse, the
+# updater follows tags from here on, so an instance parked ahead of the newest
+# tag reports "up to date" while running code no release contains. Said once
+# rather than enforced: an operator may well mean it.
+if [[ -d "$APP_DIR/.git" ]] && command -v git >/dev/null; then
+  git_here=(git -c "safe.directory=$APP_DIR" -C "$APP_DIR")
+  head_branch="$("${git_here[@]}" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  if [[ -n "$head_branch" ]]; then
+    warn "installing from the tip of '$head_branch', which is development, not a release"
+    newest_tag="$("${git_here[@]}" tag --list 'v[0-9]*' --sort=-v:refname 2>/dev/null | grep -v -- '-' | head -n1 || true)"
+    if [[ -n "$newest_tag" ]]; then
+      warn "for the newest release:  sudo git -C $APP_DIR checkout $newest_tag"
+    fi
+  else
+    info "release:     $("${git_here[@]}" describe --tags --exact-match 2>/dev/null || "${git_here[@]}" rev-parse --short HEAD)"
+  fi
+fi
 info "config dir:  $CONFIG_DIR"
 info "database:    $DB_NAME as $DB_USER on $DB_HOST"
 

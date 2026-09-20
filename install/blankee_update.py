@@ -29,7 +29,12 @@ it owns. It never chooses a ref, a branch, a remote or a path - if it could, it
 would be choosing what gets checked out and run. This script takes nothing from
 that file except "yes" and an opaque id. In particular it does NOT take the
 location of the signing key from there: that comes from the unit's own
-environment, and the file it names must be root's - see verify_signature().
+environment, and the file it names must be root's - see verify_release().
+
+WHAT IT UPDATES TO: the newest release TAG on the branch, signed by the pinned
+key, not the tip of the branch - see resolve_release(). Development happens on
+that branch in the open, so its tip is whatever was merged last; the tag is the
+maintainer saying a particular commit is a release.
 
 WHO THIS RUNS AS. Either root, or the `blankee` service user the installer
 creates. Nine of the twelve steps need only ownership of the tree, the venv and
@@ -80,6 +85,10 @@ HELPER_DIR = os.environ.get('BLANKEE_HELPER_DIR', '/run/blankee-update')
 SERVICE_USER = 'blankee'
 
 BRANCH = 'main'
+# What a release tag looks like. Anchored on a digit so a branch-shaped name
+# like `verify-me` cannot be mistaken for one, and listed with --sort=-v:refname
+# so 1.10.0 sorts above 1.9.0 rather than below it.
+RELEASE_TAG_GLOB = 'v[0-9]*'
 STATUS_SCHEMA = 1
 STALE_AFTER = 15 * 60
 
@@ -706,6 +715,90 @@ def write_available(record):
         say(f'  could not write {AVAILABLE_FILE}: {e}')
 
 
+def _signers_status():
+    """
+    Whether the pinned key file can be trusted, without deciding what to do
+    about it: ('ok', None), ('absent', why) when no key is pinned at all, or
+    ('bad', why) when the file exists but is not a trust anchor.
+
+    Split out of verify_release because working out which tag to follow needs
+    the same answer before any of the step machinery is running, and a check
+    that can only fail a run cannot be reused by one that only reports.
+    """
+    try:
+        fd = os.open(SIGNERS_FILE, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as e:
+        if e.errno == errno.ENOENT:
+            return 'absent', f'no signing key pinned at {SIGNERS_FILE}'
+        if e.errno == errno.ELOOP:
+            # Only root can put a symlink there, and the installer never does;
+            # whatever it points at is not the pinned file. Not "absent".
+            return 'bad', f'{SIGNERS_FILE} is a symlink.'
+        return 'bad', f'Could not open {SIGNERS_FILE}: {e}'
+    try:
+        info = os.fstat(fd)
+    finally:
+        os.close(fd)
+    if not stat.S_ISREG(info.st_mode):
+        return 'bad', f'{SIGNERS_FILE} is not a regular file.'
+    if info.st_uid != 0 or (info.st_mode & 0o022):
+        return 'bad', (f'{SIGNERS_FILE} must be owned by root and writable by root '
+                       f'alone (it is uid {info.st_uid}, mode '
+                       f'{oct(info.st_mode & 0o777)}). A key file anyone else can '
+                       f'write is no trust anchor.')
+    return 'ok', None
+
+
+def tag_signed(tag):
+    """
+    Whether an annotated tag verifies against the pinned key. Quiet on purpose:
+    resolve_release tries candidates in turn, and one that does not verify is a
+    tag to skip rather than a failure to report.
+    """
+    rc, _out = git('-c', 'gpg.ssh.allowedSignersFile=' + SIGNERS_FILE,
+                   'verify-tag', '--raw', tag, timeout=60)
+    return rc == 0
+
+
+def resolve_release(require_signature=True):
+    """
+    (tag, commit) of the newest release an installation should be on, or
+    (None, None) when the remote carries none.
+
+    A release is a TAG, not the tip of the branch. Development happens on the
+    release branch in the open, so a commit landing there is somebody's change
+    being accepted - and following the tip would turn every merge into a release
+    on every installation the moment it was pushed. The tag is where the
+    maintainer says "this one", and the signature on it is what makes that
+    statement checkable by a machine nobody is watching.
+
+    Three things disqualify a candidate, cheapest check first: a pre-release
+    name, because an -rc is opt-in and never handed to everyone; a commit that
+    is not an ancestor of the release branch, because a tag pushed onto an
+    unmerged branch is not a release however well signed; and a signature that
+    does not verify against the pinned key.
+    """
+    rc, out = git('tag', '--list', RELEASE_TAG_GLOB, '--sort=-v:refname')
+    if rc != 0:
+        return None, None
+    for tag in (line.strip() for line in out.splitlines()):
+        if not tag or '-' in tag:
+            continue
+        rc, sha = git('rev-parse', tag + '^{commit}')
+        if rc != 0:
+            continue
+        sha = sha.strip().splitlines()[-1].strip()
+        rc, _out = git('merge-base', '--is-ancestor', sha, f'origin/{BRANCH}')
+        if rc != 0:
+            say(f'  ignoring {tag}: it is not on origin/{BRANCH}')
+            continue
+        if require_signature and not tag_signed(tag):
+            say(f'  ignoring {tag}: not signed by a trusted key')
+            continue
+        return tag, sha
+    return None, None
+
+
 def check_only():
     """
     Fetch and compare, changing nothing else.
@@ -715,26 +808,48 @@ def check_only():
     Nothing is installed, nothing is reloaded, and the working tree is not
     touched - `git fetch` only writes to .git.
     """
-    rc, out = git('fetch', '--prune', 'origin', BRANCH, timeout=300)
+    # Tags as well as the branch: a release is a tag now (see resolve_release),
+    # and --prune-tags drops a local tag the remote no longer has, so a tag
+    # planted locally cannot win a comparison.
+    rc, out = git('fetch', '--prune', '--prune-tags', '--tags', 'origin', BRANCH, timeout=300)
     if rc != 0:
         say(f'  could not reach the remote: {out[-200:]}')
         return 1
 
-    rc, target = git('rev-parse', f'origin/{BRANCH}')
-    if rc != 0:
+    state, why = _signers_status()
+    if state == 'bad':
+        say(f'  {why}')
         return 1
-    target = target.strip().splitlines()[-1].strip()
+    if state == 'absent':
+        say(f'  {why}; reading the newest tag unverified')
+    tag, target = resolve_release(require_signature=(state == 'ok'))
+
     rc, current = git('rev-parse', 'HEAD')
     current = current.strip().splitlines()[-1].strip()
 
+    if not target:
+        say('  the remote carries no signed release tag yet')
+        write_available({
+            'available': False,
+            'checked_at': now(),
+            'from_commit': current, 'from_short': current[:7],
+            'from_version': read_version_file(),
+            'to_commit': None, 'to_short': None, 'to_tag': None, 'to_version': None,
+        })
+        return 0
+
+    # Already on it, or past it: an installation someone has moved forward by
+    # hand is not offered a way backwards.
+    rc, _out = git('merge-base', '--is-ancestor', target, current)
+    available = target != current and rc != 0
+
     version = None
-    rc, out = git('show', f'origin/{BRANCH}:VERSION')
+    rc, out = git('show', f'{tag}:VERSION')
     if rc == 0 and out.strip():
         candidate = out.strip().splitlines()[-1].strip()
         if re.fullmatch(r'\d+\.\d+\.\d+(-rc\.\d+)?', candidate):
             version = candidate
 
-    available = target != current
     write_available({
         'available': available,
         'checked_at': now(),
@@ -742,15 +857,16 @@ def check_only():
         'from_version': read_version_file(),
         'to_commit': target if available else None,
         'to_short': target[:7] if available else None,
+        'to_tag': tag if available else None,
         'to_version': version if available else None,
     })
-    say(f'  {"an update is available: " + target[:7] if available else "already up to date"}')
+    say(f'  {"an update is available: " + tag if available else "already up to date"}')
     return 0
 
 
-def verify_signature(target):
+def verify_release(tag):
     """
-    Refuse a commit not signed by the pinned key. None, or a failure.
+    Refuse a release tag not signed by the pinned key. None, or a failure.
 
     Nothing about a git fetch says who wrote what it fetched. HTTPS proves the
     server is github.com and no more; whoever can push to the release branch can
@@ -761,8 +877,15 @@ def verify_signature(target):
     rewritten, and why its LOCATION comes from the unit's environment rather
     than from a file the web user owns.
 
+    The TAG is what gets verified, not the commit it points at. Commits on the
+    branch are signed by whoever pushed them - a contributor, or GitHub itself
+    on a squash merge - and none of those signatures says "this is a release".
+    The tag is the maintainer's own statement, made with the key installations
+    pin.
+
     The key file must itself be root's and not group- or world-writable. A
-    signers file the web user could rewrite is the same hole by another door.
+    signers file the web user could rewrite is the same hole by another door -
+    checked in _signers_status, which the tag resolution above uses too.
 
     No key pinned at all (an installation upgraded in place from before signing
     existed): this run proceeds unverified and says so, and the units step
@@ -770,45 +893,24 @@ def verify_signature(target):
     converges every installation without a human on any of them; refusing here
     instead would strand exactly the installations that most need to update.
     """
-    try:
-        fd = os.open(SIGNERS_FILE, os.O_RDONLY | os.O_NOFOLLOW)
-    except OSError as e:
-        if e.errno == errno.ENOENT:
-            say(f'  no signing key pinned at {SIGNERS_FILE}; this update is '
-                f'unverified and will seed one for the next')
-            return None
-        if e.errno == errno.ELOOP:
-            # Only root can put a symlink there, and the installer never does;
-            # whatever it points at is not the pinned file. Not "absent".
-            return finish_failed(f'{SIGNERS_FILE} is a symlink. Refusing to '
-                                 'update unverified.', '', [f'ls -l {SIGNERS_FILE}'])
-        return finish_failed(f'Could not open {SIGNERS_FILE}: {e}', '',
+    state, why = _signers_status()
+    if state == 'absent':
+        say(f'  {why}; this update is unverified and will seed one for the next')
+        return None
+    if state == 'bad':
+        return finish_failed(f'{why} Refusing to update unverified.', '',
                              [f'ls -l {SIGNERS_FILE}'])
-    try:
-        info = os.fstat(fd)
-    finally:
-        os.close(fd)
-    if not stat.S_ISREG(info.st_mode):
-        return finish_failed(f'{SIGNERS_FILE} is not a regular file. Refusing to '
-                             'update unverified.', '', [f'ls -l {SIGNERS_FILE}'])
-    if info.st_uid != 0 or (info.st_mode & 0o022):
-        return finish_failed(
-            f'{SIGNERS_FILE} must be owned by root and writable by root alone '
-            f'(it is uid {info.st_uid}, mode {oct(info.st_mode & 0o777)}). '
-            'A key file anyone else can write is no trust anchor. Refusing to '
-            'update unverified.', '',
-            [f'sudo chown root:root {SIGNERS_FILE}', f'sudo chmod 644 {SIGNERS_FILE}'])
 
-    step('verify', f'Verifying the signature on {target[:7]}')
+    step('verify', f'Verifying the signature on {tag}')
     rc, out = git('-c', 'gpg.ssh.allowedSignersFile=' + SIGNERS_FILE,
-                  'verify-commit', '--raw', target, timeout=60)
+                  'verify-tag', '--raw', tag, timeout=60)
     if rc != 0:
         return finish_failed(
-            f'The signature on {target[:7]} did not verify. Nothing was '
+            f'The signature on {tag} did not verify. Nothing was '
             'checked out and the deployment is unchanged. Either the release '
             'is not signed by a trusted key, or it is not what it claims to '
             'be.', out,
-            [f'cd {APP_DIR}', f'git verify-commit {target[:7]}'])
+            [f'cd {APP_DIR}', f'git verify-tag {tag}'])
     step_done('signed by a trusted key')
     return None
 
@@ -874,30 +976,37 @@ def do_update(dry_run):
              f'sudo {VENV_DIR}/bin/python install/migrate.py --verify-only'])
     step_done((out.strip().splitlines() or [''])[-1])
 
-    step('fetch', f'Fetching origin/{BRANCH}')
-    rc, out = git('fetch', '--prune', 'origin', BRANCH, timeout=300)
+    step('fetch', f'Fetching the releases on origin/{BRANCH}')
+    rc, out = git('fetch', '--prune', '--prune-tags', '--tags', 'origin', BRANCH, timeout=300)
     if rc != 0:
         return finish_failed('Could not reach the remote.', out,
-                             [f'cd {APP_DIR}', f'sudo git fetch origin {BRANCH}'])
-    rc, target = git('rev-parse', f'origin/{BRANCH}')
-    if rc != 0:
-        return finish_failed(f'Could not resolve origin/{BRANCH}.', target)
-    target = target.strip().splitlines()[-1].strip()
+                             [f'cd {APP_DIR}', f'sudo git fetch --tags origin {BRANCH}'])
+    state, why = _signers_status()
+    if state == 'bad':
+        return finish_failed(f'{why} Refusing to update unverified.', '',
+                             [f'ls -l {SIGNERS_FILE}'])
+    tag, target = resolve_release(require_signature=(state == 'ok'))
     rc, current = git('rev-parse', 'HEAD')
     current = current.strip().splitlines()[-1].strip()
+    if not target:
+        return finish_ok(f'origin/{BRANCH} carries no signed release tag; nothing to do.')
     _status['from'] = {'commit': current, 'short': current[:7],
                        'version': read_version_file()}
-    _status['to'] = {'commit': target, 'short': target[:7], 'version': None}
-    step_done(f'origin/{BRANCH} is {target[:7]}, this deployment is {current[:7]}')
+    _status['to'] = {'commit': target, 'short': target[:7], 'tag': tag, 'version': None}
+    step_done(f'the newest release is {tag} ({target[:7]}), '
+              f'this deployment is {current[:7]}')
 
-    if target == current:
-        return finish_ok('Already at the latest commit; nothing to do.')
+    # Ancestor, not equality: an installation that has been moved ahead of the
+    # newest tag by hand stays where it is rather than being reset backwards.
+    rc, _out = git('merge-base', '--is-ancestor', target, current)
+    if target == current or rc == 0:
+        return finish_ok(f'Already at {tag}; nothing to do.')
     if dry_run:
-        return finish_ok(f'Dry run: would update {current[:7]} to {target[:7]}.')
+        return finish_ok(f'Dry run: would update {current[:7]} to {tag} ({target[:7]}).')
 
     requirements_before = file_hash(os.path.join(APP_DIR, 'requirements.txt'))
 
-    failure = verify_signature(target)
+    failure = verify_release(tag)
     if failure is not None:
         return failure
 
@@ -922,7 +1031,7 @@ def do_update(dry_run):
         step_done(f'could not flush pending changes (rc={rc}); continuing: '
                   f'{out[-200:]}', ok=False)
 
-    step('checkout', f'Moving to {target[:7]}')
+    step('checkout', f'Moving to {tag}')
     # No `git clean`: it deletes untracked-but-not-ignored files, and the
     # preflight has already refused a dirty tree, so it could only do harm.
     rc, out = git('reset', '--hard', target)

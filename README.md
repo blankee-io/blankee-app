@@ -28,6 +28,8 @@ Needs Docker with the Compose plugin. Nothing else.
 
 ```bash
 git clone https://github.com/blankee-io/blankee-app.git && cd blankee-app
+# main is where development lands; a release is a tag. Take the newest one:
+git checkout "$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n1)"
 cp .env.docker.example .env
 ```
 
@@ -52,6 +54,8 @@ sudo apt-get install -y git
 
 sudo git clone https://github.com/blankee-io/blankee-app.git /opt/blankee
 cd /opt/blankee
+# main is where development lands; a release is a tag. Take the newest one:
+sudo git checkout "$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n1)"
 sudo ./install/install.sh --server-name budget.example.com
 ```
 

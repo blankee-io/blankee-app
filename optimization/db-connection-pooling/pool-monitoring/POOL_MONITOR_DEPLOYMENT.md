@@ -10,7 +10,7 @@ The internal pool monitor (`monitor_pool_internal.py`) provides real-time monito
 
 ```bash
 # Navigate to your app directory
-cd /Volumes/html
+cd /srv/blankee
 
 # Run the monitor directly
 python3 monitor_pool_internal.py

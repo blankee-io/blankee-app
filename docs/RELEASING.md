@@ -1,55 +1,78 @@
 # Releasing
 
-Blankee has two repositories: a private one where work happens, and a public one
-that carries the published source the AGPL requires. `blankee-publish.sh`
-snapshots private `main` into the public repository as a single commit, so
-**every commit on public `main` is a release**, and installations update to the
-tip of that branch.
+One repository, public: `blankee-io/blankee-app`. Work reaches `main` through
+pull requests, squash-merged. **A release is a signed tag**, not a commit on
+`main`: an installation follows the newest `v*` tag that verifies against the key
+it pinned when it was installed, so an ordinary merge changes nothing for anybody
+until a tag says otherwise.
 
-That has one consequence worth stating plainly: there is no such thing as an
-unreleased commit on public `main`. Anything pushed there is what the next
-instance to press "check for updates" will be offered.
+Until 1.45.0 this worked the other way round. Development happened in a private
+repository, `~/blankee-publish.sh` snapshotted it here as one squashed commit per
+release, and installations tracked the tip of `main` - so every commit on `main`
+*was* a release. The private history was purged of what could not be published
+and grafted onto this repository, which is why `git log` goes back further than
+the snapshots do. The publish script is no longer used.
 
 ## Cutting a release
 
-1. On private `main`, set the new version and describe it:
+1. On `main`, with everything that is going out already merged, set the version
+   and describe it:
 
    ```bash
-   printf '1.1.0\n' > VERSION
-   $EDITOR CHANGELOG.md          # add a "## 1.1.0 — YYYY-MM-DD" section
+   printf '1.45.1\n' > VERSION
+   $EDITOR CHANGELOG.md          # add a "## 1.45.1 — YYYY-MM-DD" section
    ```
 
-2. Commit, merge through `dev-main` to `main`, and push.
+2. Commit and push. Commits on `main` must be signed - the branch rule requires
+   it, and GitHub signs what it creates when a pull request is squash-merged.
 
-3. Tag the private repository:
+3. Tag it with the **release key**, and push the tag:
 
    ```bash
-   git tag -a v1.1.0 -m '1.1.0' && git push origin v1.1.0
+   git tag -s -a v1.45.1 -m '1.45.1' && git push origin v1.45.1
    ```
 
-4. Publish:
+   That signature is the whole trust anchor: an installation verifies the tag
+   against its pinned `allowed_signers` and refuses anything else. A tag signed
+   with some other key, or not signed at all, is skipped by the updater and
+   logged as skipped - it is not a release.
 
-   ```bash
-   bash ~/blankee-publish.sh "Release 1.1.0"
-   ```
-
-5. Tag the public repository at the snapshot commit, and create a GitHub release
-   whose body is the changelog section.
+4. Nothing else. `.github/workflows/release.yml` fires on `v*` and builds the
+   release page from the changelog section as it stood at the tag.
 
 ## Version numbers
 
-`VERSION` is the single source of truth. The application reads it once at import
-and shows it in the footer; the update check compares it against the published
-one to say "1.0.0 → 1.1.0".
+`VERSION` is the single source of truth for what an instance reports. The
+application reads it once at import and shows it in the footer; the update check
+reads `VERSION` **at the tag** to say "1.45.0 → 1.45.1", so a tag whose name and
+`VERSION` disagree makes the admin console state something untrue.
 
-Tags are documentation. Nothing in the application or the updater consults them,
-so a tag pushed a day late breaks nothing — it only makes the two histories
-harder to correlate until it exists.
-
-**Bump `VERSION` on every publish**, even for a one-line fix. It costs a line and
+**Bump `VERSION` on every release**, even for a one-line fix. It costs a line and
 it is what makes the version a complete signal rather than an approximate one: an
-instance that reports "up to date" while a newer commit exists is worse than one
+instance that reports "up to date" while a newer release exists is worse than one
 that reports a patch bump nobody needed.
+
+Tags are no longer documentation - **the tag is the release**. A tag pushed a day
+late is a release a day late, and until it exists nothing is offered to anyone.
+Pre-release names (`v1.46.0-rc.1`) are skipped by the updater on purpose, so one
+can be pushed freely for somebody to check out by hand.
+
+## Installing from a release
+
+An operator who clones and installs without checking out a tag installs whatever
+was merged last. Both paths in the README check out the newest tag first, and
+`install/install.sh` says so when it is run from a branch. After that the updater
+keeps the instance on tags by itself.
+
+## The move to tags, and why `main` was frozen for a while
+
+The updater that applies an update is the one already running (see the next
+section), so the tag-following code shipped in 1.45.0 was itself installed by a
+tip-following updater and only took effect afterwards. Until every installation
+had 1.45.0, a commit landing on `main` would have been offered to the stragglers
+as an update - so `main` stayed frozen to releases until the known installations
+reported 1.45.0. That freeze is history, recorded here so it is not mistaken for
+a rule that still applies.
 
 ## A fix to the updater lands one release late
 

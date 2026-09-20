@@ -519,6 +519,11 @@ STATUS_FILE = os.environ.get('BLANKEE_UPDATE_STATUS',
 
 _GITHUB_HOSTS = ('github.com', 'www.github.com')
 
+# A release tag. Deliberately without the -rc case _VERSION_RE allows: a
+# pre-release is something to check out by hand, never something an
+# administrator is told is waiting for them.
+_RELEASE_TAG_RE = re.compile(r'^v\d+\.\d+\.\d+$')
+
 AVAILABLE_FILE = os.environ.get('BLANKEE_UPDATE_AVAILABLE',
                                 '/var/www/budget_env/update-available.json')
 
@@ -564,25 +569,33 @@ def read_run_status():
 
 def fetch_remote_state(slug, local_sha):
     """
-    What the remote's main branch looks like. The only function here that uses
-    the network, and it is called only when an administrator presses the button.
+    What the newest release looks like. The only function here that uses the
+    network, and it is called only when an administrator presses the button.
 
-    Two independent signals, because neither endpoint is reachable everywhere:
+    The target is the newest release TAG, not the tip of the branch. Development
+    lands on the branch in the open, so its tip is whatever was merged last -
+    measuring against it would tell an administrator they are behind by work
+    nobody has released, and offer them an update that does not exist. The
+    updater follows tags for the same reason; see resolve_release() there.
 
-      raw.githubusercontent.com/.../VERSION  no auth, no rate limit, and it
+    Three signals, because no single endpoint is reachable everywhere:
+
+      the releases API                       which tag is newest. Excludes
+          pre-releases already; /tags is the fallback for a repository that has
+          tags but no release pages.
+      raw.githubusercontent.com/<tag>/VERSION  no auth, no rate limit, and it
           works on networks where the API does not. Gives the human answer,
           "1.0.0 -> 1.1.0".
-      the compare API                        says how many commits main has that
-          this deployment does not, which is what actually decides whether an
-          update exists - the target is the branch tip, so a commit that did not
-          touch VERSION still counts.
+      the compare API                        how many commits the release has
+          that this deployment does not, which is what decides whether an update
+          exists - a release commit that did not touch VERSION still counts.
 
     Failure is reported as failure. Answering "up to date" when the check could
     not look is worse than not offering a check at all.
     """
     out = {'checked': True, 'up_to_date': None, 'behind_by': None, 'status': None,
            'latest_sha': None, 'latest_short': None, 'latest_version': None,
-           'commits': [], 'signals': [], 'error': None}
+           'latest_tag': None, 'commits': [], 'signals': [], 'error': None}
 
     host = (slug or {}).get('host')
     owner, repo = (slug or {}).get('owner'), (slug or {}).get('repo')
@@ -634,9 +647,40 @@ def fetch_remote_state(slug, local_sha):
     errors = []
     not_found = False
     try:
+        # Signal 0: the newest release. Everything below is measured against this
+        # tag rather than the branch; a repository with no releases at all - a
+        # fork, or this one before 1.45.0 - falls back to the branch, which is
+        # the only answer available there.
+        tag = None
+        tag_lookup_failed = False
+        try:
+            r = client.get(f'https://api.github.com/repos/{owner}/{repo}/releases/latest')
+            if r.status_code == 200:
+                candidate = ((r.json() or {}).get('tag_name') or '').strip()
+                if _RELEASE_TAG_RE.match(candidate):
+                    tag = candidate
+            elif r.status_code == 404:
+                r = client.get(f'https://api.github.com/repos/{owner}/{repo}/tags')
+                if r.status_code == 200:
+                    for entry in (r.json() or []):
+                        if _RELEASE_TAG_RE.match((entry.get('name') or '').strip()):
+                            tag = entry['name'].strip()
+                            break
+                elif r.status_code not in (404,):
+                    tag_lookup_failed = True
+                    errors.append(f'tag lookup returned HTTP {r.status_code}')
+            else:
+                tag_lookup_failed = True
+                errors.append(f'release lookup returned HTTP {r.status_code}')
+        except Exception as e:
+            tag_lookup_failed = True
+            errors.append(f'release lookup failed ({e})')
+        out['latest_tag'] = tag
+        ref = f'refs/tags/{tag}' if tag else 'main'
+
         # Signal 1: the published VERSION.
         try:
-            r = client.get(f'https://raw.githubusercontent.com/{owner}/{repo}/main/VERSION')
+            r = client.get(f'https://raw.githubusercontent.com/{owner}/{repo}/{ref}/VERSION')
             if r.status_code == 200:
                 candidate = r.text.strip().splitlines()[0].strip() if r.text.strip() else ''
                 if _VERSION_RE.match(candidate):
@@ -652,11 +696,14 @@ def fetch_remote_state(slug, local_sha):
         except Exception as e:
             errors.append(f'VERSION lookup failed ({e})')
 
-        # Signal 2: how far behind main this commit is.
-        if local_sha:
+        # Signal 2: how far behind the release this commit is. Skipped when the
+        # newest tag could not be read: comparing against the branch instead
+        # would count merges that are not a release and report an update that
+        # pressing the button would not install.
+        if local_sha and not tag_lookup_failed:
             try:
                 r = client.get(f'https://api.github.com/repos/{owner}/{repo}'
-                               f'/compare/{local_sha}...main')
+                               f'/compare/{local_sha}...{tag or "main"}')
                 if r.status_code == 200:
                     data = r.json()
                     # base is the deployed commit and head is main, so ahead_by

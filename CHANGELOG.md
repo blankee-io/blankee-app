@@ -8,6 +8,34 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.45.0 — 2026-09-20
+
+### Changed
+- Development happens in this repository now, in the open: changes arrive as
+  pull requests and are squash-merged onto `main`. Until now every commit on
+  `main` was a release, because releases were published from a private
+  repository as one squashed snapshot per version - so there was nowhere here
+  for work in progress to live. That repository's history has been grafted onto
+  this one, minus the parts that cannot be published, and it is archived.
+- **A release is a signed tag**, not a commit on `main`. An installation follows
+  the newest `v*` tag that verifies against the signing key it pinned when it was
+  installed, so an ordinary merge is no longer offered to anybody as an update.
+  A tag signed with any other key, or not signed at all, is skipped and logged as
+  skipped. A pre-release tag (`v1.46.0-rc.1`) is skipped on purpose, so one can
+  be published for somebody to check out by hand.
+- The admin console's update check measures against that same tag rather than
+  the tip of `main`, and names it. An installation that has been moved ahead of
+  the newest tag by hand is left where it is instead of being reset backwards
+  onto it.
+- `install/install.sh` says so when it is run from a branch rather than a
+  release, and the README's Docker and Debian paths check out the newest tag
+  before installing.
+
+### Note for this update only
+The updater that applies an update is the one already running, so this release is
+installed by the previous, tip-following one. Tag-following starts with the next
+check after it lands - nothing to do, but it is why this one arrives the old way.
+
 ## 1.44.5 — 2026-09-20
 
 ### Fixed

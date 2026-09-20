@@ -413,7 +413,7 @@ Run: python check_redis_health.py --watch
 ## File Structure
 
 ```
-/Volumes/html-2/
+/srv/blankee-2/
 ├── app.py (modified)
 │   └── Integrated Redis manager
 │
