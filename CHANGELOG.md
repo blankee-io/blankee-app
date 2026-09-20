@@ -8,6 +8,24 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.44.4 — 2026-09-20
+
+### Fixed
+- A pull that imported nothing still corrected the balances. The bank's figure
+  is stamped at a moment, often just after midnight UTC, and that stamp was
+  read in UTC rather than in the user's own zone - so a balance that was the
+  end of Thursday evening was compared against the app's Friday, and the
+  forecasts resting on Friday were "corrected" away as money missing. The
+  stamp is now read in the user's timezone and the app is measured on the day
+  the figure speaks for, never later than yesterday. Balances are still
+  matched every day; an older stamp means an earlier day, not a day skipped.
+- The bank's balance is money that has moved, so the app's side of the
+  comparison no longer counts what is only planned. A bill still due, a
+  forecast charge on a card, or a card payment nobody has made yet is left
+  out of the app's figure instead of reading as a discrepancy and being
+  written into a real entry. A projected interest charge is untouched, since
+  the card's projection owns it.
+
 ## 1.44.3 — 2026-09-19
 
 ### Fixed
