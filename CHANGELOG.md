@@ -8,6 +8,34 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.45.1 — 2026-09-20
+
+### Added
+- The documents somebody needs to contribute: `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`, `SECURITY.md`, `CONTRIBUTORS.md`, and issue and pull
+  request templates. `CONTRIBUTING.md` is the first public home for the
+  conventions this codebase actually holds to - Redis-first writes, the colour
+  palette, the shared toast and modal, structured logging, and the three places a
+  migration has to be registered - with the reason each one exists rather than
+  the rule on its own.
+- Checks on every pull request (`.github/workflows/checks.yml`): every commit
+  signed off, every import declared in `requirements.txt` (installed first, which
+  also proves the file still resolves), no Pro-only icon without a Free fallback,
+  every migration registered, and every module parsing.
+- `install/check_migrations.py`, which checks the migration list against the files
+  and the assertions **without a database**, so it can run on a pull request. It
+  is worth running before a release too.
+- `docker-compose.override.yml.example`: copy it and an edit to a template or a
+  `.py` file shows up on the next request instead of the next image build. The
+  README's new Developing section walks through it.
+
+### Fixed
+- `install/migrate.py` never asserted three columns
+  `add_smtp_verification.sql` has been adding to `instance_settings` since it
+  landed - `verified_fingerprint`, `verification_sent_at` and
+  `verification_attempts` - so `--verify-only` reported a schema correct while
+  not looking at them. Found by the new check on its first run.
+
 ## 1.45.0 — 2026-09-20
 
 ### Changed
