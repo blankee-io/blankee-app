@@ -1,0 +1,88 @@
+name: Bug report
+description: Something in Blankee does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. If this is a security problem, please do not
+        file it here — see [SECURITY.md](https://github.com/blankee-io/blankee-app/blob/main/SECURITY.md).
+
+        If your instance has real data in it, please redact amounts you would
+        rather not publish. Dates and category names are usually what matter.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The version in the footer of any page, or the output of `cat VERSION`.
+      placeholder: "1.45.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is it installed?
+      options:
+        - Docker (docker compose)
+        - Debian/Ubuntu (install/install.sh)
+        - Something else
+    validations:
+      required: true
+
+  - type: dropdown
+    id: bank
+    attributes:
+      label: Is a bank feed connected?
+      description: Bank syncing changes how entries and forecasts are created, so this narrows it down quickly.
+      options:
+        - "No"
+        - "Yes, a checking account"
+        - "Yes, a credit card"
+        - "Yes, both"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        I confirmed a grocery transaction for the 18th and expected it to come out of that
+        week's allowance. It came out of the following week's instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: If you can get it to happen again, the sequence. If it happened once and you cannot repeat it, say so — that is still worth reporting.
+      placeholder: |
+        1. Dashboard → this week
+        2. ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: |
+        Admin console → Logs, or `/var/log/blankee/blankee_error.log` on a Debian install,
+        `docker compose logs app` under Docker. The lines around the time it happened, not the whole file.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and discussions
+          required: false
+        - label: This is not a security problem (those go through SECURITY.md)
+          required: true

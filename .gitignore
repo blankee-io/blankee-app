@@ -98,3 +98,8 @@ migrations/
 # NOTE: the '.env' rule above matches only that exact name, so
 # .env.docker.example is still committed. Do not change it to '.env*' - the
 # docker install reads that example file.
+
+# A contributor's local Compose overrides (docker-compose.override.yml.example is
+# the template, and is committed). Compose reads this file automatically, so it
+# holds bind mounts and debug switches specific to one machine.
+docker-compose.override.yml

@@ -40,6 +40,22 @@ the snapshots do. The publish script is no longer used.
 4. Nothing else. `.github/workflows/release.yml` fires on `v*` and builds the
    release page from the changelog section as it stood at the tag.
 
+## Contributions
+
+A change from somebody else arrives as a pull request and is **squash-merged**,
+like any other: one commit on `main`, authored by them. Nothing is imported or
+replayed any more - that machinery existed only because releases used to be
+snapshots from a private repository.
+
+What a release owes them: their name in the changelog entry for the release it
+ships in ("thanks @handle"), and a row in `CONTRIBUTORS.md` with that version.
+The changelog entry reaches the release page by itself, since the workflow builds
+the notes from it.
+
+`CONTRIBUTING.md` promises the checks run on every pull request, so keep
+`.github/workflows/checks.yml` working: the sign-off check, `check_requirements.py`,
+`build_fa_fallback.py --check` and `check_migrations.py`.
+
 ## Version numbers
 
 `VERSION` is the single source of truth for what an instance reports. The
@@ -161,3 +177,9 @@ Any new migration must also add its assertions to `EXPECTED_TABLES`,
 `EXPECTED_COLUMNS` or `EXPECTED_CONSTRAINTS` in `install/migrate.py` in the same
 commit. Those lists are what `--verify-only` checks, and a migration outside them
 is one the verification silently does not cover.
+
+`install/check_migrations.py` checks that without a database - every file in
+`install/sql/` listed in `MIGRATIONS` and vice versa, and every table or column a
+migration creates present in the `EXPECTED_*` lists. It runs on every pull
+request, and it is worth running before a release too: it found three columns
+`add_smtp_verification.sql` had been adding since 1.20 that nothing asserted.
