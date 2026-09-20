@@ -146,6 +146,56 @@ def db_config():
     }
 
 
+_SSL_ARGS = None
+
+
+def ssl_args(cfg):
+    """
+    Extra client arguments needed to reach this server, or none. Decided once.
+
+    Debian's `default-mysql-client` is MariaDB's, and since 11.x it verifies the
+    server's certificate by default. The `mysql:8.0` image generates a
+    self-signed one, so `mysql` refuses a connection that pymysql - and
+    therefore the application itself - makes happily. The symptom is an install
+    that never finishes rather than an error anybody would connect to TLS.
+
+    Strict first. The flag is added only when a plain connection fails on the
+    certificate AND the client understands how to relax it: Oracle's client does
+    not verify and does not know `--ssl-verify-server-cert`, so passing it
+    always would break every Debian-package install to fix the container one.
+    `BLANKEE_MYSQL_SSL_ARGS` lets the Docker entrypoint, which has already
+    worked this out while waiting for the server, hand the answer over.
+    """
+    global _SSL_ARGS
+    if _SSL_ARGS is not None:
+        return _SSL_ARGS
+
+    from_env = os.environ.get('BLANKEE_MYSQL_SSL_ARGS', '').split()
+    if from_env:
+        _SSL_ARGS = from_env
+        return _SSL_ARGS
+
+    def probe(extra):
+        cmd = ['mysql', '--no-defaults'] + extra + [
+            '-h', cfg['host'], '-u', cfg['user'], '--batch', '--skip-column-names',
+            cfg['name'], '-e', 'SELECT 1']
+        env = dict(os.environ, MYSQL_PWD=cfg['password'])
+        return subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+    plain = probe([])
+    if plain.returncode == 0 or not re.search(
+            r'certificate|TLS/SSL error', plain.stderr or '', re.I):
+        _SSL_ARGS = []
+        return _SSL_ARGS
+
+    relaxed = ['--ssl-verify-server-cert=0']
+    _SSL_ARGS = relaxed if probe(relaxed).returncode == 0 else []
+    if _SSL_ARGS:
+        print("  the client refuses the server's self-signed certificate; "
+              "connecting without verifying it")
+    return _SSL_ARGS
+
+
 def mysql(cfg, sql=None, stdin_text=None, force=False):
     """
     Run SQL through the mysql client. Returns (returncode, stdout, stderr).
@@ -158,8 +208,8 @@ def mysql(cfg, sql=None, stdin_text=None, force=False):
     # one this connects as the wrong identity and fails with "Access denied" for
     # credentials that are perfectly correct. An installer cannot depend on
     # whatever option files the operator happens to have.
-    cmd = ['mysql', '--no-defaults', '-h', cfg['host'], '-u', cfg['user'],
-           '--batch', '--skip-column-names']
+    cmd = (['mysql', '--no-defaults'] + ssl_args(cfg)
+           + ['-h', cfg['host'], '-u', cfg['user'], '--batch', '--skip-column-names'])
     if force:
         cmd.append('--force')
     cmd.append(cfg['name'])

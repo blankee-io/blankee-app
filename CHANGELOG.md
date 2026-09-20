@@ -8,6 +8,27 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.45.2 — 2026-09-20
+
+### Fixed
+- A fresh Docker install could not finish. It sat at "Waiting for MySQL" until it
+  gave up, on a database that was already running and healthy. Debian's
+  `default-mysql-client` is MariaDB's, and since 11.x it **verifies the server's
+  certificate** by default; the `mysql:8.0` image generates a self-signed one, so
+  the client refused a connection the application's own Python driver was making
+  happily. Nothing in the application was affected - only the entrypoint's wait
+  and the migration runner, which are what has to succeed before the first page
+  can be served. Existing Docker installs would hit it too, on the next
+  `docker compose up --build` that picked up a newer base image.
+
+  The fix tries the strict connection first and relaxes only the certificate
+  *identity* check, only when the client reports the certificate as the problem
+  and only when it understands how to - Oracle's client does not verify and does
+  not know the option, so passing it unconditionally would have broken every
+  Debian-package install to fix the container one. The connection stays
+  encrypted, and the decision is made once, while waiting, then handed to
+  `install/migrate.py`.
+
 ## 1.45.1 — 2026-09-20
 
 ### Added
