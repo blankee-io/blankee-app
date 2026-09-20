@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.44.5 — 2026-09-20
+
+### Fixed
+- The daily pull's own documentation still described the run at ten to
+  midnight it had before 1.44.1. It runs at six in the morning, in the
+  user's timezone, and the file now says so - along with what one pass
+  does, in the order it does it.
+
 ## 1.44.4 — 2026-09-20
 
 ### Fixed

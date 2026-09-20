@@ -12,12 +12,20 @@ Its own thread rather than a job on the bucket prompt's walk. A pull is a
 network request that the Bridge can take minutes to answer; the 20:00 walk
 has to stay quick, and a slow bank should not delay anyone's prompt.
 
-Ten to midnight, local: the day is over, so what posted today comes in
-while it is still today, today's forecasts that nothing matched are moved
-on before the day closes, and the balances are compared as of yesterday,
-when nothing was still open. (It used to run at six in the morning; the
-overnight postings the bank makes after midnight now arrive a day later,
-and the day's own transactions a day earlier.)
+Six in the morning, local: the bank posts overnight, so the night's rows
+are in the budget before the day starts, and a person sees them the morning
+after they happened rather than a day later. (It ran at ten to midnight for
+a while, to catch the day's own postings; in practice the overnight rows
+matter more, and they arrive after that run.)
+
+What one pass does, in order: the posted transactions come in as entries
+waiting to be confirmed, each drawing down the forecast for its own day;
+forecasts on days the bank has now reported are settled, a bill moved to
+the day after the last posted transaction and an allowance released; the
+totals are recalculated; and only then are the balances compared - each
+account measured on the day its own balance figure speaks for, with what
+is still only forecast left out of the app's side. See bank_import.pull,
+defer_unmatched and feed_as_of.
 """
 
 import threading
