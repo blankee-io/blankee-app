@@ -6,6 +6,11 @@ Licensed under the [GNU Affero General Public License v3.0](LICENSE). Bundled
 third-party components are listed in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for a dev
+setup and the conventions that matter, and
+[Discussions](https://github.com/blankee-io/blankee-app/discussions) for anything
+that is not yet a bug. Found a security problem? [SECURITY.md](SECURITY.md).
+
 ---
 
 ## Install
@@ -331,6 +336,45 @@ optional** — a release that adds a dependency fails at import without it. And
 To check the schema without changing it, add `--verify-only`.
 
 ---
+
+---
+
+## Developing
+
+Docker builds the working tree, so a clone is all you need. The override file is
+what makes it iterable — with it, an edit to a template, a `.py` file or anything
+under `static/` shows up on the next request; without it both are baked into the
+image and every change means a rebuild.
+
+```bash
+git clone https://github.com/blankee-io/blankee-app.git && cd blankee-app
+cp .env.docker.example .env                                 # the three secrets it names
+cp docker-compose.override.yml.example docker-compose.override.yml
+docker compose up -d --build
+```
+
+Then <http://localhost:18420>, and the first account you create becomes the
+administrator. The override also exposes MySQL on `127.0.0.1:13306` and Redis on
+`127.0.0.1:16379`, which is most of how you debug Redis-first code, and sets
+`BANK_PROVIDER=null` so nothing reaches a real bank while you work.
+
+After changing `requirements.txt`:
+
+```bash
+docker compose up -d --build app
+```
+
+There is no test suite. What there is, and what runs on every pull request:
+
+```bash
+python3 install/check_requirements.py          # every import declared
+python3 install/build_fa_fallback.py --check    # no Pro-only icon without a fallback
+python3 install/check_migrations.py             # a migration registered in all three places
+```
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the conventions — Redis-first writes, the
+colour palette, the shared toast and modal, structured logging, and what a
+migration has to touch.
 
 ## Logs
 

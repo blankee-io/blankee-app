@@ -1,0 +1,42 @@
+# Development overrides. Copy, do not rename:
+#
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#
+# Compose picks up docker-compose.override.yml automatically, so nothing else
+# changes about how you start it. The copy is gitignored.
+#
+# What this buys you: an edit to a template, a .py file or anything under
+# static/ shows up on the next request instead of on the next image build.
+# Without it the whole tree is baked into the image at build time, and iterating
+# means `docker compose up -d --build app` for every change.
+services:
+  app:
+    volumes:
+      # Your clone over the image's copy. The two named volumes below are listed
+      # after it on purpose: they must stay volumes, or profile pictures and
+      # blankee.conf would live in your working tree and show up as untracked
+      # files - and blankee.conf carries the administrator password-reset flag,
+      # which you want to survive `docker compose down`.
+      - .:/app
+      - uploads:/app/static/uploads
+      - config:/config
+    environment:
+      # Jinja compiles a template once per process and keeps it. Without this an
+      # edit to a template is invisible until the container restarts, which looks
+      # exactly like a change that did nothing.
+      TEMPLATES_AUTO_RELOAD: "1"
+      FLASK_DEBUG: "1"
+      # A real bank connection is not needed for most work, and a stray pull
+      # against a real account while you are testing is worth avoiding.
+      BANK_PROVIDER: "null"
+
+  # Exposed so you can look, which is most of debugging Redis-first code:
+  #   mysql -h 127.0.0.1 -P 13306 -u blankee -p blankee
+  #   redis-cli -p 16379 keys 'income_entries:v1:*'
+  # Ports well away from the defaults, so a local MySQL or Redis keeps working.
+  db:
+    ports:
+      - "127.0.0.1:13306:3306"
+  redis:
+    ports:
+      - "127.0.0.1:16379:6379"

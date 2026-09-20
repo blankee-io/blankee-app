@@ -1,0 +1,13 @@
+# A blank issue is almost always a question in the wrong place, and answering it
+# starts with asking for the version anyway. The form asks up front instead.
+blank_issues_enabled: false
+contact_links:
+  - name: Question, or an idea for a feature
+    url: https://github.com/blankee-io/blankee-app/discussions
+    about: Discussions is the place for "how do I", "should Blankee do X" and anything not yet a bug. Features are worth raising here before writing code.
+  - name: Security problem
+    url: https://github.com/blankee-io/blankee-app/security/advisories/new
+    about: Report privately. Never in an issue - see SECURITY.md for what to include.
+  - name: How to contribute
+    url: https://github.com/blankee-io/blankee-app/blob/main/CONTRIBUTING.md
+    about: Running it locally, the conventions that matter, and how a change gets from a branch to a release.

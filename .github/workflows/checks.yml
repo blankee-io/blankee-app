@@ -1,0 +1,102 @@
+# The checks a pull request gets. There is no test suite; these are the cheap,
+# dependency-free gates that catch what review keeps catching by hand.
+#
+# `pull_request`, never `pull_request_target`: this workflow runs code from a
+# fork, so it gets the read-only token and no secrets. Nothing here needs either.
+#
+# Guarded by repository, like release.yml: this file is published, and a fork
+# should not spend its own Actions minutes reporting on somebody else's rules.
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sign-off:
+    name: Sign-off (DCO)
+    if: github.repository == 'blankee-io/blankee-app' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Every commit carries Signed-off-by
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+          # --no-merges: a merge GitHub creates when a branch is updated has no
+          # author to certify anything, and asking for one would be asking the
+          # contributor to sign somebody else's commit.
+          for sha in $(git rev-list --no-merges "$BASE".."$HEAD"); do
+            if [ -z "$(git log -1 --format='%(trailers:key=Signed-off-by,valueonly)' "$sha")" ]; then
+              echo "::error::$(git log -1 --format='%h %s' "$sha") has no Signed-off-by"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo ""
+            echo "$missing commit(s) are missing a sign-off."
+            echo ""
+            echo "The Developer Certificate of Origin (https://developercertificate.org)"
+            echo "is how this project records that you have the right to submit your"
+            echo "change. There is nothing to sign and nothing to post - just the line"
+            echo "git adds for you:"
+            echo ""
+            echo "  last commit only:   git commit -s --amend --no-edit"
+            echo "  the whole branch:   git rebase --signoff main"
+            echo ""
+            echo "then: git push --force-with-lease"
+            exit 1
+          fi
+          echo "all commits signed off"
+
+  static:
+    name: Static checks
+    if: github.repository == 'blankee-io/blankee-app'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Font Awesome Pro is not in this repository. An icon that only exists in
+      # Pro needs a Free fallback, or it renders as nothing on a clean install.
+      - name: Icon fallbacks
+        run: python3 install/build_fa_fallback.py --check
+
+      # A migration is three edits in one commit; this is the one that can be
+      # checked without a database.
+      - name: Migration manifest
+        run: python3 install/check_migrations.py
+
+      # Not a test suite - just "does every module parse", which catches the class
+      # of mistake that takes an instance down on reload.
+      - name: Everything compiles
+        run: python3 -m compileall -q app.py version_info.py install providers relay
+
+  dependencies:
+    name: Dependencies
+    # Separate from the static checks because it is the only job that installs
+    # anything: check_requirements.py maps each import to the distribution that
+    # provides it, which it can only do when they are installed. Installing also
+    # proves requirements.txt still resolves, which is a failure mode of its own.
+    if: github.repository == 'blankee-io/blankee-app'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          # The version the application is developed and served on - see the
+          # Dockerfile. A pin that resolves on 3.12 and not on 3.10 is a bug here.
+          python-version: '3.10'
+          cache: pip
+      - name: Install what requirements.txt asks for
+        run: pip install -r requirements.txt
+      - name: Every import is declared
+        run: python3 install/check_requirements.py
