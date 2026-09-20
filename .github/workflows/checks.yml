@@ -22,7 +22,7 @@ jobs:
     if: github.repository == 'blankee-io/blankee-app' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Every commit carries Signed-off-by
@@ -63,7 +63,7 @@ jobs:
     if: github.repository == 'blankee-io/blankee-app'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Font Awesome Pro is not in this repository. An icon that only exists in
       # Pro needs a Free fallback, or it renders as nothing on a clean install.
@@ -89,7 +89,7 @@ jobs:
     if: github.repository == 'blankee-io/blankee-app'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           # The version the application is developed and served on - see the
