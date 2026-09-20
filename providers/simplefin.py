@@ -458,17 +458,23 @@ class SimpleFINBankProvider(BankProvider):
         screen shows, and what the bank page refreshes from.
         """
         body = self._get(user_id, {'balances-only': '1'})
-        connections, accounts = self._parse_accounts(body)
+        connections, accounts = self._parse_accounts(body, _user_zone(user_id))
         return {'connections': connections, 'accounts': accounts,
                 'errors': body.get('errlist') or []}
 
     @staticmethod
-    def _parse_accounts(body: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    def _parse_accounts(body: Dict[str, Any], tz=None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         (connections, accounts) from one /accounts body, in the shapes the
         pages use. The same body carries transactions when they were asked
         for, so an overview and a transaction pull parse their accounts here
         alike.
+
+        tz is the user's zone, for the balance date. The Bridge stamps a
+        balance at a moment, often just after midnight UTC, and that moment
+        says which of the user's days the figure is the end of - the
+        reconciliation measures the app on that day, so reading it in UTC
+        would measure a day the figure does not cover.
         """
         connections = {}
         for c in body.get('connections') or []:
@@ -514,7 +520,7 @@ class SimpleFINBankProvider(BankProvider):
                 'currency': a.get('currency') or 'USD',
                 'current_balance': _decimal(a.get('balance')),
                 'available_balance': _decimal(a.get('available-balance')),
-                'balance_date': _epoch_to_date(a.get('balance-date')),
+                'balance_date': _epoch_to_date(a.get('balance-date'), tz),
                 'guessed_subtype': guess_subtype(name),
                 'mask': mask_from_name(name),
             })
@@ -607,7 +613,7 @@ class SimpleFINBankProvider(BankProvider):
                     'posted_at': _epoch_int(t.get('posted')),
                     'enrichment': {},
                 })
-        connections, accounts = self._parse_accounts(body)
+        connections, accounts = self._parse_accounts(body, tz)
         return {'transactions': out, 'connections': connections, 'accounts': accounts,
                 'errors': body.get('errlist') or []}
 

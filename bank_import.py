@@ -1403,15 +1403,25 @@ def record_balances(user_id: int, balances: List[Dict[str, Any]]) -> int:
     return written
 
 
-def feed_as_of_yesterday(user_id: int, balances: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], str, List[str]]:
+def feed_as_of(user_id: int, balances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    The bank's balances turned into what the app should show for the end of
-    the user's YESTERDAY: today's balance less whatever posted today. As of
-    yesterday because today's forecasts are still open; as of the end of it
-    because the bank's figure is a moment, not a day.
+    The bank's balances turned into what the app should show, grouped by the
+    day each one actually speaks for.
 
-    Returns ({'checking', 'savings', 'cards': {credit_account_id: owed}},
-    yesterday, [account ids skipped for a stale balance date]).
+    A balance is a moment, and the moment is the bank's: the Bridge stamps one
+    just after midnight UTC, which for anyone west of it is the evening
+    before. Read in the user's own zone that stamp says which of their days
+    the figure is the end of, and that is the day the app is measured on -
+    never later than yesterday, because today's forecasts are still open.
+    Whatever posted after that day is taken back out of the figure, per
+    account, because the bank's number is a moment and a day is not.
+
+    Nothing is skipped for being old. A stamp from the day before yesterday
+    is not a reason not to balance; it is a reason to balance against the day
+    it belongs to.
+
+    Returns [{'as_of', 'checking', 'savings', 'cards': {credit_account_id:
+    owed}}], one per distinct day, earliest first.
     """
     from bank_redis import (_get_all_linked_accounts_raw, linked_account_kind,
                             get_credit_account_for_linked_account, get_linked_transactions)
@@ -1419,64 +1429,87 @@ def feed_as_of_yesterday(user_id: int, balances: List[Dict[str, Any]]) -> Tuple[
     active = {str(a.get('account_id')): a for a in (_get_all_linked_accounts_raw(user_id) or [])
               if _flag(a.get('is_active', 1))}
 
-    # Signed movements posted after yesterday, per account.
+    # The day each account's figure is the end of.
+    day_of: Dict[str, str] = {}
+    for b in balances or []:
+        aid = str(b.get('account_id') or '')
+        if not aid or aid not in active or b.get('current_balance') is None:
+            continue
+        stamped = _iso(b.get('balance_date'))
+        day_of[aid] = stamped if stamped and stamped < yesterday else yesterday
+
+    # Signed movements posted after that day, per account.
     moved: Dict[str, float] = {}
     for t in get_linked_transactions(user_id) or []:
         if _flag(t.get('pending')):
             continue
-        d = _iso(t.get('date'))
-        if not d or d <= yesterday:
-            continue
         aid = str(t.get('account_id') or '')
+        day = day_of.get(aid)
+        d = _iso(t.get('date'))
+        if not day or not d or d <= day:
+            continue
         signed = float(t.get('amount') or 0) * (1 if t.get('transaction_type') == 'income' else -1)
         moved[aid] = moved.get(aid, 0.0) + signed
 
-    feed: Dict[str, Any] = {'checking': None, 'savings': None, 'cards': {}}
-    stale: List[str] = []
+    groups: Dict[str, Dict[str, Any]] = {}
     for b in balances or []:
         aid = str(b.get('account_id') or '')
-        acc = active.get(aid)
-        if not acc or b.get('current_balance') is None:
-            continue
-        if b.get('balance_date') and b['balance_date'] < yesterday:
-            stale.append(aid)
+        day = day_of.get(aid)
+        if not day:
             continue
         as_of = float(b['current_balance']) - moved.get(aid, 0.0)
-        kind = linked_account_kind(acc)
+        group = groups.setdefault(day, {'as_of': day, 'checking': None, 'savings': None, 'cards': {}})
+        kind = linked_account_kind(active[aid])
         if kind == 'checking':
-            feed['checking'] = as_of
+            group['checking'] = as_of
         elif kind == 'savings':
-            feed['savings'] = as_of
+            group['savings'] = as_of
         elif kind == 'credit':
             card = get_credit_account_for_linked_account(user_id, aid)
             if card and card.get('id') is not None:
                 # A card's balance from the bank is what is owed, negative.
-                feed['cards'][int(card['id'])] = abs(as_of)
-    return feed, yesterday, stale
+                group['cards'][int(card['id'])] = abs(as_of)
+    return [groups[d] for d in sorted(groups)]
 
 
 def reconcile(user_id: int, balances: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
-    Bring the app's balances to the bank's, as of the user's yesterday, with
-    the corrections auto_balance writes for a typed figure. Nothing is
-    confirmed on the way: a forecast the feed answers for has been matched
-    or moved on already, and one it does not answer for is the evening
-    prompt's. None when there was nothing to compare.
+    Bring the app's balances to the bank's, each account measured on the day
+    its figure speaks for (feed_as_of), with the corrections auto_balance
+    writes for a typed figure.
+
+    Forecasts are left out of the app's side: the bank's figure is money that
+    moved, and a plan it has not seen is not a discrepancy to be corrected
+    into a real entry. Nothing is confirmed on the way either - a forecast
+    the feed answers for has been matched or moved on already, and one it
+    does not answer for is the evening prompt's.
+
+    None when there was nothing to compare.
     """
     import auto_balance
-    feed, yesterday, stale = feed_as_of_yesterday(user_id, balances)
-    if feed['checking'] is None and feed['savings'] is None and not feed['cards']:
-        if stale:
-            log_info(logger, TAG, f'user {user_id}: balances not reconciled, the bank\'s figures are older than {yesterday}')
-        return None
     from app import app
+    groups = [g for g in feed_as_of(user_id, balances)
+              if g['checking'] is not None or g['savings'] is not None or g['cards']]
+    if not groups:
+        return None
+    if len(groups) > 1 or groups[0]['as_of'] < (_user_today(user_id) - timedelta(days=1)).isoformat():
+        log_info(logger, TAG, f"user {user_id}: balancing against the bank as of "
+                              f"{', '.join(g['as_of'] for g in groups)}")
+    merged: Optional[Dict[str, Any]] = None
     with app.app_context():
-        result = auto_balance.reconcile_to_feed(user_id, checking=feed['checking'], savings=feed['savings'],
-                                                cards=feed['cards'], on_date=_parse(yesterday),
-                                                confirm_buckets=False)
-    result['as_of'] = yesterday
-    result['stale'] = stale
-    return result
+        for g in groups:
+            result = auto_balance.reconcile_to_feed(user_id, checking=g['checking'], savings=g['savings'],
+                                                   cards=g['cards'], on_date=_parse(g['as_of']),
+                                                   confirm_buckets=False, ignore_forecasts=True)
+            if merged is None:
+                merged = result
+            else:
+                merged['checking'] = merged.get('checking') or result.get('checking')
+                merged['savings'] = merged.get('savings') or result.get('savings')
+                merged['cards'] = (merged.get('cards') or []) + (result.get('cards') or [])
+    if merged is not None:
+        merged['as_of'] = groups[0]['as_of']
+    return merged
 
 
 def reconcile_summary(result: Optional[Dict[str, Any]]) -> str:
