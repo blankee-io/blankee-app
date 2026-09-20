@@ -555,6 +555,98 @@ def app_balance(user_id, on_date=None):
     return Decimal(str(value or 0))
 
 
+def _open_forecasts(user_id, table, on_date):
+    """
+    [(category_id, Decimal amount)] for every open forecast on `table` dated
+    on or before on_date. Redis, the same source the recalculations read.
+    """
+    cutoff = on_date.isoformat() if hasattr(on_date, 'isoformat') else str(on_date)[:10]
+    out = []
+    for e in redis_manager.get_table_cache(table, user_id) or []:
+        try:
+            if int(e.get('is_bucket') or 0) != 1:
+                continue
+            amount = Decimal(str(e.get('amount') or 0))
+            category_id = int(e.get('category_id'))
+        except (TypeError, ValueError, ArithmeticError):
+            continue
+        day = str(e.get('date') or '')[:10]
+        if amount <= 0 or not day or day > cutoff:
+            continue
+        out.append((category_id, amount))
+    return out
+
+
+def open_forecast_offsets(user_id, on_date, card_ids=None):
+    """
+    What open forecasts dated on or before on_date add to the stored figures,
+    so that a comparison against a bank balance can take them back out.
+
+    A forecast is an entry like any other to the recalculations, so both
+    figures count it: update_daily_totals sums buckets into the remainder
+    with no filter at all, and a card's balance is previous + expenses -
+    payments over the same rows. A bank balance is money that has actually
+    moved. Compared with the forecasts left in, a bill still due reads as
+    money missing and gets written into a real entry - which is how a pull
+    that imported nothing came to correct a balance by the exact size of the
+    forecasts sitting on the day it measured.
+
+    Returns {'cash': Decimal, 'cards': {credit_account_id: Decimal}}, each to
+    be ADDED to the stored figure. Only the tables a bank feed answers for -
+    the same scope defer_unmatched settles. A table the bank says nothing
+    about is the evening prompt's, and its forecasts stay counted.
+    """
+    from bank_import import fed_tables, _card_category_ids
+    fed = fed_tables(user_id)
+    # The remainder is income less expenses, so an expense forecast has taken
+    # money out of it and an income forecast has put money in.
+    cash = Decimal('0')
+    if 'expense_entries' in fed:
+        for _cid, amount in _open_forecasts(user_id, 'expense_entries', on_date):
+            cash += amount
+    if 'income_entries' in fed:
+        for _cid, amount in _open_forecasts(user_id, 'income_entries', on_date):
+            cash -= amount
+
+    cards = {int(a): Decimal('0') for a in (card_ids or [])}
+    if cards:
+        # A projected interest charge is not in the stored balance as the entry
+        # it looks like: update_daily_ca_totals skips it and recomputes the
+        # charge itself. Taking it out here would remove something that was
+        # never added.
+        interest = set()
+        for c in redis_manager.get_table_cache('c_expense_categories', user_id) or []:
+            if c.get('id') is not None and c.get('is_interest') in (1, True, '1', 'true', 'True'):
+                interest.add(int(c['id']))
+        owners = {}
+        for account_id in cards:
+            for cat in (_card_category_ids(user_id, account_id) or set()):
+                owners[int(cat)] = account_id
+        for cat, amount in _open_forecasts(user_id, 'c_expense_entries', on_date):
+            owner = owners.get(cat)
+            if owner is not None and cat not in interest:
+                cards[owner] -= amount
+        # A forecast in a card's mirror category is a payment towards that
+        # card, held on the card side as a c_payment row - and that table has
+        # no is_bucket of its own, so the stored balance shows a debt already
+        # cleared by a payment nobody has made yet.
+        mirrors = {}
+        for c in redis_manager.get_table_cache('expense_categories', user_id) or []:
+            try:
+                owner = int(c.get('credit_account_id'))
+            except (TypeError, ValueError):
+                continue
+            if (int(c.get('is_credit_account') or 0) == 1 and owner in cards
+                    and c.get('id') is not None):
+                mirrors[int(c['id'])] = owner
+        if mirrors:
+            for cat, amount in _open_forecasts(user_id, 'expense_entries', on_date):
+                owner = mirrors.get(cat)
+                if owner is not None:
+                    cards[owner] += amount
+    return {'cash': cash, 'cards': cards}
+
+
 def reconcilable(user_id):
     """
     Which balances this user can usefully state by hand.
@@ -961,9 +1053,14 @@ def _correct_savings(user_id, actual, on_date):
     return True, difference
 
 
-def _correct_card(user_id, account_id, actual, on_date):
+def _correct_card(user_id, account_id, actual, on_date, forecast_offset=None):
     """
     Move one card's balance to `actual` with a signed entry in its Uncategorized.
+
+    forecast_offset is what the card's open forecasts add to the stored
+    balance, when the figure being matched is a bank's - see
+    open_forecast_offsets. Without it a forecast charge on the card reads as
+    a debt the bank has not reported and the correction cancels it.
 
     Not a payment, even when the balance needs to come down. A payment is created
     from an expense against the cash balance, so recording one would move the
@@ -988,6 +1085,8 @@ def _correct_card(user_id, account_id, actual, on_date):
             break
     if current is None:
         return False, None
+    if forecast_offset:
+        current += Decimal(str(forecast_offset))
 
     difference = actual - current
     if abs(difference) < TOLERANCE:
@@ -1101,7 +1200,7 @@ def _write_correction(user_id, on_date, difference):
 
 
 def apply(user_id, actual_balance, on_date=None, actual_savings=None,
-          actual_cards=None, confirm_buckets=True):
+          actual_cards=None, confirm_buckets=True, ignore_forecasts=False):
     """
     Reconcile the app against a real balance.
 
@@ -1110,10 +1209,14 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
     Uncategorized entry dated today.
 
     confirm_buckets=False skips the first step. The bank feed reconciles
-    every morning, as of the day before, and by then a forecast on a fed
-    table has already been matched or moved on; a forecast on a table the
-    bank does not answer for (an unlinked card's) is the evening prompt's
-    to ask about, not the feed's to answer.
+    every morning, as of the day the bank's figure speaks for, and by then a
+    forecast on a fed table has already been matched or moved on; a forecast
+    on a table the bank does not answer for (an unlinked card's) is the
+    evening prompt's to ask about, not the feed's to answer.
+
+    ignore_forecasts leaves whatever forecasts remain out of the app's side
+    of the comparison - for the feed, which states money that moved rather
+    than a figure a person has looked at. See open_forecast_offsets.
 
     actual_savings and actual_cards are optional: the savings balance the user
     reports, and {account_id: balance} for whichever cards they filled in. Each
@@ -1177,6 +1280,16 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
     if current is None:
         return False, {'error': "There is no balance recorded for today yet.",
                        'confirmed': confirmed}
+    if ignore_forecasts:
+        try:
+            current += open_forecast_offsets(user_id, on_date)['cash']
+        except Exception as e:
+            # Comparing with them still in would correct a plan into an entry.
+            # Nothing measured is better than something wrong written down.
+            log_exception(logger, 'AUTOBALANCE',
+                          f"Could not measure the open forecasts for user {user_id}: {e}")
+            return False, {'error': 'Could not measure your open forecasts.',
+                           'confirmed': confirmed}
 
     difference = actual - current
     result = {
@@ -1263,7 +1376,7 @@ def apply(user_id, actual_balance, on_date=None, actual_savings=None,
 
 
 def reconcile_to_feed(user_id, checking=None, savings=None, cards=None,
-                      on_date=None, confirm_buckets=True):
+                      on_date=None, confirm_buckets=True, ignore_forecasts=False):
     """
     Bring the app's balances to what the bank feed reports: the moment
     accounts are linked from the bank page, and after every pull since.
@@ -1279,6 +1392,10 @@ def reconcile_to_feed(user_id, checking=None, savings=None, cards=None,
     owed}, for cards linked to an existing Blankee card (a card created at link
     time already starts at the bank's figure). Returns a dict saying what
     happened to each, in the shape apply() uses, so the caller can report it.
+
+    ignore_forecasts takes the open forecasts out of the app's side of every
+    comparison - what the pull passes, because the bank states money that
+    moved. See open_forecast_offsets.
     """
     from app import _recalc_ca_daily_balance, _recalc_totals_remainders
     on_date = on_date or _user_now(user_id).date()
@@ -1287,9 +1404,20 @@ def reconcile_to_feed(user_id, checking=None, savings=None, cards=None,
     # The savings and card readers below read MySQL; a pull has just
     # recalculated into Redis.
     _flush(user_id)
-
+    # Measured before any correction is written, so a correction cannot be
+    # read back as part of what was being corrected for.
+    card_offsets = {}
+    if ignore_forecasts and cards:
+        try:
+            card_offsets = open_forecast_offsets(user_id, on_date,
+                                                 card_ids=list(cards.keys()))['cards']
+        except Exception as e:
+            log_exception(logger, 'AUTOBALANCE',
+                          f"Could not measure the open forecasts for user {user_id}: {e}")
+            card_offsets = None
     if checking is not None:
-        ok, r = apply(user_id, checking, on_date=on_date, confirm_buckets=confirm_buckets)
+        ok, r = apply(user_id, checking, on_date=on_date, confirm_buckets=confirm_buckets,
+                      ignore_forecasts=ignore_forecasts)
         result['checking'] = {
             'ok': ok,
             'difference': r.get('difference'),
@@ -1326,8 +1454,15 @@ def reconcile_to_feed(user_id, checking=None, savings=None, cards=None,
     for account_id, actual in (cards or {}).items():
         if actual is None:
             continue
+        if card_offsets is None:
+            # The forecasts could not be measured; correcting the card would be
+            # guessing at which part of the difference is real.
+            result['cards'].append({'account_id': int(account_id), 'ok': False,
+                                    'difference': None, 'entry_written': False})
+            continue
         try:
-            ok, diff = _correct_card(user_id, account_id, Decimal(str(actual)), on_date)
+            ok, diff = _correct_card(user_id, account_id, Decimal(str(actual)), on_date,
+                                     forecast_offset=card_offsets.get(int(account_id)))
         except Exception as e:
             log_exception(logger, 'AUTOBALANCE',
                           f"Could not correct card {account_id} for user {user_id}: {e}")
