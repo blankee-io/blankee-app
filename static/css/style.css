@@ -40,6 +40,11 @@
     --shadow-lg:          rgb(0 0 0 / 14%);
     --shadow-xl:          rgb(0 0 0 / 20%);
     --shadow-xxl:         rgb(0 0 0 / 35%);
+
+    /* The badge on the corner of an entry cell: the tick, the dash, the pending
+       question mark and the days-late count. One token because they sit side by
+       side down a column, and any difference between them reads as meaning. */
+    --entry-badge-size:   13px;
 }
 
 /* Universal hover transition for all interactive elements */
@@ -3544,8 +3549,8 @@ tr[data-category-id] td.before-member-since {
     position: absolute;
     top: -6px;
     right: -8px;
-    width: 11px;
-    height: 11px;
+    width: var(--entry-badge-size);
+    height: var(--entry-badge-size);
     font-size: 8.5px;
     font-weight: 900;
     pointer-events: none;
@@ -3581,15 +3586,17 @@ tr[data-category-id] td.before-member-since {
     position: absolute;
     top: -6px;
     right: -8px;
-    width: 11px;
-    height: 11px;
+    width: var(--entry-badge-size);
+    height: var(--entry-badge-size);
     font-size: 8.5px;
     font-weight: 900;
     pointer-events: none;
     font-family: var(--blankee-fa-family, "Font Awesome 7 Pro");
-    /* 068 is fa-minus, present in Free and Pro alike - the same constraint the
-       tick above is written to. */
-    content: '068';
+    /* f068 is fa-minus, present in Free and Pro alike - the same constraint the
+       tick above is written to. The backslash matters: written through a script
+       that read it as an escape, it became a form feed and the badge rendered
+       the characters 068 instead of a dash. */
+    content: '\f068';
     color: var(--white);
     background-color: var(--success);
     border-radius: 50%;
@@ -3601,15 +3608,19 @@ tr[data-category-id] td.before-member-since {
 .pending-entry {
     font-weight: bold;
     position: relative;
-    z-index: 2;
+    /* Same stacking as .paid, for the same reason: this is a stacking context,
+       so the badge in ::after cannot clear .current-week-outline at 15 unless
+       the cell does. At 2 the outline's border drew straight across it. */
+    z-index: 16;
 }
 
 .pending-entry::after {
+    z-index: 16;
     position: absolute;
     top: -6px;
     right: -8px;
-    width: 11px;
-    height: 11px;
+    width: var(--entry-badge-size);
+    height: var(--entry-badge-size);
     font-size: 8.5px;
     font-weight: 900;
     pointer-events: none;
@@ -3621,7 +3632,6 @@ tr[data-category-id] td.before-member-since {
     content: '\f128';
     color: var(--white);
     background-color: var(--secondary);
-    border: 1.5px solid var(--text-dark);
     border-radius: 50%;
     display: inline-flex;
     align-items: center;
@@ -3633,8 +3643,8 @@ tr[data-category-id] td.before-member-since {
     position: absolute;
     top: -6px;
     right: -8px;
-    width: 14px;
-    height: 14px;
+    width: var(--entry-badge-size);
+    height: var(--entry-badge-size);
     font-size: 8px;
     font-weight: 900;
     pointer-events: none;
@@ -19110,8 +19120,10 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
    two pages are narrower than on the day view, so a marker at right: -8px
    overhung the cell edge and collided with the one in the next column.
 
-   Scoped by body id because the same four markers are used on all five
-   dashboards and the other three sit correctly. #dashboard is the week grid,
+   Scoped by body id because the same five markers are used on all five
+   dashboards and the other three pages sit correctly. The pending question mark
+   was missing from this list, so it alone stayed at -8px and sat three pixels
+   right of every other marker in the column. #dashboard is the week grid,
    #dashboard-m-body the month calendar. */
 
 #dashboard .paid::after,
@@ -19128,7 +19140,10 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 #loaf-page .below-threshold::before,
 #dashboard .bucket-late-badge,
 #dashboard-m-body .bucket-late-badge,
-#loaf-page .bucket-late-badge {
+#loaf-page .bucket-late-badge,
+#dashboard .pending-entry::after,
+#dashboard-m-body .pending-entry::after,
+#loaf-page .pending-entry::after {
     right: -5px;
 }
 

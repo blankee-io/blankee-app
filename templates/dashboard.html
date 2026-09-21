@@ -1720,6 +1720,12 @@
                 td.classList.add('group-sum-cell');
                 td.style.textAlign = 'right';
                 td.style.fontWeight = '600';
+                // Dim the columns before the account existed, as every other row
+                // does. globalFridays is what numColumns was counted from, so the
+                // indices line up; guarded in case a caller ever passes more.
+                if (globalFridays[i] && isWeekBeforeMemberSince(globalFridays[i])) {
+                    td.classList.add('before-member-since');
+                }
                 headerRow.appendChild(td);
             }
 
