@@ -1717,18 +1717,22 @@
         }
 
         // Build a group header <tr> for the main data table
-        function createGroupHeaderRow(group, type, numColumns) {
+        // months rather than a count: every other row dims the columns that fall
+        // before the account existed, and a group header that stays bright is the
+        // one bright band in an otherwise dimmed column.
+        function createGroupHeaderRow(group, type, months) {
             const headerRow = document.createElement('tr');
             headerRow.classList.add('group-header-row', `${type}-group-header`);
             if (type.startsWith('ca_')) headerRow.classList.add('ca-group-header');
             headerRow.setAttribute('data-group-id', group.id);
 
             // Data cells (one per date column) — show sums when collapsed
-            for (let i = 0; i < numColumns; i++) {
+            for (let i = 0; i < months.length; i++) {
                 const td = document.createElement('td');
                 td.classList.add('group-sum-cell');
                 td.style.textAlign = 'right';
                 td.style.fontWeight = '600';
+                if (isMonthBeforeMemberSince(months[i].date)) td.classList.add('before-member-since');
                 headerRow.appendChild(td);
             }
 
@@ -1970,7 +1974,7 @@
                     }
                     _lastIncomeSidebarEl = sidebarHeader;
 
-                    const groupHeaderRow = createGroupHeaderRow(group, 'income', numColumns);
+                    const groupHeaderRow = createGroupHeaderRow(group, 'income', months);
                     groupHeaderRow.classList.add('empty-group');
                     if (!isIncomeEditMode) groupHeaderRow.style.display = 'none';
                     incomeTableBody.appendChild(groupHeaderRow);
@@ -1983,7 +1987,7 @@
                 cats[0].parentNode.insertBefore(sidebarHeader, cats[0]);
                 _lastIncomeSidebarEl = cats[cats.length - 1];
 
-                const groupHeaderRow = createGroupHeaderRow(group, 'income', numColumns);
+                const groupHeaderRow = createGroupHeaderRow(group, 'income', months);
                 incomeTableBody.appendChild(groupHeaderRow);
 
                 cats.forEach(displayedCategory => {
@@ -2011,7 +2015,7 @@
                 const sidebarHeader = createSidebarGroupHeader(ungroupedGroup, 'income');
                 ungroupedCats[0].parentNode.insertBefore(sidebarHeader, ungroupedCats[0]);
 
-                const groupHeaderRow = createGroupHeaderRow(ungroupedGroup, 'income', numColumns);
+                const groupHeaderRow = createGroupHeaderRow(ungroupedGroup, 'income', months);
                 incomeTableBody.appendChild(groupHeaderRow);
 
                 ungroupedCats.forEach(displayedCategory => {
@@ -2040,7 +2044,7 @@
                 const sidebarHeader = createSidebarGroupHeader(systemGroup, 'income');
                 systemCats[0].parentNode.insertBefore(sidebarHeader, systemCats[0]);
 
-                const groupHeaderRow = createGroupHeaderRow(systemGroup, 'income', numColumns);
+                const groupHeaderRow = createGroupHeaderRow(systemGroup, 'income', months);
                 incomeTableBody.appendChild(groupHeaderRow);
 
                 systemCats.forEach(displayedCategory => {
@@ -2183,7 +2187,7 @@
                     }
                     _lastExpenseSidebarEl = sidebarHeader;
 
-                    const groupHeaderRow = createGroupHeaderRow(group, 'expense', numColumns);
+                    const groupHeaderRow = createGroupHeaderRow(group, 'expense', months);
                     groupHeaderRow.classList.add('empty-group');
                     if (!isExpenseEditMode) groupHeaderRow.style.display = 'none';
                     expensesTableBody.appendChild(groupHeaderRow);
@@ -2196,7 +2200,7 @@
                 cats[0].parentNode.insertBefore(sidebarHeader, cats[0]);
                 _lastExpenseSidebarEl = cats[cats.length - 1];
 
-                const groupHeaderRow = createGroupHeaderRow(group, 'expense', numColumns);
+                const groupHeaderRow = createGroupHeaderRow(group, 'expense', months);
                 expensesTableBody.appendChild(groupHeaderRow);
 
                 cats.forEach(displayedCategory => {
@@ -2224,7 +2228,7 @@
                 const sidebarHeader = createSidebarGroupHeader(ungroupedGroup, 'expense');
                 ungroupedCats[0].parentNode.insertBefore(sidebarHeader, ungroupedCats[0]);
 
-                const groupHeaderRow = createGroupHeaderRow(ungroupedGroup, 'expense', numColumns);
+                const groupHeaderRow = createGroupHeaderRow(ungroupedGroup, 'expense', months);
                 expensesTableBody.appendChild(groupHeaderRow);
 
                 ungroupedCats.forEach(displayedCategory => {
@@ -2253,7 +2257,7 @@
                 const sidebarHeader = createSidebarGroupHeader(systemGroup, 'expense');
                 systemCats[0].parentNode.insertBefore(sidebarHeader, systemCats[0]);
 
-                const groupHeaderRow = createGroupHeaderRow(systemGroup, 'expense', numColumns);
+                const groupHeaderRow = createGroupHeaderRow(systemGroup, 'expense', months);
                 expensesTableBody.appendChild(groupHeaderRow);
 
                 systemCats.forEach(displayedCategory => {
@@ -2410,7 +2414,7 @@
                         }
                         _lastCaSidebarEl = sidebarHeader;
 
-                        const groupHeaderRow = createGroupHeaderRow(group, caType, numColumns);
+                        const groupHeaderRow = createGroupHeaderRow(group, caType, months);
                         groupHeaderRow.classList.add('empty-group');
                         if (!(window.isCaEditMode && window.isCaEditMode[accountId])) groupHeaderRow.style.display = 'none';
                         caTableBody.appendChild(groupHeaderRow);
@@ -2423,7 +2427,7 @@
                     cats[0].parentNode.insertBefore(sidebarHeader, cats[0]);
                     _lastCaSidebarEl = cats[cats.length - 1];
 
-                    const groupHeaderRow = createGroupHeaderRow(group, caType, numColumns);
+                    const groupHeaderRow = createGroupHeaderRow(group, caType, months);
                     caTableBody.appendChild(groupHeaderRow);
 
                     cats.forEach(displayedCategory => {
@@ -2451,7 +2455,7 @@
                     const sidebarHeader = createSidebarGroupHeader(ungroupedGroup, caType);
                     ungroupedCats[0].parentNode.insertBefore(sidebarHeader, ungroupedCats[0]);
 
-                    const groupHeaderRow = createGroupHeaderRow(ungroupedGroup, caType, numColumns);
+                    const groupHeaderRow = createGroupHeaderRow(ungroupedGroup, caType, months);
                     caTableBody.appendChild(groupHeaderRow);
 
                     ungroupedCats.forEach(displayedCategory => {
@@ -2480,7 +2484,7 @@
                     const sidebarHeader = createSidebarGroupHeader(systemGroup, caType);
                     systemCats[0].parentNode.insertBefore(sidebarHeader, systemCats[0]);
 
-                    const groupHeaderRow = createGroupHeaderRow(systemGroup, caType, numColumns);
+                    const groupHeaderRow = createGroupHeaderRow(systemGroup, caType, months);
                     caTableBody.appendChild(groupHeaderRow);
 
                     systemCats.forEach(displayedCategory => {

@@ -8,6 +8,24 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.45.4 — 2026-09-21
+
+### Fixed
+- The four markers on the corner of an entry cell - the tick, the dash, the
+  pending question mark and the days-late count - had drifted apart. They were
+  three different sizes, the question mark sat three pixels right of the others
+  on the week and three-month grids, and it alone carried a dark ring and passed
+  *under* the current-week outline instead of over it. They now share one size
+  token and one position, and look like four states of the same thing.
+- The "some of this settled" dash rendered as the characters `068` rather than a
+  minus sign: the stylesheet held a literal control character where `\f068`
+  belonged, written by a script that read the backslash as an escape.
+- On the week and three-month dashboards, the columns before the date an account
+  was opened are dimmed - but the category group bands stayed at full strength,
+  so each dimmed column had bright stripes across it. The group header rows were
+  built from a count of columns rather than the dates, so they had no way to know
+  which columns were in the past. They do now.
+
 ## 1.45.3 — 2026-09-21
 
 ### Fixed
