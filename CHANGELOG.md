@@ -8,6 +8,22 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.45.3 — 2026-09-21
+
+### Fixed
+- The development setup the README and `CONTRIBUTING.md` tell a contributor to
+  copy did not work. It sets `TEMPLATES_AUTO_RELOAD=1`, but Flask reads that from
+  its config and never from the environment, so nothing honoured it: a template
+  edit stayed invisible until the container restarted, which looks exactly like a
+  change that did nothing. The application reads it now. A `.py` change still
+  needs `docker compose restart app`, and the documentation says so rather than
+  implying otherwise.
+
+### Changed
+- The Loaf summary card no longer repeats the Loaf wordmark. The nav bar
+  directly above it already carries one, and on a phone the second pushed the
+  figure the page exists for further down.
+
 ## 1.45.2 — 2026-09-20
 
 ### Fixed

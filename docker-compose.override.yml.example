@@ -5,10 +5,11 @@
 # Compose picks up docker-compose.override.yml automatically, so nothing else
 # changes about how you start it. The copy is gitignored.
 #
-# What this buys you: an edit to a template, a .py file or anything under
-# static/ shows up on the next request instead of on the next image build.
-# Without it the whole tree is baked into the image at build time, and iterating
-# means `docker compose up -d --build app` for every change.
+# What this buys you: an edit to a template or to anything under static/ shows up
+# on the next request instead of on the next image build, and a .py change needs
+# only `docker compose restart app` rather than a rebuild. (gunicorn does not
+# watch its own source; add --reload to its command here if you want it to.)
+# Without this file the whole tree is baked into the image at build time.
 services:
   app:
     volumes:

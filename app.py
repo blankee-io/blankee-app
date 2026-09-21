@@ -103,6 +103,19 @@ app.config['REMEMBER_COOKIE_SAMESITE'] = 'Lax'
 app.config['WTF_CSRF_TIME_LIMIT'] = None
 app.config['WTF_CSRF_SSL_STRICT'] = False
 csrf = CSRFProtect(app)
+
+# Jinja compiles a template once per process and keeps it, which is right on a
+# server and wrong while somebody is editing one: the edit is invisible until
+# the process restarts, and that looks exactly like a change that did nothing.
+#
+# Flask takes this from config, never from the environment, so a compose
+# override setting TEMPLATES_AUTO_RELOAD=1 - which is what the development setup
+# in the README and CONTRIBUTING told contributors to copy - quietly did nothing
+# at all. Read here, and set on the environment as well as the config because
+# the environment may already have been built by the time this runs.
+if os.environ.get('TEMPLATES_AUTO_RELOAD', '').strip().lower() in ('1', 'true', 'yes'):
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
+    app.jinja_env.auto_reload = True
 # Defence in depth rather than a fix: the cookie is already inaccessible to
 # script, and marking it so removes one way a stored-XSS bug could become
 # session theft.

@@ -37,8 +37,9 @@ docker compose up -d --build
 Open <http://localhost:18420> and create the first account — it becomes the
 administrator and registration closes behind it. The override file mounts your
 clone into the container and turns on template reloading, so an edit to a
-template or a `.py` file is visible after a refresh; without it, both are baked
-into the image and you have to rebuild. After changing `requirements.txt`, run
+template or to anything under `static/` is visible on the next request. A `.py`
+change needs `docker compose restart app` — gunicorn does not watch its own
+source. After changing `requirements.txt`, rebuild:
 `docker compose up -d --build app`.
 
 Bank syncing and AI categorisation are off unless you configure them

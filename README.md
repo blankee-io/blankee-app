@@ -342,9 +342,10 @@ To check the schema without changing it, add `--verify-only`.
 ## Developing
 
 Docker builds the working tree, so a clone is all you need. The override file is
-what makes it iterable — with it, an edit to a template, a `.py` file or anything
-under `static/` shows up on the next request; without it both are baked into the
-image and every change means a rebuild.
+what makes it iterable — with it, an edit to a template or anything under
+`static/` shows up on the next request, and a `.py` change needs only
+`docker compose restart app`. Without it the whole tree is baked into the image
+and every change means a rebuild.
 
 ```bash
 git clone https://github.com/blankee-io/blankee-app.git && cd blankee-app
