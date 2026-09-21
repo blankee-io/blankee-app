@@ -20495,13 +20495,6 @@ label.loaf-holiday {
 
 /* The light-background wordmark, on the one page with a white card to put it
    on. Sized against the card's own heading rather than the nav bar's. */
-.loaf-summary-mark {
-    display: block;
-    width: auto;
-    height: 26px;
-    margin: 0 0 14px;
-}
-
 .loaf-basket-section {
     overflow: visible;
 }
@@ -20586,10 +20579,7 @@ label.loaf-holiday {
         padding: 8px;
     }
 
-    .loaf-summary-mark {
-        height: 22px;
     }
-}
 
 /* =====================================================================
    Guided connection flows: SimpleFIN (bank) and Claude (AI categorization).

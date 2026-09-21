@@ -64,14 +64,6 @@
         <div class="summary-page-layout">
             <div class="summary-left-column">
                 <div class="buffer-card">
-                    {# The light-background wordmark, which until now was
-                       declared in the registry with no page drawing it. This is
-                       the page it belongs on: a white card, where the version
-                       drawn for the teal bar would vanish. #}
-                    <img class="loaf-summary-mark"
-                         src="{{ url_for('static', filename=current_app.wordmark_light) }}"
-                         alt="{{ current_app.name }}">
-
                     <div class="buffer-subtitle">Hours left today</div>
                     <div class="buffer-amount" id="loaf-total-today">--</div>
                     <div class="projected-label" id="loaf-total-note">across every basket</div>
