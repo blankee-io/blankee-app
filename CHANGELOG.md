@@ -8,6 +8,18 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.45.5 — 2026-09-21
+
+### Fixed
+- An interest charge could not be deferred. When the statement arrived and the
+  bank had not yet reported the charge, the daily pull moved the forecast forward
+  a day, as it does with any other bill - and then the interest projection put a
+  fresh charge back on the statement date and deleted the one that had moved. The
+  charge appeared to sit on the statement date for ever, however many days went
+  past. The projection now leaves a charge that has been moved on alone, and
+  removes it only when the cycle stops charging altogether or the real figure is
+  answered.
+
 ## 1.45.4 — 2026-09-21
 
 ### Fixed

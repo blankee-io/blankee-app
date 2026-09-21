@@ -8692,6 +8692,15 @@ def _reconcile_interest_entries(user_id, account_id, category_id, projected,
     entries = _get_entries_from_redis('c_expense_entries', user_id) or []
     projected_buckets = {}
     confirmed = set()
+    # A charge the daily pull has moved on, keyed by the cycle it came from.
+    #
+    # The pull defers a forecast the bank has not reported by the day it was due,
+    # interest included, and stamps original_date with where it started. Without
+    # this, the two fought and the projection always won: it found nothing on the
+    # statement date, created a fresh charge there, and then deleted the moved one
+    # as no-longer-projected. The visible result was an interest charge that
+    # never moved however many times it was deferred.
+    deferred = {}
     for entry in entries:
         if int(entry.get('category_id') or 0) != int(category_id):
             continue
@@ -8699,12 +8708,23 @@ def _reconcile_interest_entries(user_id, account_id, category_id, projected,
         if isinstance(when, str):
             when = datetime.strptime(when[:10], '%Y-%m-%d').date()
         if int(entry.get('is_bucket') or 0) == 1:
-            projected_buckets[when] = entry
+            origin = entry.get('original_date')
+            if isinstance(origin, str):
+                origin = datetime.strptime(origin[:10], '%Y-%m-%d').date()
+            if origin:
+                deferred[origin] = entry
+            else:
+                projected_buckets[when] = entry
         else:
             confirmed.add(when)
 
     for when, amount in sorted(projected.items()):
         if when in confirmed:
+            continue
+        # Moved on already. Left exactly as it is, amount included: once a charge
+        # has been deferred it is an obligation waiting to be settled, not a
+        # figure this walk still gets to restate.
+        if when in deferred:
             continue
         existing = projected_buckets.pop(when, None)
         if existing is None:
@@ -8746,6 +8766,24 @@ def _reconcile_interest_entries(user_id, account_id, category_id, projected,
             continue
         _delete_entry_in_redis('c_expense_entries', user_id, category_id,
                                when, when, specific_entry_id=stale.get('id'))
+
+    # A deferred charge outlives this walk, but not the cycle it belongs to. If
+    # that cycle no longer charges anything - the card was paid off, the rate
+    # went to zero, the cycle was switched off - or the real charge has since
+    # been answered on the statement date, then what was moved on is a forecast
+    # that no longer holds, and goes the same way as a stale one above.
+    for origin, moved in deferred.items():
+        if origin in projected and origin not in confirmed:
+            continue
+        if window_start is not None and origin < window_start:
+            continue
+        if window_end is not None and origin > window_end:
+            continue
+        when = moved.get('date')
+        if isinstance(when, str):
+            when = datetime.strptime(when[:10], '%Y-%m-%d').date()
+        _delete_entry_in_redis('c_expense_entries', user_id, category_id,
+                               when, when, specific_entry_id=moved.get('id'))
 
 
 def update_daily_ca_totals(user_id, start_date):
