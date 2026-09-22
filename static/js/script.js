@@ -372,6 +372,32 @@ function showEndDateWarning(endDateSelector) {
  * @param {*}      [opts.checkbox.skipResult]- what to resolve with when remembered
  *                                             (default true)
  */
+// The dialog's markup. ids only on the one shared element: a stacked copy
+// carries the same classes and none of the ids, so nothing that looks the
+// shared one up by id can land on the copy.
+var _openConfirmModals = [];
+function _confirmModalMarkup(withIds) {
+    function id(name) { return withIds ? ' id="' + name + '"' : ''; }
+    return '<div class="modal-content center-modal">' +
+        '<span' + id('generic-confirm-close') + ' class="close-modal generic-confirm-close">&times;</span>' +
+        '<h2' + id('generic-confirm-title') + ' class="generic-confirm-title">Confirm</h2>' +
+        '<p' + id('generic-confirm-message') + ' class="generic-confirm-message"></p>' +
+        // A slot for callers needing more than a sentence - the end-of-day
+        // bucket prompt puts a list of entries here. Empty and hidden for
+        // every caller that does not use it.
+        '<div' + id('generic-confirm-body') + ' class="generic-confirm-body"></div>' +
+        '<div' + id('generic-confirm-checkbox-row') + ' class="modal-checkbox-row generic-confirm-checkbox-row" style="display:none;">' +
+            '<input type="checkbox"' + id('generic-confirm-checkbox') + ' class="generic-confirm-checkbox">' +
+            '<label' + (withIds ? ' for="generic-confirm-checkbox"' : '') + id('generic-confirm-checkbox-label') +
+                ' class="generic-confirm-checkbox-label"></label>' +
+        '</div>' +
+        '<div class="modal-buttons">' +
+            '<button' + id('generic-confirm-btn') + ' class="generic-confirm-btn">Confirm</button>' +
+            '<button' + id('generic-cancel-btn') + ' class="generic-cancel-btn">Cancel</button>' +
+        '</div>' +
+    '</div>';
+}
+
 function showConfirmModal(opts) {
     return new Promise(function(resolve) {
         // A remembered checkbox short-circuits the dialog. What it resolves to
@@ -390,41 +416,39 @@ function showConfirmModal(opts) {
             }
         }
 
-        // Ensure modal exists in DOM
-        var modal = document.getElementById('generic-confirm-modal');
-        if (!modal) {
+        // One element, shared by every caller and kept between openings: the
+        // bucket prompt wires handlers onto its body once and reads its close
+        // function back from there.
+        var base = document.getElementById('generic-confirm-modal');
+        if (!base) {
+            base = document.createElement('div');
+            base.id = 'generic-confirm-modal';
+            base.className = 'modal generic-confirm';
+            base.innerHTML = _confirmModalMarkup(true);
+            document.body.appendChild(base);
+        }
+        // A caller that may find the dialog already open - a question raised
+        // by an answer inside the bucket prompt, say - asks to stack: a second
+        // dialog of the same shape over the first, gone again when closed. The
+        // first stays as it was, inert underneath, and its keys are ignored
+        // until the one on top has gone (see onKeydown).
+        var stacked = !!(opts.stack && base.classList.contains('modal--open'));
+        var modal = base;
+        if (stacked) {
             modal = document.createElement('div');
-            modal.id = 'generic-confirm-modal';
-            modal.className = 'modal';
-            modal.innerHTML =
-                '<div class="modal-content center-modal">' +
-                    '<span id="generic-confirm-close" class="close-modal">&times;</span>' +
-                    '<h2 id="generic-confirm-title">Confirm</h2>' +
-                    '<p id="generic-confirm-message"></p>' +
-                    // A slot for callers needing more than a sentence - the
-                    // end-of-day bucket prompt puts a list of entries here.
-                    // Empty and hidden for every existing caller.
-                    '<div id="generic-confirm-body"></div>' +
-                    '<div id="generic-confirm-checkbox-row" class="modal-checkbox-row" style="display:none;">' +
-                        '<input type="checkbox" id="generic-confirm-checkbox">' +
-                        '<label for="generic-confirm-checkbox" id="generic-confirm-checkbox-label"></label>' +
-                    '</div>' +
-                    '<div class="modal-buttons">' +
-                        '<button id="generic-confirm-btn">Confirm</button>' +
-                        '<button id="generic-cancel-btn">Cancel</button>' +
-                    '</div>' +
-                '</div>';
+            modal.className = 'modal generic-confirm generic-confirm-stacked';
+            modal.innerHTML = _confirmModalMarkup(false);
             document.body.appendChild(modal);
         }
 
-        var titleEl      = document.getElementById('generic-confirm-title');
-        var msgEl        = document.getElementById('generic-confirm-message');
-        var confirmBtn   = document.getElementById('generic-confirm-btn');
-        var cancelBtn    = document.getElementById('generic-cancel-btn');
-        var closeBtn     = document.getElementById('generic-confirm-close');
-        var checkboxRow  = document.getElementById('generic-confirm-checkbox-row');
-        var checkboxEl   = document.getElementById('generic-confirm-checkbox');
-        var checkboxLbl  = document.getElementById('generic-confirm-checkbox-label');
+        var titleEl      = modal.querySelector('.generic-confirm-title');
+        var msgEl        = modal.querySelector('.generic-confirm-message');
+        var confirmBtn   = modal.querySelector('.generic-confirm-btn');
+        var cancelBtn    = modal.querySelector('.generic-cancel-btn');
+        var closeBtn     = modal.querySelector('.generic-confirm-close');
+        var checkboxRow  = modal.querySelector('.generic-confirm-checkbox-row');
+        var checkboxEl   = modal.querySelector('.generic-confirm-checkbox');
+        var checkboxLbl  = modal.querySelector('.generic-confirm-checkbox-label');
 
         titleEl.textContent   = opts.title || 'Confirm';
         msgEl.textContent     = opts.message || '';
@@ -439,7 +463,7 @@ function showConfirmModal(opts) {
         // This is why there is one modal implementation and not two: a second
         // one diverges on focus, escape and backdrop handling immediately, and
         // the difference stays invisible until someone hits it.
-        var bodyEl = document.getElementById('generic-confirm-body');
+        var bodyEl = modal.querySelector('.generic-confirm-body');
         if (opts.bodyHtml) {
             bodyEl.innerHTML = opts.bodyHtml;
             bodyEl.style.display = '';
@@ -493,6 +517,7 @@ function showConfirmModal(opts) {
         }
 
         modal.classList.add('modal--open');
+        _openConfirmModals.push(modal);
 
         // onReady lets a caller with custom body content wire its own handlers
         // and close the dialog with whatever result it likes, while still
@@ -533,7 +558,11 @@ function showConfirmModal(opts) {
             closeBtn.removeEventListener('click', onCancel);
             modal.removeEventListener('click', onBackdrop);
             document.removeEventListener('keydown', onKeydown);
+            var at = _openConfirmModals.indexOf(modal);
+            if (at !== -1) { _openConfirmModals.splice(at, 1); }
             resolve(result);
+            // A stacked copy is not kept: the next one is built afresh.
+            if (stacked) { modal.remove(); }
         }
         function persistCheckbox(outcome) {
             // persistOn says which outcomes record the preference. 'confirm' is
@@ -558,6 +587,8 @@ function showConfirmModal(opts) {
         }
         function onBackdrop(e) { if (e.target === modal) cleanup(false); }
         function onKeydown(e) {
+            // Only the dialog on top answers to the keyboard.
+            if (_openConfirmModals[_openConfirmModals.length - 1] !== modal) { return; }
             if (e.key === 'Enter') { e.preventDefault(); onConfirm(); }
             else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
         }
@@ -1323,6 +1354,8 @@ function showDriftPrompt(d) {
         title: 'Has it changed?',
         message: '',
         bodyHtml: driftComparison(d),
+        // Over the prompt it was answered in, if that is still open.
+        stack: true,
         confirmText: 'Change it',
         cancelText: 'Leave it'
     }).then(function (yes) {
@@ -1354,9 +1387,9 @@ function showDriftPrompt(d) {
     });
 }
 
-// A confirmation can hand back a habit while the dialog it happened in is
-// still open, and there is one shared dialog. So the question waits until
-// that dialog has gone, then asks - one at a time, in the order they came.
+// A confirmation hands back a habit while the dialog it happened in is
+// still open; the question goes on top of it straight away (stack: true).
+// Several answered in quick succession are asked one at a time, in order.
 var _driftQueue = [];
 var _driftAsking = false;
 function queueDriftPrompt(d) {
@@ -1365,11 +1398,6 @@ function queueDriftPrompt(d) {
 }
 function flushDriftPrompts() {
     if (_driftAsking || !_driftQueue.length) { return; }
-    var modal = document.getElementById('generic-confirm-modal');
-    if (modal && modal.classList.contains('modal--open')) {
-        setTimeout(flushDriftPrompts, 400);
-        return;
-    }
     _driftAsking = true;
     showDriftPrompt(_driftQueue.shift()).then(function () {
         _driftAsking = false;

@@ -16819,30 +16819,40 @@ tr[data-collapsed] {
     z-index: 9000;
 }
 
-#generic-confirm-modal .modal-content {
+/* A second dialog stacked over the first - see showConfirmModal's `stack`. */
+.generic-confirm-stacked.modal {
+    z-index: 9010;
+}
+
+#generic-confirm-modal .modal-content,
+.generic-confirm-stacked .modal-content {
     max-width: 400px;
 }
 
-#generic-confirm-modal .modal-content h2 {
+#generic-confirm-modal .modal-content h2,
+.generic-confirm-stacked .modal-content h2 {
     color: var(--primary);
     margin-bottom: 15px;
     font-size: 20px;
 }
 
-#generic-confirm-modal .modal-content p {
+#generic-confirm-modal .modal-content p,
+.generic-confirm-stacked .modal-content p {
     color: var(--text-dark);
     margin-bottom: 20px;
     font-size: 14px;
     line-height: 1.5;
 }
 
-#generic-confirm-modal .modal-checkbox-row {
+#generic-confirm-modal .modal-checkbox-row,
+.generic-confirm-stacked .modal-checkbox-row {
     margin-bottom: 16px;
     font-size: 13px;
     text-align: center;
 }
 
-#generic-confirm-checkbox {
+#generic-confirm-checkbox,
+.generic-confirm-stacked .generic-confirm-checkbox {
     accent-color: var(--primary);
     width: 15px;
     height: 15px;
@@ -16851,12 +16861,14 @@ tr[data-collapsed] {
     margin-right: 4px;
 }
 
-#generic-confirm-checkbox + label {
+#generic-confirm-checkbox + label,
+.generic-confirm-stacked .generic-confirm-checkbox + label {
     cursor: pointer;
     vertical-align: middle;
 }
 
-#generic-confirm-btn {
+#generic-confirm-btn,
+.generic-confirm-stacked .generic-confirm-btn {
     width: 45%;
     padding: 14px 24px;
     margin: 10px;
@@ -16870,25 +16882,30 @@ tr[data-collapsed] {
     background-color: var(--primary);
 }
 
-#generic-confirm-btn:hover {
+#generic-confirm-btn:hover,
+.generic-confirm-stacked .generic-confirm-btn:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 16px var(--shadow-lg);
     background-color: var(--primary-hover);
 }
 
-#generic-confirm-btn:active {
+#generic-confirm-btn:active,
+.generic-confirm-stacked .generic-confirm-btn:active {
     transform: translateY(0);
 }
 
-#generic-confirm-btn.danger {
+#generic-confirm-btn.danger,
+.generic-confirm-stacked .generic-confirm-btn.danger {
     background-color: var(--danger);
 }
 
-#generic-confirm-btn.danger:hover {
+#generic-confirm-btn.danger:hover,
+.generic-confirm-stacked .generic-confirm-btn.danger:hover {
     background-color: var(--danger-hover);
 }
 
-#generic-cancel-btn {
+#generic-cancel-btn,
+.generic-confirm-stacked .generic-cancel-btn {
     width: 45%;
     padding: 14px 24px;
     margin: 10px;
@@ -16902,13 +16919,15 @@ tr[data-collapsed] {
     background-color: var(--secondary);
 }
 
-#generic-cancel-btn:hover {
+#generic-cancel-btn:hover,
+.generic-confirm-stacked .generic-cancel-btn:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 16px var(--shadow-lg);
     background-color: var(--secondary-hover);
 }
 
-#generic-cancel-btn:active {
+#generic-cancel-btn:active,
+.generic-confirm-stacked .generic-cancel-btn:active {
     transform: translateY(0);
 }
 
@@ -18111,7 +18130,8 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 
 /* The body slot added to showConfirmModal. Empty for every other caller, so
    it collapses to nothing rather than adding a gap. */
-#generic-confirm-body {
+#generic-confirm-body,
+.generic-confirm-stacked .generic-confirm-body {
     width: 100%;
     overflow-y: auto;
     margin: 6px 0 14px;
@@ -18652,6 +18672,7 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 
 /* A caller with nothing to say leaves the paragraph empty; collapse it so
    it does not open a gap where a sentence used to be. */
+#generic-confirm-message:empty,
 #generic-confirm-message:empty {
     display: none;
 }
