@@ -15,14 +15,16 @@ this file; the admin console links to it, it does not read it.
   When a recurring bill or wage is confirmed - in the evening prompt or the
   bank modal - for a different amount, or more than two days from the day it
   was due, and the previous occurrence missed the same way, Blankee asks
-  whether the plan should follow it: "Phone has come through as $54.99 instead
-  of $52.00, and on the 4th instead of the 1st, twice now. Change it to that
-  from Oct 01, 2026?" Yes schedules the change from the next due date, the way
-  a raise or a price change is, so nothing already recorded moves; Leave it
-  remembers the answer, and the same habit is not asked about again. Until it
-  is answered, the recurring page marks the entry. Allowances and variable
-  income are never asked about - they differ by design. Weekend and holiday
-  slips of a day or two never count.
+  whether the plan should follow it - right there, over the prompt, with a
+  two-column comparison of what was forecasted against what came through, one
+  row for the amount and one for the day, whichever repeated. The two are
+  judged on their own: a bill that has landed on the 13th twice has a day habit
+  whatever its amounts did. Change it schedules the change from the next due
+  date, the way a raise or a price change is, so nothing already recorded
+  moves; Leave it remembers the answer, and the same habit is not asked about
+  again. Until it is answered, the recurring page marks the entry. Allowances
+  and variable income are never asked about - they differ by design. Weekend
+  and holiday slips of a day or two never count.
 
 ### Removed
 - The recurring-mismatch detection that depended on the old bank provider's
