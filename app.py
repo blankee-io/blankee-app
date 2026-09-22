@@ -4860,144 +4860,6 @@ _FUZZY_CADENCE_RANGES = [
 _DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 
 
-def _detect_recurring_mismatch(transaction_record, entry_type, category_id, user_id):
-    """
-    Check if a confirmed transaction's amount/cadence differs from the recurring entry.
-    Creates/updates/deletes mismatch records as needed.
-    
-    Args:
-        transaction_record: Dict from linked_transactions (must have amount, enrichment_recurrence, 
-                           enrichment_periodicity, enrichment_periodicity_days, date, transaction_id)
-        entry_type: 'income', 'expense', or 'c_expense'
-        category_id: The confirmed category ID
-        user_id: User ID
-    """
-    enrichment_recurrence = (transaction_record.get('enrichment_recurrence') or '').lower().strip()
-    if enrichment_recurrence not in ('recurring', 'subscription'):
-        return
-    
-    recurring_table_map = {
-        'income': 'recurring_income',
-        'expense': 'recurring_expense',
-        'c_expense': 'recurring_c_expense'
-    }
-    recurring_table = recurring_table_map.get(entry_type)
-    if not recurring_table:
-        return
-    
-    # Get ALL recurring entries for this category
-    try:
-        redis_key = f"{recurring_table}:v1:{user_id}"
-        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-        if not cached:
-            return
-        all_recurring = json.loads(cached)
-    except Exception as e:
-        log_error(app.logger, 'MISMATCH', f"Error reading recurring entries: {e}", user_id=user_id)
-        return
-    
-    # Filter to wage_bill=1 entries for this category
-    wage_bill_entries = [
-        r for r in all_recurring
-        if int(r.get('category_id', 0)) == int(category_id) and int(r.get('wage_bill', 0)) == 1
-    ]
-    
-    if not wage_bill_entries:
-        _detect_recurring_suggestion(transaction_record, entry_type, category_id, user_id, all_recurring, recurring_table)
-        return
-    
-    txn_amount = float(transaction_record.get('amount', 0))
-    enrichment_periodicity = (transaction_record.get('enrichment_periodicity') or '').lower().strip().replace('_', '-')
-    enrichment_periodicity_days = transaction_record.get('enrichment_periodicity_days')
-    txn_date_str = transaction_record.get('date')
-    transaction_id = transaction_record.get('transaction_id')
-    
-    # Parse transaction date for day-of-week / day-of-month inference
-    txn_weekday_name = None
-    txn_day_of_month = None
-    if txn_date_str:
-        try:
-            if isinstance(txn_date_str, str):
-                txn_date = datetime.strptime(txn_date_str[:10], '%Y-%m-%d')
-            else:
-                txn_date = txn_date_str
-            txn_weekday_name = _DAY_NAMES[txn_date.weekday()]  # 0=monday
-            txn_day_of_month = txn_date.day
-        except Exception:
-            pass
-    
-    # Determine detected cadence from enrichment
-    detected_interval = None
-    detected_unit = None
-    
-    if enrichment_periodicity and enrichment_periodicity != 'other':
-        mapped = _ENRICHMENT_CADENCE_MAP.get(enrichment_periodicity)
-        if mapped:
-            detected_interval, detected_unit = mapped
-    elif enrichment_periodicity == 'other' and enrichment_periodicity_days:
-        # Fuzzy match using ±3 day tolerance
-        try:
-            days = float(enrichment_periodicity_days)
-            for low, high, interval, unit in _FUZZY_CADENCE_RANGES:
-                if low <= days <= high:
-                    detected_interval, detected_unit = interval, unit
-                    break
-        except (ValueError, TypeError):
-            pass
-    
-    for rec_entry in wage_bill_entries:
-        recurring_id = rec_entry.get('id')
-        rec_amount = float(rec_entry.get('amount', 0))
-        rec_interval = int(rec_entry.get('cadence_interval', 0))
-        rec_unit = (rec_entry.get('cadence_unit') or '').lower().strip()
-        rec_weekdays = (rec_entry.get('weekdays') or '').lower().strip()
-        rec_monthly_days = (rec_entry.get('monthly_days') or '').strip()
-        
-        has_mismatch = False
-        
-        # Amount comparison: >$1 or >2%, whichever is greater
-        amount_diff = abs(txn_amount - rec_amount)
-        threshold = max(1.0, rec_amount * 0.02)
-        if amount_diff > threshold:
-            has_mismatch = True
-            log_info(app.logger, 'MISMATCH', f"Amount mismatch: txn={txn_amount}, rec={rec_amount}, diff={amount_diff:.2f}",
-                     recurring_id=recurring_id, user_id=user_id)
-        
-        # Cadence comparison (only if we have detected cadence)
-        if detected_interval is not None and detected_unit is not None:
-            # Compare interval + unit
-            if detected_interval != rec_interval or detected_unit != rec_unit:
-                has_mismatch = True
-                log_info(app.logger, 'MISMATCH', f"Cadence mismatch: detected={detected_interval}/{detected_unit}, rec={rec_interval}/{rec_unit}",
-                         recurring_id=recurring_id, user_id=user_id)
-            else:
-                # Cadence matches — check day-of-week/month
-                if detected_unit == 'weeks' and txn_weekday_name and rec_weekdays:
-                    rec_weekday_list = [w.strip() for w in rec_weekdays.split(',') if w.strip()]
-                    if txn_weekday_name not in rec_weekday_list:
-                        has_mismatch = True
-                        log_info(app.logger, 'MISMATCH', f"Weekday mismatch: txn={txn_weekday_name}, rec={rec_weekdays}",
-                                 recurring_id=recurring_id, user_id=user_id)
-                
-                if detected_unit == 'months' and txn_day_of_month and rec_monthly_days:
-                    rec_days_list = [int(d.strip()) for d in rec_monthly_days.split(',') if d.strip()]
-                    if txn_day_of_month not in rec_days_list:
-                        has_mismatch = True
-                        log_info(app.logger, 'MISMATCH', f"Monthly day mismatch: txn day={txn_day_of_month}, rec={rec_monthly_days}",
-                                 recurring_id=recurring_id, user_id=user_id)
-        
-        if has_mismatch:
-            upsert_recurring_mismatch({
-                'recurring_table': recurring_table,
-                'recurring_id': recurring_id,
-                'category_id': category_id,
-                'transaction_id': transaction_id,
-            }, user_id=user_id)
-        else:
-            # Self-healing: no mismatch, remove any existing record
-            delete_recurring_mismatch(recurring_table, recurring_id, user_id=user_id)
-
-
 def _detect_recurring_suggestion(transaction_record, entry_type, category_id, user_id, all_recurring, recurring_table):
     """
     Check if a confirmed transaction should generate a "suggested recurring" entry.
@@ -17955,14 +17817,15 @@ def confirm_transaction():
     if not ok:
         return jsonify({'status': 'error', 'message': message}), 400
 
-    try:
-        from bank_redis import get_linked_transactions
-        txn_record = next((t for t in get_linked_transactions(user_id=current_user.id)
-                           if str(t.get('transaction_id')) == str(transaction_id)), None)
-        if txn_record:
-            _detect_recurring_mismatch(txn_record, entry_type, category_id, current_user.id)
-    except Exception as mismatch_err:
-        log_warning(app.logger, 'MISMATCH', f"Mismatch detection failed (non-blocking): {mismatch_err}")
+    # A bill or wage that has come through the same new way twice - see
+    # recurring_drift. The answer rides back with the confirmation and the
+    # page asks once the modal has gone.
+    import recurring_drift
+    drift = None
+    if change and not change.get('removed'):
+        drift = recurring_drift.observe(current_user.id, change['table'], change['category_id'],
+                                        change['date'], change['amount'],
+                                        entry_id=change['entry_id'], transaction_id=str(transaction_id))
 
     remaining = bank_import.count_pending(current_user.id)
     if remaining == 0:
@@ -17975,155 +17838,79 @@ def confirm_transaction():
     # something dated yesterday since the morning, and then, measured
     # against the morning's stored figures, it "corrected" that entry away.
     return jsonify({'status': 'success', 'message': message, 'change': change,
-                    'remaining': remaining, 'note': ''})
+                    'remaining': remaining, 'note': '', 'drift': drift})
 
 
 
 @app.route('/api/recurring-mismatches', methods=['GET'])
 @login_required
 def get_recurring_mismatches_api():
-    """Get active (non-dismissed) recurring mismatches, enriched with comparison data."""
+    """
+    The bills and wages that have come through the same new way twice and
+    have not been answered yet - what the badge on a recurring page marks.
+    Each is described by recurring_drift, which knows the template and the
+    habit and can say what Yes would change.
+    """
+    import recurring_drift
     from redis_crud import get_recurring_mismatches
-    
-    recurring_table_filter = request.args.get('recurring_table')
-    
+    wanted = request.args.get('recurring_table')
     try:
-        mismatches = get_recurring_mismatches(user_id=current_user.id, dismissed=False)
-        
-        if recurring_table_filter:
-            mismatches = [m for m in mismatches if m.get('recurring_table') == recurring_table_filter]
-        
-        if not mismatches:
-            return jsonify({'status': 'success', 'mismatches': []})
-        
-        # Enrich each mismatch with comparison data
-        enriched = []
-        
-        # Pre-load bank transactions for lookup
-        linked_txns = get_linked_transactions(user_id=current_user.id)
-        txn_lookup = {t.get('transaction_id'): t for t in linked_txns}
-        
-        # Pre-load recurring tables
-        recurring_cache = {}
-        for table in ('recurring_income', 'recurring_expense', 'recurring_c_expense'):
-            redis_key = f"{table}:v1:{current_user.id}"
-            cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-            recurring_cache[table] = json.loads(cached) if cached else []
-        
-        for m in mismatches:
-            txn = txn_lookup.get(m.get('transaction_id'))
-            if not txn:
+        out = []
+        for m in get_recurring_mismatches(user_id=current_user.id, dismissed=False) or []:
+            if wanted and m.get('recurring_table') != wanted:
                 continue
-            
-            # Find the recurring entry
-            rec_table = m.get('recurring_table')
-            rec_id = int(m.get('recurring_id', 0))
-            rec_entry = None
-            for r in recurring_cache.get(rec_table, []):
-                if int(r.get('id', 0)) == rec_id:
-                    rec_entry = r
-                    break
-            
-            if not rec_entry:
-                continue
-            
-            # Build detected cadence string
-            enrichment_periodicity = (txn.get('enrichment_periodicity') or '').lower().strip().replace('_', '-')
-            detected_interval, detected_unit = None, None
-            if enrichment_periodicity and enrichment_periodicity != 'other':
-                mapped = _ENRICHMENT_CADENCE_MAP.get(enrichment_periodicity)
-                if mapped:
-                    detected_interval, detected_unit = mapped
-            elif enrichment_periodicity == 'other' and txn.get('enrichment_periodicity_days'):
-                try:
-                    days = float(txn.get('enrichment_periodicity_days'))
-                    for low, high, interval, unit in _FUZZY_CADENCE_RANGES:
-                        if low <= days <= high:
-                            detected_interval, detected_unit = interval, unit
-                            break
-                except (ValueError, TypeError):
-                    pass
-            
-            # Infer day-of-week / day-of-month from transaction date
-            txn_weekday_name = None
-            txn_day_of_month = None
-            txn_date_str = txn.get('date')
-            if txn_date_str:
-                try:
-                    if isinstance(txn_date_str, str):
-                        txn_date = datetime.strptime(txn_date_str[:10], '%Y-%m-%d')
-                    else:
-                        txn_date = txn_date_str
-                    txn_weekday_name = _DAY_NAMES[txn_date.weekday()]
-                    txn_day_of_month = txn_date.day
-                except Exception:
-                    pass
-            
-            detected_cadence = _format_cadence_string(detected_interval, detected_unit, txn_weekday_name, txn_day_of_month)
-            current_cadence = _format_cadence_string(
-                int(rec_entry.get('cadence_interval', 0)),
-                (rec_entry.get('cadence_unit') or '').lower(),
-                (rec_entry.get('weekdays') or ''),
-                (rec_entry.get('monthly_days') or '')
-            )
-            
-            # Get category name
-            category_name = _get_category_name_for_mismatch(rec_table, int(m.get('category_id', 0)), current_user.id)
-            
-            enriched.append({
-                'id': m.get('id'),
-                'recurring_table': rec_table,
-                'recurring_id': rec_id,
-                'category_id': m.get('category_id'),
-                'category_name': category_name,
-                'transaction_id': m.get('transaction_id'),
-                'created_at': m.get('created_at'),
-                # Current recurring values
-                'current_amount': float(rec_entry.get('amount', 0)),
-                'current_cadence': current_cadence,
-                'current_cadence_interval': int(rec_entry.get('cadence_interval', 0)),
-                'current_cadence_unit': (rec_entry.get('cadence_unit') or ''),
-                'current_weekdays': (rec_entry.get('weekdays') or ''),
-                'current_monthly_days': (rec_entry.get('monthly_days') or ''),
-                'current_start_date': str(rec_entry.get('start_date', ''))[:10],
-                'current_end_date': str(rec_entry.get('end_date', ''))[:10],
-                'current_no_end_date': int(rec_entry.get('no_end_date', 0)),
-                # Detected values from bank transaction
-                'detected_amount': float(txn.get('amount', 0)),
-                'detected_cadence': detected_cadence,
-                'detected_cadence_interval': detected_interval,
-                'detected_cadence_unit': detected_unit,
-                'detected_weekday': txn_weekday_name,
-                'detected_day_of_month': txn_day_of_month,
-                # Informational
-                'enrichment_last_payment_date': txn.get('enrichment_last_payment_date'),
-                'enrichment_periodicity': txn.get('enrichment_periodicity'),
-                'enrichment_periodicity_days': txn.get('enrichment_periodicity_days'),
-            })
-        
-        return jsonify({'status': 'success', 'mismatches': enriched})
-        
+            described = recurring_drift.describe(current_user.id, m)
+            if described:
+                out.append(described)
+        return jsonify({'status': 'success', 'mismatches': out})
     except Exception as e:
-        log_exception(app.logger, 'MISMATCH', f"Error fetching mismatches: {e}")
+        log_exception(app.logger, 'DRIFT', f"Error fetching mismatches: {e}")
         return jsonify({'status': 'error', 'message': 'Internal error'}), 500
 
 
-@app.route('/api/recurring-mismatches/<int:mismatch_id>/dismiss', methods=['POST'])
+def _drift_key():
+    """The link a drift answer is about: (recurring_table, recurring_id) from the body."""
+    data = request.get_json(silent=True) or {}
+    table, rid = data.get('recurring_table'), data.get('recurring_id')
+    if table not in ('recurring_income', 'recurring_expense', 'recurring_c_expense') or rid in (None, ''):
+        return None, None
+    return table, rid
+
+
+@app.route('/api/recurring-mismatches/dismiss', methods=['POST'])
 @login_required
-def dismiss_recurring_mismatch_api(mismatch_id):
-    """Dismiss a recurring mismatch."""
-    from redis_crud import dismiss_recurring_mismatch
-    
+def dismiss_recurring_mismatch_api():
+    """No: the habit is remembered so it is not asked about again."""
+    import recurring_drift
+    table, rid = _drift_key()
+    if table is None:
+        return jsonify({'status': 'error', 'message': 'Which recurring entry?'}), 400
     try:
-        success = dismiss_recurring_mismatch(mismatch_id, user_id=current_user.id)
-        if success:
-            log_info(app.logger, 'MISMATCH', f"Mismatch {mismatch_id} dismissed", user_id=current_user.id)
-            return jsonify({'status': 'success'})
-        else:
-            return jsonify({'status': 'error', 'message': 'Mismatch not found'}), 404
+        ok, message = recurring_drift.dismiss(current_user.id, table, rid)
     except Exception as e:
-        log_exception(app.logger, 'MISMATCH', f"Error dismissing mismatch: {e}")
+        log_exception(app.logger, 'DRIFT', f"Error dismissing {table} {rid}: {e}")
         return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+    if not ok:
+        return jsonify({'status': 'error', 'message': message}), 404
+    return jsonify({'status': 'success', 'message': message})
+
+
+@app.route('/api/recurring-mismatches/apply', methods=['POST'])
+@login_required
+def apply_recurring_mismatch_api():
+    """Yes: the recurring entry follows its new habit from the next due date."""
+    import recurring_drift
+    table, rid = _drift_key()
+    if table is None:
+        return jsonify({'status': 'error', 'message': 'Which recurring entry?'}), 400
+    try:
+        ok, message, result = recurring_drift.apply(current_user.id, table, rid)
+    except Exception as e:
+        log_exception(app.logger, 'DRIFT', f"Error applying {table} {rid}: {e}")
+        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
+    if not ok:
+        return jsonify({'status': 'error', 'message': message}), 400
+    return jsonify({'status': 'success', 'message': message, 'result': result})
 
 
 # ============================================================
@@ -18218,72 +18005,6 @@ def dismiss_recurring_suggestion_api(suggestion_id):
     except Exception as e:
         log_exception(app.logger, 'SUGGEST_REC', f"Error dismissing suggestion: {e}")
         return jsonify({'status': 'error', 'message': 'Internal error'}), 500
-
-
-def _format_cadence_string(interval, unit, weekday_or_weekdays, monthly_days_or_dom):
-    """Format a human-readable cadence string."""
-    if interval is None or unit is None or not interval:
-        return None
-    
-    # Normalize unit
-    unit = str(unit).lower().rstrip('s')  # 'months' → 'month'
-    unit_display = {'day': 'day', 'week': 'week', 'month': 'month', 'year': 'year'}.get(unit, unit)
-    
-    if interval == 1:
-        base = f"Every {unit_display}"
-    else:
-        base = f"Every {interval} {unit_display}s"
-    
-    # Add weekday info
-    if unit == 'week' and weekday_or_weekdays:
-        if isinstance(weekday_or_weekdays, str) and ',' in weekday_or_weekdays:
-            days = ', '.join(d.strip().capitalize() for d in weekday_or_weekdays.split(',') if d.strip())
-            return f"{base} on {days}"
-        elif isinstance(weekday_or_weekdays, str) and weekday_or_weekdays.strip():
-            return f"{base} on {weekday_or_weekdays.strip().capitalize()}s"
-    
-    # Add monthly day info
-    if unit == 'month' and monthly_days_or_dom:
-        if isinstance(monthly_days_or_dom, (int, float)):
-            return f"{base} on the {_ordinal(int(monthly_days_or_dom))}"
-        elif isinstance(monthly_days_or_dom, str) and monthly_days_or_dom.strip():
-            days = ', '.join(_ordinal(int(d.strip())) for d in monthly_days_or_dom.split(',') if d.strip())
-            return f"{base} on the {days}"
-    
-    return base
-
-
-def _ordinal(n):
-    """Return ordinal string for a number (1st, 2nd, 3rd, etc.)"""
-    if 11 <= (n % 100) <= 13:
-        suffix = 'th'
-    else:
-        suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
-    return f"{n}{suffix}"
-
-
-def _get_category_name_for_mismatch(recurring_table, category_id, user_id):
-    """Get the category name given a recurring table type and category_id."""
-    cat_table_map = {
-        'recurring_income': 'income_categories',
-        'recurring_expense': 'expense_categories',
-        'recurring_c_expense': 'c_expense_categories'
-    }
-    cat_table = cat_table_map.get(recurring_table)
-    if not cat_table:
-        return ''
-    
-    try:
-        redis_key = f"{cat_table}:v1:{user_id}"
-        cached = _redis_client.get(redis_key) if app.config.get('REDIS_OK') else None
-        if cached:
-            categories = json.loads(cached)
-            for cat in categories:
-                if int(cat.get('id', 0)) == category_id:
-                    return cat.get('name', '')
-    except Exception:
-        pass
-    return ''
 
 
 # ------------------------------------------------- end-of-day bucket confirmation
@@ -18477,6 +18198,15 @@ def api_buckets_resolve():
     if not ok:
         return jsonify({'success': False, 'error': message}), 400
 
+    # A bill or wage that has come through the same new way twice - see
+    # recurring_drift. Only a Yes says anything about the money; No and Skip
+    # are about the forecast.
+    drift = None
+    if action in ('came_through', 'came_through_amount') and change and not change.get('removed'):
+        import recurring_drift
+        drift = recurring_drift.observe(current_user.id, table, change['category_id'],
+                                        change['date'], change['amount'], entry_id=change['entry_id'])
+
     # A credit-account answer changes the card's running balance, and that is
     # stored per day rather than derived on render - so nothing recalculates it
     # unless something asks. The entry routes do exactly this after touching a
@@ -18515,7 +18245,7 @@ def api_buckets_resolve():
     # affected cells instead of reloading. None means nothing needs touching.
     # remaining lets the page set its bubble without asking again.
     return jsonify({'success': True, 'message': message, 'change': change,
-                    'remaining': remaining})
+                    'remaining': remaining, 'drift': drift})
 
 
 def _hidden_email_kinds(user_id):
@@ -20342,53 +20072,37 @@ def _annotate_chain_rows(records, categories=None, groups=None):
     return records
 
 
-@app.route('/schedule-recurring-change', methods=['POST'])
-@login_required
-def schedule_recurring_change():
+def _schedule_recurring_change(user_id, kind, category_id, effective, amount, cadence_interval,
+                               cadence_unit, end_date=None, no_end_date=0, weekdays=None,
+                               monthly_days=None, yearly_day=None, yearly_month=None):
     """Schedule a change to a recurring entry, taking effect on a future date.
 
     Splits the chain: the link covering the effective date is truncated to the
     day before it, and a new link starts on it. Nothing before that date moves,
     which is the whole point - the entries already forecast at the old amount up
     to the effective date are left exactly where they are.
+
+    Returns (http_status, payload). The route below hands it the browser's form;
+    recurring_drift.apply hands it a habit a bill has settled into. One
+    implementation, so a change scheduled either way splits the chain the same.
     """
-    data = request.get_json() or {}
-    kind = data.get('kind')
-    if kind not in _CHAIN_KINDS:
-        return jsonify({'status': 'error', 'message': 'Unknown recurring kind.'}), 400
     spec = _CHAIN_KINDS[kind]
-
-    category_id = data.get('category_id')
-    effective_date = data.get('effective_date')
-    amount = data.get('amount')
-    cadence_interval = data.get('cadence_interval')
-    cadence_unit = data.get('cadence_unit')
-    end_date = data.get('end_date')
-    no_end_date = int(data.get('no_end_date') or 0)
-    weekdays = data.get('weekdays') or []
-    monthly_days = data.get('monthly_days') or []
-    yearly_day = data.get('yearly_day')
-    yearly_month = data.get('yearly_month')
-
-    if not all([category_id, effective_date, amount, cadence_interval, cadence_unit]):
-        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
-
-    effective = _as_date(effective_date)
-    if not effective:
-        return jsonify({'status': 'error', 'message': 'Effective date is not a date.'}), 400
+    weekdays = weekdays or []
+    monthly_days = monthly_days or []
+    no_end_date = int(no_end_date or 0)
 
     # A change in the past would rewrite amounts that have already been forecast
     # or settled, which is the one thing this must never do.
-    today = _user_today_for(current_user.id)
+    today = _user_today_for(user_id)
     if effective <= today:
-        return jsonify({'status': 'error',
-                        'message': f'A {spec["label"]} has to start after today.'}), 400
+        return 400, {'status': 'error',
+                     'message': f'A {spec["label"]} has to start after today.'}
 
     try:
-        chain = _recurring_chain(kind, current_user.id, category_id)
+        chain = _recurring_chain(kind, user_id, category_id)
         if not chain:
-            return jsonify({'status': 'error',
-                            'message': 'That category has nothing recurring to change.'}), 404
+            return 404, {'status': 'error',
+                         'message': 'That category has nothing recurring to change.'}
 
         # The link the effective date lands in: the last one that starts on or
         # before it. Anything later is a change already scheduled beyond this one.
@@ -20398,20 +20112,19 @@ def schedule_recurring_change():
             if start and start <= effective:
                 target = link
         if target is None:
-            return jsonify({'status': 'error',
-                            'message': 'That date is before this starts.'}), 400
+            return 400, {'status': 'error', 'message': 'That date is before this starts.'}
 
         target_end = _as_date(target.get('end_date'))
         if not _chain_link_is_open_ended(target) and target_end and target_end < effective:
-            return jsonify({
+            return 400, {
                 'status': 'error',
                 'message': (f'This ends on {target_end.strftime("%b %d, %Y")}. '
                             f'A {spec["label"]} has to start on or before then - to '
-                            'start it again later, change the end date first.')}), 400
+                            'start it again later, change the end date first.')}
 
         if _as_date(target.get('start_date')) == effective:
-            return jsonify({'status': 'error',
-                            'message': 'There is already a change starting on that date.'}), 400
+            return 400, {'status': 'error',
+                         'message': 'There is already a change starting on that date.'}
 
         # Three cases. Asking for no end date must not inherit the split link's
         # end_date: on something that really does stop, that is a date before the
@@ -20432,21 +20145,21 @@ def schedule_recurring_change():
                 new_no_end = 1
 
         if _as_date(new_end) and _as_date(new_end) < effective:
-            return jsonify({'status': 'error',
-                            'message': 'The end date is before the change starts.'}), 400
+            return 400, {'status': 'error',
+                         'message': 'The end date is before the change starts.'}
 
         # 1. Truncate the link being split, and drop the entries it no longer
         #    covers - only the ones from the effective date on.
         truncated = dict(target)
         truncated['end_date'] = str(effective - timedelta(days=1))
         truncated['no_end_date'] = 0
-        _update_recurring_in_redis(spec['recurring'], current_user.id, truncated)
-        _delete_chain_entries(kind, current_user.id, target['id'], effective)
+        _update_recurring_in_redis(spec['recurring'], user_id, truncated)
+        _delete_chain_entries(kind, user_id, target['id'], effective)
 
         # 2. The new link. Type and account come from the link it replaces: a
         #    change to the amount is not a change to what kind of thing it is.
         new_link = {
-            'user_id': current_user.id,
+            'user_id': user_id,
             'category_id': int(category_id),
             'category_name': target.get('category_name'),
             'amount': float(amount),
@@ -20463,23 +20176,53 @@ def schedule_recurring_change():
         }
         if kind == 'c_expense':
             new_link['account_id'] = target.get('account_id')
-        _update_recurring_in_redis(spec['recurring'], current_user.id, new_link)
+        _update_recurring_in_redis(spec['recurring'], user_id, new_link)
 
-        _chain_generate(kind, new_link, effective, new_end, current_user.id)
+        _chain_generate(kind, new_link, effective, new_end, user_id)
 
         # The category's own no_end_date follows the last link, which is what the
         # tables read to decide whether to print an end date at all.
         if new_no_end:
-            _update_category_in_redis(spec['categories'], current_user.id, category_id,
+            _update_category_in_redis(spec['categories'], user_id, category_id,
                                       {'no_end_date': 1})
 
-        return jsonify({'status': 'success', 'recurring_id': new_link['id'],
-                        'message': f'{spec["label"].capitalize()} scheduled.'})
+        return 200, {'status': 'success', 'recurring_id': new_link['id'],
+                     'message': f'{spec["label"].capitalize()} scheduled.'}
 
     except Exception as e:
         log_error(app.logger, 'RECURRING', f"Error scheduling {spec['label']}: {e}")
-        return jsonify({'status': 'error',
-                        'message': f'An error occurred while scheduling: {str(e)}'}), 500
+        return 500, {'status': 'error',
+                     'message': f'An error occurred while scheduling: {str(e)}'}
+
+
+@app.route('/schedule-recurring-change', methods=['POST'])
+@login_required
+def schedule_recurring_change():
+    """The browser's form for _schedule_recurring_change: a raise or a price change."""
+    data = request.get_json() or {}
+    kind = data.get('kind')
+    if kind not in _CHAIN_KINDS:
+        return jsonify({'status': 'error', 'message': 'Unknown recurring kind.'}), 400
+
+    category_id = data.get('category_id')
+    effective_date = data.get('effective_date')
+    amount = data.get('amount')
+    cadence_interval = data.get('cadence_interval')
+    cadence_unit = data.get('cadence_unit')
+
+    if not all([category_id, effective_date, amount, cadence_interval, cadence_unit]):
+        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
+
+    effective = _as_date(effective_date)
+    if not effective:
+        return jsonify({'status': 'error', 'message': 'Effective date is not a date.'}), 400
+
+    status, payload = _schedule_recurring_change(
+        current_user.id, kind, category_id, effective, amount, cadence_interval, cadence_unit,
+        end_date=data.get('end_date'), no_end_date=data.get('no_end_date'),
+        weekdays=data.get('weekdays'), monthly_days=data.get('monthly_days'),
+        yearly_day=data.get('yearly_day'), yearly_month=data.get('yearly_month'))
+    return jsonify(payload), status
 
 
 @app.route('/add-recurring-income', methods=['POST'])

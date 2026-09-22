@@ -4653,7 +4653,17 @@ def _flush_table_to_mysql(table: str, user_id: int):
                 return len(rows)
                 
             elif table == 'recurring_mismatches':
-                # Recurring mismatches table — tracks the enrichment provider-detected bill/wage changes
+                # Recurring mismatches: a bill or wage that has come through the same
+                # new way twice - see recurring_drift.py. The habit columns are all
+                # optional, and a row from before they existed carries none.
+                def _habit(row):
+                    def _day(v):
+                        return str(v)[:10] if v not in (None, '') else None
+                    def _num(v, cast):
+                        return cast(v) if v not in (None, '') else None
+                    return (_num(row.get('entry_id'), int), _num(row.get('detected_amount'), float),
+                            _num(row.get('detected_shift'), int),
+                            _day(row.get('expected_date')), _day(row.get('observed_date')))
                 # First, handle pending deletes
                 pending_key = f"pending_deletes:recurring_mismatches:{user_id}"
                 pending_deletes = _redis_client.smembers(pending_key)
@@ -4686,13 +4696,19 @@ def _flush_table_to_mysql(table: str, user_id: int):
                     
                     if is_temp:
                         cursor.execute("""
-                            INSERT INTO recurring_mismatches (id, user_id, recurring_table, recurring_id, category_id, transaction_id, dismissed, created_at)
-                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO recurring_mismatches (id, user_id, recurring_table, recurring_id, category_id, transaction_id, dismissed, created_at,
+                                                              entry_id, detected_amount, detected_shift, expected_date, observed_date)
+                            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 category_id = VALUES(category_id),
                                 transaction_id = VALUES(transaction_id),
                                 dismissed = VALUES(dismissed),
-                                created_at = VALUES(created_at)
+                                created_at = VALUES(created_at),
+                                entry_id = VALUES(entry_id),
+                                detected_amount = VALUES(detected_amount),
+                                detected_shift = VALUES(detected_shift),
+                                expected_date = VALUES(expected_date),
+                                observed_date = VALUES(observed_date)
                         """, (
                             user_id,
                             row.get('recurring_table'),
@@ -4700,7 +4716,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('category_id')),
                             row.get('transaction_id'),
                             int(row.get('dismissed', 0)),
-                            created_at_val
+                            created_at_val,
+                            *_habit(row)
                         ))
                         new_id = cursor.lastrowid
                         if new_id:
@@ -4708,13 +4725,19 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             log_info(logger, 'FLUSH', f"recurring_mismatches temp ID {old_id} → real ID {new_id}")
                     else:
                         cursor.execute("""
-                            INSERT INTO recurring_mismatches (id, user_id, recurring_table, recurring_id, category_id, transaction_id, dismissed, created_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO recurring_mismatches (id, user_id, recurring_table, recurring_id, category_id, transaction_id, dismissed, created_at,
+                                                              entry_id, detected_amount, detected_shift, expected_date, observed_date)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON DUPLICATE KEY UPDATE
                                 category_id = VALUES(category_id),
                                 transaction_id = VALUES(transaction_id),
                                 dismissed = VALUES(dismissed),
-                                created_at = VALUES(created_at)
+                                created_at = VALUES(created_at),
+                                entry_id = VALUES(entry_id),
+                                detected_amount = VALUES(detected_amount),
+                                detected_shift = VALUES(detected_shift),
+                                expected_date = VALUES(expected_date),
+                                observed_date = VALUES(observed_date)
                         """, (
                             old_id,
                             user_id,
@@ -4723,7 +4746,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             int(row.get('category_id')),
                             row.get('transaction_id'),
                             int(row.get('dismissed', 0)),
-                            created_at_val
+                            created_at_val,
+                            *_habit(row)
                         ))
                 
                 conn.commit()

@@ -114,6 +114,11 @@ EXPECTED_COLUMNS = (
     ('loaf_shelves', 'uncharged_weekdays'),
     ('loaf_entries', 'computed_hours'),
     ('loaf_entries', 'direction'),
+    ('recurring_mismatches', 'entry_id'),
+    ('recurring_mismatches', 'detected_amount'),
+    ('recurring_mismatches', 'detected_shift'),
+    ('recurring_mismatches', 'expected_date'),
+    ('recurring_mismatches', 'observed_date'),
 )
 EXPECTED_CONSTRAINTS = (
     ('totals_remainders_m', 'totals_remainders_m_ibfk_1'),

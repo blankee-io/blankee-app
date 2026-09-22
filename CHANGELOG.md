@@ -8,6 +8,27 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.46.0 — 2026-09-21
+
+### Added
+- A bill or wage that has come through the same new way twice is asked about.
+  When a recurring bill or wage is confirmed - in the evening prompt or the
+  bank modal - for a different amount, or more than two days from the day it
+  was due, and the previous occurrence missed the same way, Blankee asks
+  whether the plan should follow it: "Phone has come through as $54.99 instead
+  of $52.00, and on the 4th instead of the 1st, twice now. Change it to that
+  from Oct 01, 2026?" Yes schedules the change from the next due date, the way
+  a raise or a price change is, so nothing already recorded moves; Leave it
+  remembers the answer, and the same habit is not asked about again. Until it
+  is answered, the recurring page marks the entry. Allowances and variable
+  income are never asked about - they differ by design. Weekend and holiday
+  slips of a day or two never count.
+
+### Removed
+- The recurring-mismatch detection that depended on the old bank provider's
+  "this merchant is recurring" enrichment. It has not fired since that
+  provider was removed; its badge and table are what the new check uses.
+
 ## 1.45.6 — 2026-09-21
 
 ### Fixed

@@ -1275,11 +1275,11 @@ function initRecurringMismatchBadges(recurringTable) {
                 inner.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
                 badge.appendChild(inner);
                 badge.setAttribute('data-mismatch-id', m.id);
-                badge.setAttribute('title', 'Detected change');
+                badge.setAttribute('title', 'Has it changed?');
                 anchor.appendChild(badge);
                 badge.addEventListener('click', function(e) {
                     e.stopPropagation();
-                    showMismatchModal(m, recurringTable);
+                    queueDriftPrompt(m);
                 });
             });
         })
@@ -1287,154 +1287,81 @@ function initRecurringMismatchBadges(recurringTable) {
 }
 
 /**
- * Show the mismatch comparison modal.
- * @param {Object} m - Enriched mismatch object from API
- * @param {string} recurringTable - 'recurring_income', 'recurring_expense', or 'recurring_c_expense'
+ * A bill or wage has come through the same new way twice - should the plan
+ * follow it? Put through the shared dialog: Yes schedules the change from the
+ * next due date, No puts this habit away so it is not asked about again.
+ *
+ * `d` is what /api/recurring-mismatches describes, or what a confirmation
+ * hands back as `drift`. Resolves to whether the change was made.
  */
-function showMismatchModal(m, recurringTable) {
-    // Remove existing modal if any
-    var existing = document.getElementById('mismatch-modal');
-    if (existing) existing.remove();
-
-    var typeLabel = recurringTable === 'recurring_income' ? 'Income' : 'Bill/Wage';
-    var currencySymbol = (typeof window.currencySymbol !== 'undefined') ? window.currencySymbol : '$';
-
-    // Build comparison rows (only show rows that differ)
-    var rows = '';
-    var amountDiff = Math.abs(m.detected_amount - m.current_amount);
-    var threshold = Math.max(1.0, m.current_amount * 0.02);
-    if (amountDiff > threshold) {
-        rows += '<tr><td class="mismatch-label">Amount</td>' +
-            '<td class="mismatch-current">' + currencySymbol + m.current_amount.toFixed(2) + '</td>' +
-            '<td class="mismatch-detected">' + currencySymbol + m.detected_amount.toFixed(2) + '</td></tr>';
+function driftSentence(d) {
+    var sym = (typeof window.currencySymbol !== 'undefined') ? window.currencySymbol : '$';
+    var parts = [];
+    if (d.detected_amount != null) {
+        parts.push('as ' + sym + Number(d.detected_amount).toFixed(2) +
+                   ' instead of ' + sym + Number(d.current_amount).toFixed(2));
     }
-    if (m.detected_cadence && m.current_cadence && m.detected_cadence !== m.current_cadence) {
-        rows += '<tr><td class="mismatch-label">Frequency</td>' +
-            '<td class="mismatch-current">' + _escHtml(m.current_cadence) + '</td>' +
-            '<td class="mismatch-detected">' + _escHtml(m.detected_cadence) + '</td></tr>';
+    if (d.proposed_day) {
+        parts.push('on ' + d.proposed_day + (d.current_day ? ' instead of ' + d.current_day : ''));
     }
+    return d.category_name + ' has come through ' + parts.join(', and ') + ', twice now.';
+}
 
-    var paymentInfo = '';
-    if (m.enrichment_last_payment_date) {
-        paymentInfo = '<p class="mismatch-payment-info">Last detected payment: ' + _escHtml(m.enrichment_last_payment_date) + '</p>';
-    }
-
-    var modal = document.createElement('div');
-    modal.id = 'mismatch-modal';
-    modal.className = 'modal';
-    modal.innerHTML =
-        '<div class="modal-content center-modal mismatch-modal-content">' +
-            '<span class="close-modal mismatch-close">&times;</span>' +
-            '<h2>' + typeLabel + ' Update Detected</h2>' +
-            '<p class="mismatch-desc">Blankee detected that your <strong>' + _escHtml(m.category_name) + '</strong> may have changed based on recent bank transactions.</p>' +
-            '<table class="mismatch-table">' +
-                '<thead><tr><th></th><th>Current</th><th>Detected</th></tr></thead>' +
-                '<tbody>' + rows + '</tbody>' +
-            '</table>' +
-            paymentInfo +
-            '<p class="mismatch-warning">Updating will change your projected future amounts for this category.</p>' +
-            '<div class="modal-buttons">' +
-                '<button class="mismatch-update-btn" id="mismatch-update-btn">Update</button>' +
-                '<button class="mismatch-dismiss-btn" id="mismatch-dismiss-btn">Dismiss</button>' +
-            '</div>' +
-        '</div>';
-
-    document.body.appendChild(modal);
-    modal.classList.add('modal--open');
-
-    var closeBtn = modal.querySelector('.mismatch-close');
-    var updateBtn = document.getElementById('mismatch-update-btn');
-    var dismissBtn = document.getElementById('mismatch-dismiss-btn');
-
-    function closeModal() {
-        modal.classList.remove('modal--open');
-        modal.remove();
-    }
-
-    closeBtn.addEventListener('click', closeModal);
-    modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
-
-    // Update button — call existing edit recurring endpoint, then dismiss
-    updateBtn.addEventListener('click', function() {
-        updateBtn.disabled = true;
-        updateBtn.textContent = 'Updating...';
-
-        // Build the update payload with detected values
-        var editUrl = {
-            'recurring_income': '/update-recurring-income',
-            'recurring_expense': '/update-recurring-expense',
-            'recurring_c_expense': '/update-recurring-ca-expense'
-        }[recurringTable];
-
-        var payload = { recurring_id: m.recurring_id };
-        // Always include all required fields from current values
-        payload.category_name = m.category_name || '';
-        payload.amount = (amountDiff > threshold) ? m.detected_amount : m.current_amount;
-        payload.cadence_interval = (m.detected_cadence_interval && m.detected_cadence_unit && m.detected_cadence !== m.current_cadence) ? m.detected_cadence_interval : m.current_cadence_interval;
-        payload.cadence_unit = (m.detected_cadence_interval && m.detected_cadence_unit && m.detected_cadence !== m.current_cadence) ? m.detected_cadence_unit : m.current_cadence_unit;
-        payload.start_date = new Date().toISOString().slice(0, 10);
-        payload.end_date = m.current_end_date || new Date().toISOString().slice(0, 10);
-        payload.no_end_date = m.current_no_end_date || 0;
-        payload.wage_bill = 1;
-        // Weekdays / monthly_days
-        if (m.detected_cadence_interval && m.detected_cadence_unit && m.detected_cadence !== m.current_cadence) {
-            if (m.detected_cadence_unit === 'weeks' && m.detected_weekday) {
-                payload.weekdays = [m.detected_weekday];
-            } else if (m.current_weekdays) {
-                payload.weekdays = m.current_weekdays.split(',');
-            }
-            if (m.detected_cadence_unit === 'months' && m.detected_day_of_month) {
-                payload.monthly_days = [String(m.detected_day_of_month)];
-            } else if (m.current_monthly_days) {
-                payload.monthly_days = m.current_monthly_days.split(',');
-            }
-        } else {
-            if (m.current_weekdays) payload.weekdays = m.current_weekdays.split(',');
-            if (m.current_monthly_days) payload.monthly_days = m.current_monthly_days.split(',');
-        }
-
-        fetch(editUrl, {
+function showDriftPrompt(d) {
+    return showConfirmModal({
+        title: 'Has it changed?',
+        message: driftSentence(d) + ' Change it to that from ' + d.effective_text + '?',
+        confirmText: 'Change it',
+        cancelText: 'Leave it'
+    }).then(function (yes) {
+        // Keyed on the link, not the row: the row's id is a placeholder until
+        // the flush worker has been round, and can change while this is open.
+        var url = '/api/recurring-mismatches/' + (yes ? 'apply' : 'dismiss');
+        return fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({ recurring_table: d.recurring_table, recurring_id: d.recurring_id })
         })
-        .then(function(r) { return r.json(); })
-        .then(function(result) {
-            if (result.status === 'success' || result.success) {
-                // Dismiss mismatch
-                return fetch('/api/recurring-mismatches/' + m.id + '/dismiss', { method: 'POST' })
-                    .then(function() {
-                        _removeBadge(m.recurring_id);
-                        _updateRowValues(m, recurringTable);
-                        showToast('Recurring entry updated!', 'success');
-                        closeModal();
-                    });
-            } else {
-                showToast(result.message || 'Failed to update recurring entry.', 'error');
-                updateBtn.disabled = false;
-                updateBtn.textContent = 'Update';
-            }
-        })
-        .catch(function(err) {
-            showToast('Error updating entry.', 'error');
-            updateBtn.disabled = false;
-            updateBtn.textContent = 'Update';
-        });
-    });
-
-    // Dismiss button
-    dismissBtn.addEventListener('click', function() {
-        dismissBtn.disabled = true;
-        fetch('/api/recurring-mismatches/' + m.id + '/dismiss', { method: 'POST' })
-            .then(function() {
-                _removeBadge(m.recurring_id);
-                showToast('Dismissed', 'info');
-                closeModal();
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (!res || res.status !== 'success') {
+                    showToast((res && res.message) || 'Could not save that.', 'error');
+                    return false;
+                }
+                if (yes) { showToast(res.message || 'Changed.', 'success'); }
+                // The recurring page marks the same row with a badge; it goes
+                // with the answer, and a Yes redraws the page with the new
+                // link under the old one.
+                _removeBadge(d.recurring_id);
+                if (yes && document.querySelector('tr[data-recurring-id]')) {
+                    window.location.reload();
+                }
+                return yes;
             })
-            .catch(function() {
-                showToast('Error dismissing.', 'error');
-                dismissBtn.disabled = false;
-            });
+            .catch(function () { showToast('Could not reach the server.', 'error'); return false; });
+    });
+}
+
+// A confirmation can hand back a habit while the dialog it happened in is
+// still open, and there is one shared dialog. So the question waits until
+// that dialog has gone, then asks - one at a time, in the order they came.
+var _driftQueue = [];
+var _driftAsking = false;
+function queueDriftPrompt(d) {
+    _driftQueue.push(d);
+    flushDriftPrompts();
+}
+function flushDriftPrompts() {
+    if (_driftAsking || !_driftQueue.length) { return; }
+    var modal = document.getElementById('generic-confirm-modal');
+    if (modal && modal.classList.contains('modal--open')) {
+        setTimeout(flushDriftPrompts, 400);
+        return;
+    }
+    _driftAsking = true;
+    showDriftPrompt(_driftQueue.shift()).then(function () {
+        _driftAsking = false;
+        flushDriftPrompts();
     });
 }
 
@@ -1443,17 +1370,6 @@ function _removeBadge(recurringId) {
     if (row) {
         var badge = row.querySelector('.recurring-mismatch-badge');
         if (badge) badge.remove();
-    }
-}
-
-function _updateRowValues(m, recurringTable) {
-    var row = document.querySelector('tr[data-recurring-id="' + m.recurring_id + '"]');
-    if (!row) return;
-    // Update amount cell
-    var amountCell = row.querySelector('td[data-column="amount"]');
-    if (amountCell && m.detected_amount) {
-        var sym = (typeof window.currencySymbol !== 'undefined') ? window.currencySymbol : '$';
-        amountCell.textContent = sym + m.detected_amount.toFixed(2);
     }
 }
 
@@ -2501,6 +2417,7 @@ function categoriseBankRow(row, categoryId) {
         }
         // The last row answered: the balances were matched to the bank.
         if (res.note) { showToast(res.note, "info", 6000); }
+        if (res.drift) { queueDriftPrompt(res.drift); }
         return true;
       })
       .catch(function () {
@@ -2593,6 +2510,7 @@ function resolveAllBucketRows(bodyEl, action, close) {
                     bucketPromptChanges.push(res.change);
                     scheduleBucketRefresh();
                 }
+                if (res.drift) { queueDriftPrompt(res.drift); }
                 row.remove();
             }
             else { row.classList.remove("bucket-prompt-busy"); }
@@ -2867,6 +2785,7 @@ function showBucketPrompt(opts) {
                                 bucketPromptChanges.push(res.change);
                                 scheduleBucketRefresh();
                             }
+                            if (res.drift) { queueDriftPrompt(res.drift); }
                             row.remove();
                             if (!bodyEl.querySelector(".bucket-prompt-item")) {
                                 bodyEl.__bucketClose(true);

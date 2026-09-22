@@ -903,6 +903,11 @@ def get_recurring_mismatches(user_id=None, dismissed=False):
         return []
 
 
+# The habit a row records, once the same miss has been confirmed twice - see
+# recurring_drift.py. All optional: a row from before they existed has none.
+_HABIT_FIELDS = ('entry_id', 'detected_amount', 'detected_shift', 'expected_date', 'observed_date')
+
+
 def upsert_recurring_mismatch(mismatch_data, user_id=None):
     """
     Insert or update a recurring mismatch record (Redis-first).
@@ -910,7 +915,8 @@ def upsert_recurring_mismatch(mismatch_data, user_id=None):
     Always overwrites with latest — un-dismisses if previously dismissed.
     
     Args:
-        mismatch_data: Dict with: recurring_table, recurring_id, category_id, transaction_id
+        mismatch_data: Dict with: recurring_table, recurring_id, category_id, and any of
+                      transaction_id and the _HABIT_FIELDS
         user_id: User ID (defaults to current_user.id)
         
     Returns:
@@ -946,6 +952,8 @@ def upsert_recurring_mismatch(mismatch_data, user_id=None):
                 # Update existing — always overwrite with latest, un-dismiss
                 cached_data[i]['category_id'] = mismatch_data.get('category_id', m.get('category_id'))
                 cached_data[i]['transaction_id'] = mismatch_data.get('transaction_id')
+                for key in _HABIT_FIELDS:
+                    cached_data[i][key] = mismatch_data.get(key)
                 cached_data[i]['dismissed'] = 0
                 cached_data[i]['created_at'] = datetime.now().isoformat()
                 db_id = cached_data[i].get('id')
@@ -966,6 +974,7 @@ def upsert_recurring_mismatch(mismatch_data, user_id=None):
                 'recurring_id': int(recurring_id),
                 'category_id': int(mismatch_data.get('category_id', 0)),
                 'transaction_id': mismatch_data.get('transaction_id'),
+                **{key: mismatch_data.get(key) for key in _HABIT_FIELDS},
                 'dismissed': 0,
                 'created_at': datetime.now().isoformat()
             }
