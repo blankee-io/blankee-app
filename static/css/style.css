@@ -16964,6 +16964,61 @@ tr[data-collapsed] {
     100% { opacity: 0; }
 }
 
+/* ===== Has it changed? - the drift comparison inside the shared dialog ===== */
+.drift-compare-lead {
+    margin: 0 0 12px;
+}
+
+.drift-compare {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 14px;
+    font-size: 14px;
+}
+
+.drift-compare th,
+.drift-compare td {
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--secondary-lighter);
+}
+
+.drift-compare thead th {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--secondary-dark);
+    border-bottom: 2px solid var(--secondary-hover);
+}
+
+.drift-compare tbody th {
+    width: 28%;
+    font-weight: 600;
+    color: var(--text-dark);
+}
+
+/* The planned figure is what is being left behind; the new one is the answer. */
+.drift-compare td:nth-child(2) {
+    color: var(--secondary-dark);
+}
+
+.drift-compare td:last-child {
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.drift-compare-from {
+    margin: 0;
+}
+
+.drift-compare-when {
+    display: block;
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--secondary-dark);
+}
+
 /* ─── Recurring Suggestions ─────────────────────────────────────────────────── */
 
 .suggested-recurring-section {

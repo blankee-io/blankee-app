@@ -206,14 +206,18 @@ def _miss(link, on, amount):
     }
 
 
-def _same_habit(now, before):
-    """Whether the earlier miss is the same one, on the dimensions that miss now."""
-    if now['amount'] is not None and before['amount'] != now['amount']:
-        return False
-    if now['shift'] is not None and (before['shift'] is None
-                                     or abs(before['shift'] - now['shift']) > SLACK_DAYS):
-        return False
-    return True
+def _shared_habit(now, before):
+    """
+    What the two misses have in common - each dimension on its own. A bill
+    that has landed on the 13th twice has a day habit whatever its amounts
+    did, and one that has been 54.99 twice has an amount habit whether or
+    not it was on time. Returns {'amount', 'shift'}, each None where the two
+    do not agree; the caller asks when either is set.
+    """
+    amount = now['amount'] if (now['amount'] is not None and before['amount'] == now['amount']) else None
+    shift = (now['shift'] if (now['shift'] is not None and before['shift'] is not None
+                              and abs(before['shift'] - now['shift']) <= SLACK_DAYS) else None)
+    return {'amount': amount, 'shift': shift}
 
 
 def _previous(user_id, table, category_id, before, exclude_id):
@@ -293,10 +297,12 @@ def _observe(user_id, table, category_id, on, amount, entry_id, transaction_id):
     if prev_link is None or not _flag(prev_link.get('wage_bill')):
         return None
     before = _miss(prev_link, prev_on, prev.get('amount'))
-    if before is None or not _same_habit(now, before):
+    if before is None:
+        return None
+    habit = _shared_habit(now, before)
+    if habit['amount'] is None and habit['shift'] is None:
         return None
 
-    habit = {'amount': now['amount'], 'shift': now['shift']}
     from redis_crud import get_recurring_mismatches, upsert_recurring_mismatch
     for row in get_recurring_mismatches(user_id, dismissed=True) or []:
         if (row.get('recurring_table') == recurring_table
@@ -311,8 +317,8 @@ def _observe(user_id, table, category_id, on, amount, entry_id, transaction_id):
         'category_id': int(category_id),
         'transaction_id': transaction_id,
         'entry_id': entry_id,
-        'detected_amount': float(now['amount']) if now['amount'] is not None else None,
-        'detected_shift': now['shift'],
+        'detected_amount': float(habit['amount']) if habit['amount'] is not None else None,
+        'detected_shift': habit['shift'],
         'expected_date': now['expected'].isoformat(),
         'observed_date': on.isoformat(),
     }

@@ -1294,23 +1294,35 @@ function initRecurringMismatchBadges(recurringTable) {
  * `d` is what /api/recurring-mismatches describes, or what a confirmation
  * hands back as `drift`. Resolves to whether the change was made.
  */
-function driftSentence(d) {
+function driftComparison(d) {
+    // Two columns: what the plan says, and what has come through twice. Only
+    // the rows that differ - a habit is usually one thing, sometimes both.
     var sym = (typeof window.currencySymbol !== 'undefined') ? window.currencySymbol : '$';
-    var parts = [];
+    var money = function (v) { return sym + Number(v).toFixed(2); };
+    var rows = '';
     if (d.detected_amount != null) {
-        parts.push('as ' + sym + Number(d.detected_amount).toFixed(2) +
-                   ' instead of ' + sym + Number(d.current_amount).toFixed(2));
+        rows += '<tr><th scope="row">Amount</th><td>' + money(d.current_amount) + '</td>' +
+                '<td>' + money(d.detected_amount) + '</td></tr>';
     }
     if (d.proposed_day) {
-        parts.push('on ' + d.proposed_day + (d.current_day ? ' instead of ' + d.current_day : ''));
+        rows += '<tr><th scope="row">Day</th><td>' + _escHtml(d.current_day || '') + '</td>' +
+                '<td>' + _escHtml(d.proposed_day) + '</td></tr>';
     }
-    return d.category_name + ' has come through ' + parts.join(', and ') + ', twice now.';
+    return '<p class="drift-compare-lead"><strong>' + _escHtml(d.category_name) + '</strong>' +
+               ' came through differently than forecasted, twice in a row.</p>' +
+           '<table class="drift-compare">' +
+               '<thead><tr><th></th><th>Forecasted</th><th>Came through</th></tr></thead>' +
+               '<tbody>' + rows + '</tbody>' +
+           '</table>' +
+           '<p class="drift-compare-from">Change the recurring category to match the new transactions?' +
+               ' <span class="drift-compare-when">From ' + _escHtml(d.effective_text) + '.</span></p>';
 }
 
 function showDriftPrompt(d) {
     return showConfirmModal({
         title: 'Has it changed?',
-        message: driftSentence(d) + ' Change it to that from ' + d.effective_text + '?',
+        message: '',
+        bodyHtml: driftComparison(d),
         confirmText: 'Change it',
         cancelText: 'Leave it'
     }).then(function (yes) {
