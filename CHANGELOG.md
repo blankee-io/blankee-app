@@ -8,6 +8,19 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.46.4 — 2026-09-22
+
+### Fixed
+- A card's projected interest charge that the daily pull has moved forward now
+  counts in the card's balance on the day its row sits, like every other
+  forecast, instead of on the statement date where there was nothing to see.
+  Until the bank posts the charge the balance matches the bank's, and the day
+  the charge shows is the day it is owed. Follows 1.46.3, which kept the charge
+  in the balance but on the statement date.
+- A recalculation of a card's balances now tells open pages to redraw. A
+  repair run outside a page left the dashboard showing the old balance until
+  it was reloaded.
+
 ## 1.46.3 — 2026-09-22
 
 ### Fixed

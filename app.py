@@ -8794,6 +8794,11 @@ def update_daily_ca_totals(user_id, start_date):
             # The projected charges already on record, for replaying the run-up
             # to a partial walk rather than recomputing it. See charge_for.
             stored_interest = {}
+            # Charges the daily pull has moved on, by the statement they are
+            # for. Counted where the row now sits, like any other forecast, so
+            # the balance and the row move together; the cycle is told the
+            # statement is carried, and the reconciler that the charge stands.
+            deferred_interest = {}
             # The first day Blankee knows anything at all about this card,
             # which is not the day the card was opened. See the backfill below.
             account_first_seen = None
@@ -8838,11 +8843,21 @@ def update_daily_ca_totals(user_id, start_date):
                         elif isinstance(statement, datetime):
                             statement = statement.date()
                         if int(entry.get('is_bucket') or 0) == 1:
-                            stored_interest[statement] = (
-                                stored_interest.get(statement, 0.0)
-                                + float(entry.get('amount', 0)))
-                            continue
-                        confirmed_interest_dates.add(statement)
+                            if statement != entry_date:
+                                # Moved on by the pull: money owed, on the day
+                                # the row now sits. Falls through to the
+                                # expenses below and is not replayed on the
+                                # statement date as well.
+                                deferred_interest[statement] = (
+                                    deferred_interest.get(statement, 0.0)
+                                    + float(entry.get('amount', 0)))
+                            else:
+                                stored_interest[entry_date] = (
+                                    stored_interest.get(entry_date, 0.0)
+                                    + float(entry.get('amount', 0)))
+                                continue
+                        else:
+                            confirmed_interest_dates.add(statement)
                     expense_by_date[entry_date] = expense_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
 
             # Try to get payment entries from Redis first
@@ -8933,7 +8948,8 @@ def update_daily_ca_totals(user_id, start_date):
                           if current_date < requested_min else None)
                 charge = cycle.charge_for(
                     current_date, balance,
-                    current_date in confirmed_interest_dates, replay=replay)
+                    (current_date in confirmed_interest_dates
+                     or current_date in deferred_interest), replay=replay)
                 if charge:
                     total_expenses += charge
                     balance += charge
@@ -8941,6 +8957,12 @@ def update_daily_ca_totals(user_id, start_date):
                     # collected. A replayed charge is already an entry.
                     if current_date >= requested_min:
                         projected_interest[current_date] = charge
+                elif current_date in deferred_interest and current_date >= requested_min:
+                    # Nothing posted here - the moved row carries it - but the
+                    # statement is still charged, and the reconciler has to be
+                    # told so, or it reads the silence as "no longer projected"
+                    # and removes the row.
+                    projected_interest[current_date] = deferred_interest[current_date]
 
                 redis_updates.append({
                     'account_id': account_id,
@@ -9892,6 +9914,12 @@ def _recalc_ca_daily_balance(user_id, start_date=None):
             for row in cursor.fetchall()
         ]
         cursor.close()
+
+    # Whatever asked for this - a route, the pull, a repair from a shell - the
+    # figures on every open page are now stale, and the pages only redraw when
+    # this changes. A repair run without it left a dashboard showing the old
+    # balance until somebody reloaded.
+    _bump_data_version(user_id)
 
     return ({
         "status": "success",

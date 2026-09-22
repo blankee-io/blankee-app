@@ -555,14 +555,10 @@ def app_balance(user_id, on_date=None):
     return Decimal(str(value or 0))
 
 
-def _open_forecasts(user_id, table, on_date, by_origin=()):
+def _open_forecasts(user_id, table, on_date):
     """
     [(category_id, Decimal amount)] for every open forecast on `table` dated
     on or before on_date. Redis, the same source the recalculations read.
-
-    by_origin: categories whose forecasts are dated by original_date when they
-    have one - where the charge lands in the balance, not where the entry sits.
-    See open_forecast_offsets for the one case that needs it.
     """
     cutoff = on_date.isoformat() if hasattr(on_date, 'isoformat') else str(on_date)[:10]
     out = []
@@ -575,8 +571,6 @@ def _open_forecasts(user_id, table, on_date, by_origin=()):
         except (TypeError, ValueError, ArithmeticError):
             continue
         day = str(e.get('date') or '')[:10]
-        if category_id in by_origin and e.get('original_date'):
-            day = str(e.get('original_date'))[:10]
         if amount <= 0 or not day or day > cutoff:
             continue
         out.append((category_id, amount))
@@ -616,24 +610,17 @@ def open_forecast_offsets(user_id, on_date, card_ids=None):
 
     cards = {int(a): Decimal('0') for a in (card_ids or [])}
     if cards:
-        # A projected interest charge is in the stored balance, just not as
-        # the entry it looks like: update_daily_ca_totals skips the entry and
-        # adds the charge it computes itself, on the statement date. So it is
-        # taken out like any other forecast - but dated by the statement it
-        # came from, because that is where the walk put it, wherever the pull
-        # has since moved the entry. Leaving it in read an unposted charge as
-        # debt the bank had not reported, and the correction wrote it off as a
-        # negative Uncategorized entry the size of the interest.
-        interest = set()
-        for c in redis_manager.get_table_cache('c_expense_categories', user_id) or []:
-            if c.get('id') is not None and c.get('is_interest') in (1, True, '1', 'true', 'True'):
-                interest.add(int(c['id']))
+        # A projected interest charge is a forecast like any other here: the
+        # balance holds it on the day its row sits - the statement date, or
+        # wherever the pull has since moved it (see update_daily_ca_totals) -
+        # so it comes out by that date with the rest. Leaving it in read an
+        # unposted charge as debt the bank had not reported, and the
+        # correction wrote it off as a negative Uncategorized entry.
         owners = {}
         for account_id in cards:
             for cat in (_card_category_ids(user_id, account_id) or set()):
                 owners[int(cat)] = account_id
-        for cat, amount in _open_forecasts(user_id, 'c_expense_entries', on_date,
-                                           by_origin=interest):
+        for cat, amount in _open_forecasts(user_id, 'c_expense_entries', on_date):
             owner = owners.get(cat)
             if owner is not None:
                 cards[owner] -= amount
