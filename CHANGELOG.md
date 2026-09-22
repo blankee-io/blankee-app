@@ -8,6 +8,13 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.46.2 — 2026-09-22
+
+### Fixed
+- On the admin console the Users table ran closer to the card's edges than the
+  sections above it. It now sits on the same line as their content, add-user
+  button included.
+
 ## 1.46.1 — 2026-09-22
 
 ### Changed
