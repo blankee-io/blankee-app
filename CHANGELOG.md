@@ -8,6 +8,18 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.45.6 — 2026-09-21
+
+### Fixed
+- On a credit card's statement date the daily pull could write a negative
+  Uncategorized entry the size of the projected interest. The card balance it
+  compares with the bank's includes interest the app expects to be charged, but
+  the comparison, unlike every other forecast, left that charge in - so interest
+  the bank had not posted yet read as the card holding too much, and the pull
+  wrote it off. Projected interest is now taken out of the comparison, dated by
+  the statement it belongs to even after the charge has been moved on. The
+  mistake came in with 1.44.4.
+
 ## 1.45.5 — 2026-09-21
 
 ### Fixed
