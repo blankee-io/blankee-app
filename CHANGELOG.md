@@ -8,6 +8,20 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.46.3 — 2026-09-22
+
+### Fixed
+- A card's projected interest charge, once the daily pull had moved it forward
+  past its statement date, dropped out of the card's balance the next time the
+  balance was recalculated from a later day - and the morning comparison with
+  the bank then wrote the missing amount back in as an Uncategorized
+  correction, so the card showed the charge twice. The balance walk now finds a
+  moved charge by the statement it belongs to.
+
+### Changed
+- The update offer reads "Changelog:" above the release notes, and no longer
+  explains what installing does.
+
 ## 1.46.2 — 2026-09-22
 
 ### Fixed

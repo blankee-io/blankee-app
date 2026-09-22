@@ -8823,12 +8823,26 @@ def update_daily_ca_totals(user_id, start_date):
                     # and its cycle is left alone.
                     if (interest_category_id is not None
                             and entry_category_id == interest_category_id):
+                        # By the statement it belongs to, not the day it sits
+                        # on. The pull moves a charge the bank has not posted
+                        # forward a day at a time, and original_date keeps
+                        # where it started. Keyed on the entry's own day, a
+                        # moved charge was not found on its statement date, the
+                        # replay posted nothing there, the balance came out
+                        # short by the charge - and the bank comparison, which
+                        # takes the projected charge out before comparing, then
+                        # wrote it back in as a correction.
+                        statement = entry.get('original_date') or entry_date
+                        if isinstance(statement, str):
+                            statement = datetime.strptime(statement[:10], '%Y-%m-%d').date()
+                        elif isinstance(statement, datetime):
+                            statement = statement.date()
                         if int(entry.get('is_bucket') or 0) == 1:
-                            stored_interest[entry_date] = (
-                                stored_interest.get(entry_date, 0.0)
+                            stored_interest[statement] = (
+                                stored_interest.get(statement, 0.0)
                                 + float(entry.get('amount', 0)))
                             continue
-                        confirmed_interest_dates.add(entry_date)
+                        confirmed_interest_dates.add(statement)
                     expense_by_date[entry_date] = expense_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
 
             # Try to get payment entries from Redis first
