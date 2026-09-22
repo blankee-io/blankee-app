@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.46.5 — 2026-09-22
+
+### Fixed
+- The daily pull recomputes each card's balance before comparing it with the
+  bank's. It used to compare a stored figure, refreshed only when the pull had
+  imported or moved something - so a pull that changed nothing measured
+  against whatever the last recalculation left, and after 1.46.4 changed where
+  a projected charge counts, a Sync now wrote the stale difference off as a
+  correction.
+
 ## 1.46.4 — 2026-09-22
 
 ### Fixed

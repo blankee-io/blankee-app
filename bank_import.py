@@ -1497,6 +1497,20 @@ def reconcile(user_id: int, balances: List[Dict[str, Any]]) -> Optional[Dict[str
                               f"{', '.join(g['as_of'] for g in groups)}")
     merged: Optional[Dict[str, Any]] = None
     with app.app_context():
+        # The cards' stored balances, fresh, from the earliest day about to be
+        # measured. The comparison reads a stored figure, and a pull that
+        # imported and moved nothing left it exactly as it found it - which
+        # was fine until the day the figure itself was wrong: after a release
+        # that changed where a charge counts, a Sync now measured yesterday
+        # against a balance nothing had recomputed and wrote the difference
+        # off as a correction. One short walk per pull is cheaper than that.
+        card_days = [g['as_of'] for g in groups if g['cards']]
+        if card_days:
+            try:
+                from app import _recalc_ca_daily_balance
+                _recalc_ca_daily_balance(user_id, _parse(min(card_days)))
+            except Exception as e:
+                log_exception(logger, TAG, f'user {user_id}: refreshing the card balances before comparing failed: {e}')
         for g in groups:
             result = auto_balance.reconcile_to_feed(user_id, checking=g['checking'], savings=g['savings'],
                                                    cards=g['cards'], on_date=_parse(g['as_of']),
