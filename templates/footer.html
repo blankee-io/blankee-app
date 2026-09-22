@@ -21,11 +21,30 @@
         if (localStorage.getItem(key) === '1') { return; }
         document.addEventListener('DOMContentLoaded', function () {
             showConfirmModal({
-                title: 'Update Available',
-                message: 'Blankee {{ notice.to_version or notice.to_short }} is '
-                       + 'available. Installing replaces the application code, '
-                       + 'applies any new dependencies and migrations, and reloads '
-                       + 'the application.',
+                title: 'Update {{ notice.to_version or notice.to_short }} available',
+                message: '',
+                // The notes arrive after the dialog is up: they come from the
+                // release itself, and a slow network must not hold the notice.
+                bodyHtml: '<div class="update-changelog" data-loading="1">Reading the release notes…</div>'
+                        + '<p class="update-note">Installing replaces the application code, '
+                        + 'applies any new dependencies and migrations, and reloads the '
+                        + 'application.</p>',
+                onReady: function (bodyEl) {
+                    var box = bodyEl.querySelector('.update-changelog');
+                    fetch('{{ url_for("admin_update_changelog") }}', { headers: { 'Accept': 'application/json' } })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (res) {
+                            if (!box) { return; }
+                            if (res && res.html) {
+                                box.innerHTML = res.html;
+                            } else {
+                                box.outerHTML = '<p class="update-changelog-none">No release notes were found for this version.</p>';
+                            }
+                        })
+                        .catch(function () {
+                            if (box) { box.outerHTML = '<p class="update-changelog-none">The release notes could not be read.</p>'; }
+                        });
+                },
                 confirmText: 'Update',
                 cancelText: 'Dismiss',
                 checkbox: {

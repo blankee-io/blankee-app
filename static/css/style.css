@@ -16983,6 +16983,64 @@ tr[data-collapsed] {
     100% { opacity: 0; }
 }
 
+/* ===== Update available - the release notes inside the shared dialog ===== */
+.update-changelog {
+    max-height: 40vh;
+    overflow-y: auto;
+    margin: 0 0 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--secondary-lighter);
+    border-radius: 10px;
+    background: var(--secondary-lighter);
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-dark);
+}
+
+.update-changelog h4 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--secondary-dark);
+}
+
+.update-changelog h4 + h4,
+.update-changelog ul + h4,
+.update-changelog p + h4 {
+    margin-top: 12px;
+}
+
+.update-changelog ul {
+    margin: 0 0 8px;
+    padding-left: 18px;
+}
+
+.update-changelog li + li {
+    margin-top: 6px;
+}
+
+.update-changelog p {
+    margin: 0 0 8px;
+}
+
+.update-changelog code,
+.update-note code {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--white);
+    font-size: 13px;
+}
+
+.update-changelog-none,
+.update-note {
+    margin: 0 0 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-dark);
+}
+
 /* ===== Has it changed? - the drift comparison inside the shared dialog ===== */
 .drift-compare-lead {
     margin: 0 0 12px;

@@ -567,6 +567,104 @@ def read_run_status():
         return None
 
 
+def changelog_section(text, version):
+    """
+    One version's section of CHANGELOG.md, without its heading: everything
+    from `## <version>` to the next `## `. None when the file has no such
+    section - a release whose notes were forgotten offers no notes.
+    """
+    lines = (text or '').splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith('## ') and line[3:].strip().split()[:1] == [version]:
+            start = i + 1
+            break
+    if start is None:
+        return None
+    end = len(lines)
+    for j in range(start, len(lines)):
+        if lines[j].startswith('## '):
+            end = j
+            break
+    section = '\n'.join(lines[start:end]).strip()
+    return section or None
+
+
+def changelog_html(section):
+    """
+    The section as HTML the confirm dialog can hold: `### x` headings, the
+    `- ` bullets with their wrapped lines joined, `code` spans, everything
+    else a paragraph, and every character escaped first. Not a Markdown
+    engine - the changelog is written by hand in one shape, and this reads
+    that shape.
+    """
+    import html as _html
+    import re as _re
+    if not section:
+        return ''
+
+    def inline(text):
+        return _re.sub(r'`([^`]+)`', r'<code>\1</code>', _html.escape(text))
+
+    out, bullets, para = [], [], []
+
+    def flush():
+        if bullets:
+            out.append('<ul>' + ''.join(f'<li>{inline(b)}</li>' for b in bullets) + '</ul>')
+            bullets.clear()
+        if para:
+            out.append(f'<p>{inline(" ".join(para))}</p>')
+            para.clear()
+
+    for line in section.splitlines():
+        if line.startswith('### '):
+            flush()
+            out.append(f'<h4>{inline(line[4:].strip())}</h4>')
+        elif line.startswith('- '):
+            if para:
+                flush()
+            bullets.append(line[2:].strip())
+        elif line.startswith('  ') and bullets:
+            bullets[-1] += ' ' + line.strip()
+        elif not line.strip():
+            flush()
+        else:
+            if bullets:
+                flush()
+            para.append(line.strip())
+    flush()
+    return ''.join(out)
+
+
+def fetch_changelog(slug, tag, version):
+    """
+    The notes for one waiting release, as HTML, or ''. For the footer's
+    notice, which knows the tag from the nightly check and nothing else.
+    Cached per tag: the notice is on every page an administrator opens.
+    """
+    key = (tag, version)
+    if key in _CHANGELOG_CACHE:
+        return _CHANGELOG_CACHE[key]
+    owner, repo = (slug or {}).get('owner'), (slug or {}).get('repo')
+    html_out = ''
+    if owner and repo and tag and version and (slug or {}).get('host') in _GITHUB_HOSTS:
+        try:
+            import httpx
+            with httpx.Client(timeout=httpx.Timeout(10.0, connect=10.0), follow_redirects=True,
+                              headers={'User-Agent': f'blankee/{read_version() or "unknown"}'}) as client:
+                r = client.get(f'https://raw.githubusercontent.com/{owner}/{repo}/refs/tags/{tag}/CHANGELOG.md')
+                if r.status_code == 200:
+                    html_out = changelog_html(changelog_section(r.text, version))
+        except Exception as e:
+            log_warning(logger, 'UPDATE', 'Could not read the changelog', error=str(e))
+            return ''
+    _CHANGELOG_CACHE[key] = html_out
+    return html_out
+
+
+_CHANGELOG_CACHE = {}
+
+
 def fetch_remote_state(slug, local_sha):
     """
     What the newest release looks like. The only function here that uses the
@@ -595,7 +693,8 @@ def fetch_remote_state(slug, local_sha):
     """
     out = {'checked': True, 'up_to_date': None, 'behind_by': None, 'status': None,
            'latest_sha': None, 'latest_short': None, 'latest_version': None,
-           'latest_tag': None, 'commits': [], 'signals': [], 'error': None}
+           'latest_tag': None, 'latest_changelog': None,
+           'commits': [], 'signals': [], 'error': None}
 
     host = (slug or {}).get('host')
     owner, repo = (slug or {}).get('owner'), (slug or {}).get('repo')
@@ -696,6 +795,17 @@ def fetch_remote_state(slug, local_sha):
         except Exception as e:
             errors.append(f'VERSION lookup failed ({e})')
 
+        # Not a signal: what the release says about itself, for the offer.
+        # A changelog that cannot be read is an offer without notes, not a
+        # failed check.
+        if out['latest_version']:
+            try:
+                r = client.get(f'https://raw.githubusercontent.com/{owner}/{repo}/{ref}/CHANGELOG.md')
+                if r.status_code == 200:
+                    out['latest_changelog'] = changelog_section(r.text, out['latest_version'])
+            except Exception as e:
+                log_warning(logger, 'UPDATE', 'Could not read the changelog', error=str(e))
+
         # Signal 2: how far behind the release this commit is. Skipped when the
         # newest tag could not be read: comparing against the branch instead
         # would count merges that are not a release and report an update that
@@ -788,7 +898,8 @@ def update_state(check_remote=False):
     code = {'checked': False, 'up_to_date': None, 'behind_by': None, 'status': None,
             'remote': f"{slug.get('owner')}/{slug.get('repo')}" if slug.get('owner') else None,
             'remote_host': slug.get('host'), 'latest_sha': None, 'latest_short': None,
-            'latest_version': None, 'commits': [], 'signals': [], 'error': None}
+            'latest_version': None, 'latest_changelog': None,
+            'commits': [], 'signals': [], 'error': None}
     if check_remote:
         code.update(fetch_remote_state(slug, commit.get('sha')))
         code['remote'] = f"{slug.get('owner')}/{slug.get('repo')}" if slug.get('owner') else None

@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.46.1 — 2026-09-22
+
+### Changed
+- The update offer says which version it is - "Update 1.46.1 available" - and
+  shows that version's release notes, read from the release itself, above the
+  Update button. Both the console's check and the notice an administrator sees
+  after the nightly check. "Up to date" names the version too, rather than a
+  commit hash.
+
 ## 1.46.0 — 2026-09-21
 
 ### Added

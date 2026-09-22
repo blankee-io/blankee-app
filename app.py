@@ -17348,20 +17348,35 @@ def admin_update_check():
     if code.get('error'):
         return jsonify({'status': 'error', 'message': code['error'],
                         'update': state}), 200
+    # The version, in both answers. A commit hash is what the updater works
+    # with; the version is what the person recognises from the footer.
     if code.get('up_to_date'):
-        short = (state.get('commit') or {}).get('short') or 'this commit'
-        return jsonify({'status': 'success', 'message': f'Up to date at {short}.',
+        version = state.get('version') or (state.get('commit') or {}).get('short') or 'this commit'
+        return jsonify({'status': 'success', 'message': f'Up to date at {version}.',
                         'update': state}), 200
-    behind = code.get('behind_by')
+    from version_info import changelog_html
     latest = code.get('latest_version')
-    parts = []
-    if behind:
-        parts.append(f"{behind} new commit{'s' if behind != 1 else ''} on main")
-    if latest and latest != state.get('version'):
-        parts.append(f"{state.get('version') or 'unknown'} to {latest}")
-    detail = f" - {', '.join(parts)}." if parts else '.'
-    return jsonify({'status': 'success', 'message': f'An update is available{detail}',
+    message = f'Update {latest} available.' if latest else 'An update is available.'
+    return jsonify({'status': 'success', 'message': message,
+                    'changelog_html': changelog_html(code.get('latest_changelog')),
                     'update': state}), 200
+
+
+@app.route('/admin/update/changelog', methods=['GET'])
+@admin_required
+def admin_update_changelog():
+    """
+    The notes for the update the nightly check found, for the footer's
+    notice. The check itself writes only the tag and version, so the notes
+    are read from the release when the notice is first shown, and kept.
+    """
+    from version_info import update_available, remote_slug, fetch_changelog
+    waiting = update_available() or {}
+    version, tag = waiting.get('to_version'), waiting.get('to_tag')
+    if not version or not tag:
+        return jsonify({'status': 'success', 'version': version, 'html': ''})
+    return jsonify({'status': 'success', 'version': version,
+                    'html': fetch_changelog(remote_slug(), tag, version)})
 
 
 @app.route('/admin/update/status', methods=['POST'])

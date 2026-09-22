@@ -883,12 +883,18 @@
             return out;
         }
 
-        async function offerUpdate(u, message) {
-            const lines = [message];
+        async function offerUpdate(u, res) {
+            // The offer: which version, what it says about itself, and what
+            // installing does. Anything wrong with this instance goes under it.
+            const latest = ((u.code || {}).latest_version) || '';
+            const title = latest ? 'Update ' + latest + ' available' : 'Update available';
+            const notes = res.changelog_html
+                ? '<div class="update-changelog">' + res.changelog_html + '</div>'
+                : '<p class="update-changelog-none">No release notes were found for this version.</p>';
             const problems = describeProblems(u);
-            if (problems.length) {
-                lines.push('Also on this instance: ' + problems.join('; ') + '.');
-            }
+            const also = problems.length
+                ? '<p class="update-note">Also on this instance: ' + escapeHtml(problems.join('; ')) + '.</p>'
+                : '';
 
             if (!u.self_update) {
                 const dir = (u.install || {}).app_dir || '/opt/blankee';
@@ -896,9 +902,11 @@
                     ? 'git pull && docker compose up -d --build'
                     : 'sudo git -C ' + dir + ' pull && sudo ' + dir + '/install/install.sh';
                 await showConfirmModal({
-                    title: 'Update Available',
-                    message: lines.join(' ') + ' This instance cannot update itself, so '
-                           + 'apply it from a shell: ' + how,
+                    title: title,
+                    message: '',
+                    bodyHtml: notes + also
+                        + '<p class="update-note">This instance cannot update itself, so apply it '
+                        + 'from a shell: <code>' + escapeHtml(how) + '</code></p>',
                     confirmText: 'OK',
                     hideCancel: true
                 });
@@ -906,15 +914,23 @@
             }
 
             const go = await showConfirmModal({
-                title: 'Update Available',
-                message: lines.join(' ') + ' Installing replaces the application code, '
-                       + 'installs any new dependencies, applies pending migrations and '
-                       + 'reloads the application. It cannot be undone automatically.',
+                title: title,
+                message: '',
+                bodyHtml: notes + also
+                    + '<p class="update-note">Installing replaces the application code, installs any '
+                    + 'new dependencies, applies pending migrations and reloads the application. '
+                    + 'It cannot be undone automatically.</p>',
                 confirmText: 'Update',
                 cancelText: 'Not now',
                 danger: true
             });
             if (go) { startUpdate(); }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // ---- the updating overlay -------------------------------------
@@ -1128,7 +1144,7 @@
                         }
                         return;
                     }
-                    await offerUpdate(u, res.message);
+                    await offerUpdate(u, res);
                 },
                 error: function(xhr) {
                     spinCheck(false);
