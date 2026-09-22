@@ -8482,6 +8482,11 @@ transform: scale(1.2);
     justify-content: flex-end;
     width: 100%;
     margin-bottom: 8px;
+    /* The other sections' rows are .input-group boxes with 16px of their own
+       padding, so their controls end 32px in from the card. This puts the
+       add-user button on the same line. */
+    padding-right: 16px;
+    box-sizing: border-box;
 }
 
 .admin-add-user-btn {
@@ -8506,7 +8511,14 @@ transform: scale(1.2);
    tinted card, so a second block of colour inside it just competes; horizontal
    rules carry the row separation on their own. */
 .admin-users-table {
-    width: 100%;
+    /* Inset so the cells' text - and the trash icon at the right - sit 32px
+       in from the card, where the other sections' content starts and ends:
+       their rows carry 16px of padding, the cells here carry 12px, and the
+       4px is the difference. Without it the table ran closer to the edges
+       than everything above it. */
+    width: calc(100% - 8px);
+    margin-left: 4px;
+    margin-right: 4px;
     border-collapse: collapse;
     background-color: var(--white);
     border-radius: 10px;
