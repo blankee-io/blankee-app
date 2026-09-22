@@ -16996,6 +16996,14 @@ tr[data-collapsed] {
 }
 
 /* ===== Update available - the release notes inside the shared dialog ===== */
+.update-changelog-label {
+    margin: 0 0 6px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: left;
+    color: var(--text-dark);
+}
+
 .update-changelog {
     max-height: 40vh;
     overflow-y: auto;

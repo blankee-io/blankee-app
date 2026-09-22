@@ -888,9 +888,9 @@
             // installing does. Anything wrong with this instance goes under it.
             const latest = ((u.code || {}).latest_version) || '';
             const title = latest ? 'Update ' + latest + ' available' : 'Update available';
-            const notes = res.changelog_html
+            const notes = '<p class="update-changelog-label">Changelog:</p>' + (res.changelog_html
                 ? '<div class="update-changelog">' + res.changelog_html + '</div>'
-                : '<p class="update-changelog-none">No release notes were found for this version.</p>';
+                : '<p class="update-changelog-none">No release notes were found for this version.</p>');
             const problems = describeProblems(u);
             const also = problems.length
                 ? '<p class="update-note">Also on this instance: ' + escapeHtml(problems.join('; ')) + '.</p>'
@@ -916,10 +916,7 @@
             const go = await showConfirmModal({
                 title: title,
                 message: '',
-                bodyHtml: notes + also
-                    + '<p class="update-note">Installing replaces the application code, installs any '
-                    + 'new dependencies, applies pending migrations and reloads the application. '
-                    + 'It cannot be undone automatically.</p>',
+                bodyHtml: notes + also,
                 confirmText: 'Update',
                 cancelText: 'Not now',
                 danger: true

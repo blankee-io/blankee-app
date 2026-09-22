@@ -25,10 +25,8 @@
                 message: '',
                 // The notes arrive after the dialog is up: they come from the
                 // release itself, and a slow network must not hold the notice.
-                bodyHtml: '<div class="update-changelog" data-loading="1">Reading the release notes…</div>'
-                        + '<p class="update-note">Installing replaces the application code, '
-                        + 'applies any new dependencies and migrations, and reloads the '
-                        + 'application.</p>',
+                bodyHtml: '<p class="update-changelog-label">Changelog:</p>'
+                        + '<div class="update-changelog" data-loading="1">Reading the release notes…</div>',
                 onReady: function (bodyEl) {
                     var box = bodyEl.querySelector('.update-changelog');
                     fetch('{{ url_for("admin_update_changelog") }}', { headers: { 'Accept': 'application/json' } })
