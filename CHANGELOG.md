@@ -8,6 +8,19 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.46.6 — 2026-09-22
+
+### Fixed
+- Upcoming Bills on the summary page shows a paid bill as paid. Its left side -
+  the last occurrence - was read from the bucket record, which is deleted the
+  moment a bill is paid, so the very thing that side exists to show came out as
+  a dash. Both sides are now worked out on the server from where their truth
+  lives: a paid bill from the entry that records it, at the figure that came
+  through; the one coming up from the forecast still open, on the day it now
+  sits; an allowance's current period from its record, and the period before
+  it from its record when that is still there, otherwise from the entries that
+  fell inside its dates.
+
 ## 1.46.5 — 2026-09-22
 
 ### Fixed

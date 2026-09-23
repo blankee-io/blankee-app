@@ -15768,6 +15768,21 @@ def dashboard_summary():
             savings_entries = list(cursor.fetchall())
             cursor.close()
 
+    # The Upcoming Bills rows, both sides each, worked out here rather than in
+    # the page: a paid bill's record is gone by the time the page asks, and
+    # only the entries still say it was paid. See summary_buckets.
+    from summary_buckets import upcoming_rows, sort_rows
+    _today = _user_today_for(current_user.id)
+    _wage_bill = {int(r['category_id']): int(r.get('wage_bill') or 0)
+                  for r in (recurring_expense_records or []) if r.get('category_id') is not None}
+    _c_wage_bill = {int(r['category_id']): int(r.get('wage_bill') or 0)
+                    for r in (recurring_c_expense_records or []) if r.get('category_id') is not None}
+    _card_names = {int(a['id']): a.get('name') or '' for a in (credit_accounts or []) if a.get('id') is not None}
+    bucket_rows = sort_rows(
+        upcoming_rows(expense_categories, expense_entries, expense_bucket_records, _wage_bill, _today)
+        + upcoming_rows(c_expense_categories, c_expense_entries, c_expense_bucket_records, _c_wage_bill, _today,
+                        account_names=_card_names))
+
     return render_template(
         'dashboard_summary.html',
         profile_picture=profile_picture,
@@ -15785,10 +15800,9 @@ def dashboard_summary():
         c_expense_categories_all=all_c_expense_categories,
         # Entries and other data
         expense_entries=expense_entries,
-        expense_bucket_records=expense_bucket_records,
+        bucket_rows=bucket_rows,
         credit_accounts=credit_accounts,
         c_expense_entries=c_expense_entries,
-        c_expense_bucket_records=c_expense_bucket_records,
         recurring_expense_records=recurring_expense_records,
         recurring_c_expense_records=recurring_c_expense_records,
         income_entries=income_entries,
