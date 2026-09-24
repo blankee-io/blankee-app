@@ -15613,7 +15613,8 @@ def dashboard_summary():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                SELECT id, category_id, wage_bill
+                SELECT id, category_id, wage_bill, amount, cadence_interval, cadence_unit,
+                       start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
                 FROM recurring_expense
                 WHERE user_id = %s
             """, (current_user.id,))
@@ -15626,7 +15627,8 @@ def dashboard_summary():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                SELECT id, category_id, wage_bill
+                SELECT id, category_id, wage_bill, amount, cadence_interval, cadence_unit,
+                       start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
                 FROM recurring_c_expense
                 WHERE user_id = %s
             """, (current_user.id,))
@@ -15778,10 +15780,18 @@ def dashboard_summary():
     _c_wage_bill = {int(r['category_id']): int(r.get('wage_bill') or 0)
                     for r in (recurring_c_expense_records or []) if r.get('category_id') is not None}
     _card_names = {int(a['id']): a.get('name') or '' for a in (credit_accounts or []) if a.get('id') is not None}
+    _templates, _c_templates = {}, {}
+    for r in (recurring_expense_records or []):
+        if r.get('category_id') is not None:
+            _templates.setdefault(int(r['category_id']), []).append(r)
+    for r in (recurring_c_expense_records or []):
+        if r.get('category_id') is not None:
+            _c_templates.setdefault(int(r['category_id']), []).append(r)
     bucket_rows = sort_rows(
-        upcoming_rows(expense_categories, expense_entries, expense_bucket_records, _wage_bill, _today)
+        upcoming_rows(expense_categories, expense_entries, expense_bucket_records, _wage_bill, _today,
+                      templates=_templates)
         + upcoming_rows(c_expense_categories, c_expense_entries, c_expense_bucket_records, _c_wage_bill, _today,
-                        account_names=_card_names))
+                        account_names=_card_names, templates=_c_templates))
 
     return render_template(
         'dashboard_summary.html',

@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.46.7 — 2026-09-23
+
+### Fixed
+- Upcoming Bills: an allowance's current period is the one the calendar says
+  it is, even when that period's record has been released and its forecast
+  consumed - which is the usual state of the week a person is in the middle
+  of. The recurring template's own dates fill the gaps the records leave, and
+  its amount stands in for a period that has no figure of its own. A weekly
+  allowance had been showing a stale period from a month earlier as "current".
+
 ## 1.46.6 — 2026-09-22
 
 ### Fixed
