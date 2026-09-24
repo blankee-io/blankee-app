@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.46.8 — 2026-09-23
+
+### Changed
+- Upcoming Bills: an allowance's two sides are the period being spent now, on
+  the left as the one that just happened, and the period after it on the
+  right as the one coming up - the same shape as a bill's. The period in
+  progress had been on the right.
+
 ## 1.46.7 — 2026-09-23
 
 ### Fixed

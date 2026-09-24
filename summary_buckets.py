@@ -18,12 +18,11 @@ So each side is read from where its truth actually lives:
   bill, last        the most recent occurrence that was paid - the confirmed
                     entry, which outlives the record, at the figure that
                     actually came through
-  allowance, current  the period today falls in (or the next to start): what
-                    is left, from its record, which is what typed spending
-                    depletes
-  allowance, last   the period before that one: from its record when the
-                    record is still there and has been drawn on, otherwise
+  allowance, last   the period today falls in - it is the one being spent,
+                    so it is what just happened: what is left, from its
+                    record when that is still there and drawn on, otherwise
                     from the entries that fell inside its dates
+  allowance, coming up  the period after it
 
 Pure: dicts in, dicts out, no store. `today` is the person's day.
 """
@@ -197,27 +196,22 @@ def _allowance_sides(occurrences, records, spending, today, template_anchors=(),
         shown = entry['shown'] if entry else anchor
         return _side(shown, original, _money(original) - _money(spent), False)
 
+    # The period in progress is the one that just happened - it is being
+    # spent right now - so it goes on the left, and the one coming up on the
+    # right is the period after it: the same shape as a bill's two sides.
+    # A series that has not started yet has nothing on the left.
+    if current > today:
+        return None, period(current, nxt, fallback=figure(nxt) if nxt else None)
     current_side = period(current, nxt, fallback=figure(nxt) if nxt else None)
-
-    if earlier:
-        prev = earlier[-1]
-    elif nxt is not None:
-        # No earlier anchor on record: a finished period whose record and
-        # forecast are both gone. Its length is taken to be the current one's.
-        prev = current - (nxt - current)
-    else:
-        prev = None
-    if prev is None:
-        return None, current_side
-    last_side = period(prev, current, fallback=figure(current))
-    # A period before the category's first known one is not a last
-    # occurrence - the series had not started. A known period that simply
-    # saw no spending is, and reads as nothing spent.
-    if known and prev < min(known) and not any(prev <= d < current for d, _ in spending):
-        last_side = None
-    if not known and not any(prev <= d < current for d, _ in spending):
-        last_side = None
-    return last_side, current_side
+    # Not a last occurrence if it is before the category's first known
+    # period - the series had not started.
+    if known and current < min(known) and not any(
+            current <= d and (nxt is None or d < nxt) for d, _ in spending):
+        current_side = None
+    if nxt is None:
+        return current_side, None
+    after = [a for a in anchors if a > nxt]
+    return current_side, period(nxt, after[0] if after else None, fallback=figure(current))
 
 
 def upcoming_rows(categories, entries, records, wage_bill, today, account_names=None,
