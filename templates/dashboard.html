@@ -277,7 +277,7 @@
                 <!-- Table for displaying Credit Accounts categories -->
                 {% for account in credit_accounts %}
 
-                    <table class="ca-categories-table" id="ca-categories-table-{{ account.id }}">
+                    <table class="ca-categories-table{% if account.id in dormant_credit_ids %} ca-dormant hidden_style{% endif %}" id="ca-categories-table-{{ account.id }}">
                         <thead>
                             <tr>
                                 <th class="ca-categories-header" id="ca-categories-header-{{ account.id }}">
@@ -425,7 +425,7 @@
                 </table>
 
                 {% for account in credit_accounts %}
-                    <div class="search-btn-container ca" id="ca-search-btn-container-{{ account.id }}">
+                    <div class="search-btn-container ca{% if account.id in dormant_credit_ids %} ca-dormant{% endif %}" id="ca-search-btn-container-{{ account.id }}">
                         <button class="clear-filter-btn ca" id="clear-ca-filter-btn-{{ account.id }}" title="Clear Filter">
                             <i class="fa-solid fa-filter-slash"></i>
                         </button>
@@ -433,7 +433,7 @@
                     </div>
 
                     <!-- Table displaying ca data for this credit account -->
-                    <table id="cas-table-{{ account.id }}" class="aligned-table cas-table">
+                    <table id="cas-table-{{ account.id }}" class="aligned-table cas-table{% if account.id in dormant_credit_ids %} ca-dormant hidden_style{% endif %}">
                         <thead>
                             <tr id="cas-header-row-{{ account.id }}">
                                 <!-- Dynamically create individual <th> elements here -->
@@ -692,6 +692,10 @@
 
         // Convert income and expense categories to JSON and pass them to JavaScript
         let credit_accounts = {{ credit_accounts | tojson }};
+        // Cards with nothing on them today. Drawn like hidden categories: dimmed
+        // while hidden things are shown, gone when they are hidden - the same
+        // toggle. See _dormant_credit_ids.
+        const dormant_credit_ids = {{ dormant_credit_ids | tojson }};
         let incomeCategories = {{ income_categories | tojson | safe }};
         let expenseCategories = {{ expense_categories | tojson | safe }};
         let incomeGroups = {{ income_groups | tojson | safe }};
@@ -1563,6 +1567,14 @@
                     const account = credit_accounts.find(a => a.id == accountId);
                     const nameSpan = document.createElement('span');
                     nameSpan.textContent = account && account.name ? account.name : '';
+                    // A card with nothing on it today wears the hidden mark, to the
+                    // right of its name, as a hidden category does.
+                    if (typeof dormant_credit_ids !== 'undefined' && account && dormant_credit_ids.includes(account.id)) {
+                        const dormantIcon = document.createElement('i');
+                        dormantIcon.className = 'fa-solid fa-eye-slash category-icon ca-dormant-icon';
+                        dormantIcon.title = 'Nothing on this card today';
+                        nameSpan.appendChild(dormantIcon);
+                    }
                     nameSpan.style.position = 'absolute';
                     nameSpan.style.left = 'calc(.2px + 0.9vw)';
                     nameSpan.style.top = '50%';
@@ -1776,6 +1788,9 @@
                 const sidebarId = type === 'income' ? 'income-categories-table' : 'expense-categories-table';
                 sidebarTbody = document.querySelector(`#${sidebarId} tbody`);
             }
+            // A card with nothing on it today is not drawn (see
+            // _dormant_credit_ids), so its tables are not there to toggle.
+            if (!tbody || !sidebarTbody) { return; }
 
             // Show/hide category rows in main table.
             // Through rowReveal so the rows fade rather than blink. The main
@@ -7628,6 +7643,10 @@
 
             // Apply initial hidden classes based on saved state
             function applyHiddenClasses() {
+                // Cards with nothing on them today follow the hidden categories.
+                document.querySelectorAll('.ca-dormant').forEach(el => {
+                    el.classList.toggle('hidden_categories', allHiddenActive);
+                });
                 // Income sidebar
                 document.querySelectorAll('#income-categories-table tr[data-category-id]').forEach(row => {
                     const catId = row.getAttribute('data-category-id');

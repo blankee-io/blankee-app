@@ -8,6 +8,23 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.47.0 — 2026-09-23
+
+### Changed
+- A credit account with a zero balance today is treated as dormant. On the
+  week and three-month views it behaves like a hidden category: dimmed while
+  hidden categories are shown, gone when they are hidden, on the same toggle.
+  The day and month views and the summary's graphs leave it out. It is still
+  offered when adding an entry, still listed on the Credit Accounts and
+  recurring pages, and its bills still show in Upcoming Bills; it comes back
+  the day something is on it.
+
+### Fixed
+- On the week and three-month views, a category group's own row now dims in
+  the columns before the start date like every other row, collapsed or
+  expanded. Its colour sits on the row, and the cells were showing it through
+  at full strength.
+
 ## 1.46.9 — 2026-09-23
 
 ### Fixed

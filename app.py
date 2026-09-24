@@ -3547,6 +3547,7 @@ def dashboard_d():
         income_categories=income_categories,
         currency_type=currency_type,
         credit_accounts=credit_accounts,
+        dormant_credit_ids=_dormant_credit_ids(current_user.id),
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
         c_a_balances_d=c_a_balances_d,
@@ -7209,6 +7210,47 @@ def _delete_bundle_in_redis(user_id, bundle_id):
         _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
     except Exception as e:
         log_error(app.logger, 'BUNDLE', f"Error deleting bundle from Redis: {e}")
+
+def _dormant_credit_ids(user_id):
+    """
+    The user's credit accounts whose balance is zero today - the ones the
+    dashboards leave out. A card that has nothing on it is noise in a
+    section built to show what is owed; it comes back the day something is.
+    "Today" is the person's day, and a card with no balance row for it has
+    nothing on it either. Never raises: a dashboard must not fall over
+    because this could not be read.
+    """
+    try:
+        today = _user_today_for(user_id).isoformat()
+        accounts = _get_credit_accounts_from_redis(user_id)
+        if accounts is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
+                accounts = list(cursor.fetchall())
+                cursor.close()
+        ids = {int(a['id']) for a in (accounts or []) if a.get('id') is not None}
+        if not ids:
+            return []
+        rows = _get_ca_balances_from_redis('c_a_balances_d', user_id)
+        if rows is None:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute(
+                    "SELECT b.account_id, b.balance FROM c_a_balances_d b "
+                    "  JOIN credit_accounts a ON a.id = b.account_id "
+                    " WHERE a.user_id = %s AND b.date = %s", (user_id, today))
+                rows = list(cursor.fetchall())
+                cursor.close()
+        balance_today = {}
+        for r in rows or []:
+            if str(r.get('date'))[:10] == today and r.get('account_id') is not None:
+                balance_today[int(r['account_id'])] = float(r.get('balance') or 0)
+        return sorted(i for i in ids if abs(balance_today.get(i, 0.0)) < 0.005)
+    except Exception as e:
+        log_warning(app.logger, 'DASHBOARD', f'Could not tell which cards are dormant for user {user_id}: {e}')
+        return []
+
 
 def _get_credit_accounts_from_redis(user_id):
     """Get credit accounts from Redis cache, sorted by display_order DESC."""
@@ -11606,6 +11648,7 @@ def dashboard():
         bundles=bundles,
         currency_type=currency_type,
         credit_accounts=credit_accounts,
+        dormant_credit_ids=_dormant_credit_ids(current_user.id),
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
         c_a_balances=c_a_balances,
@@ -14407,6 +14450,7 @@ def dashboard_3m():
         bundles=bundles,
         currency_type=currency_type,
         credit_accounts=credit_accounts,
+        dormant_credit_ids=_dormant_credit_ids(current_user.id),
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
         c_a_balances_m=c_a_balances_m,
@@ -15032,6 +15076,7 @@ def dashboard_m():
         landing_page=landing_page,
         currency_type=currency_type,
         credit_accounts=credit_accounts,
+        dormant_credit_ids=_dormant_credit_ids(current_user.id),
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
         c_a_balances_d=c_a_balances_d,
@@ -15390,6 +15435,7 @@ def dashboard_y():
         landing_page=landing_page,
         currency_type=currency_type,
         credit_accounts=credit_accounts,
+        dormant_credit_ids=_dormant_credit_ids(current_user.id),
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
         c_a_balances_d=c_a_balances_d,
@@ -15812,6 +15858,7 @@ def dashboard_summary():
         expense_entries=expense_entries,
         bucket_rows=bucket_rows,
         credit_accounts=credit_accounts,
+        dormant_credit_ids=_dormant_credit_ids(current_user.id),
         c_expense_entries=c_expense_entries,
         recurring_expense_records=recurring_expense_records,
         recurring_c_expense_records=recurring_c_expense_records,

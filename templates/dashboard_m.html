@@ -129,6 +129,8 @@
         let savingsEntries = {{ savings_entries | tojson }};
         let ca_balances_d = {{ c_a_balances_d|tojson }};
         const credit_accounts = {{ credit_accounts|tojson }};
+        // Cards with nothing on them today are not drawn.
+        const dormant_credit_ids = {{ dormant_credit_ids|tojson }};
 
         let touchStartX = null;
         let touchEndX = null;
@@ -457,6 +459,7 @@
                     // dateStr already declared above
 
                     credit_accounts.forEach(account => {
+                        if (dormant_credit_ids.includes(account.id)) { return; }
                         // Add divider for this credit account
                         const caAccountDivider = document.createElement('div');
                         caAccountDivider.className = 'dashboard-m-ca-account-divider';

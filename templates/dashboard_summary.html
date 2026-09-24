@@ -572,6 +572,8 @@
         // Upcoming Bills, both sides of every row, worked out on the server - see summary_buckets.py.
         const bucketRows = {{ bucket_rows | tojson | safe }};
         const creditAccounts = {{ credit_accounts | tojson | safe }};
+        // Cards with nothing on them today get no graph.
+        const dormantCreditIds = {{ dormant_credit_ids | tojson | safe }};
         const recurringCExpenseCategories = {{ c_expense_categories | tojson | safe }};
         const cExpenseEntries = {{ c_expense_entries | tojson | safe }};
         const recurringExpenseRecords = {{ recurring_expense_records | tojson | safe }};
@@ -2283,6 +2285,7 @@
             if (!creditAccounts || creditAccounts.length === 0 || !caBalancesD || caBalancesD.length === 0) return;
             
             creditAccounts.forEach((account, idx) => {
+                if (dormantCreditIds.includes(account.id)) { return; }
                 // Filter balances for this account, then reduce to monthly
                 const dailyBalances = caBalancesD
                     .filter(b => parseInt(b.account_id) === parseInt(account.id));

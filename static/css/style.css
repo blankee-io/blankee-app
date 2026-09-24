@@ -3322,6 +3322,16 @@ tr[data-category-id] td.before-member-since {
     background-color: var(--secondary-hover) !important;
 }
 
+/* The group rows too. Their colour sits on the row, so a half-transparent
+   cell showed it at full strength through itself and the columns before the
+   start date read as bright as the rest. The same overlay dims them, whether
+   the group is collapsed (sums showing) or expanded. */
+#income-categories-body .group-header-row td.before-member-since,
+#expense-categories-body .group-header-row td.before-member-since,
+.ca-group-header.group-header-row td.before-member-since {
+    background-color: var(--secondary-hover) !important;
+}
+
 /* Member Since badge positioning for dashboard_m day-label */
 .dashboard-m-day-label {
     position: relative;
@@ -6176,6 +6186,19 @@ td:has(.bucket-progress-container) {
 
 .hidden_categories {
     display: none;
+}
+
+/* A card with nothing on it today (see _dormant_credit_ids). Dimmer than a
+   hidden category's grey italics, since the whole block goes, not one row;
+   the eye-slash sits to the right of the name in the header. */
+.ca-dormant {
+    opacity: 0.45;
+}
+
+.ca-dormant-icon {
+    margin-left: 8px;
+    font-size: 0.85em;
+    vertical-align: middle;
 }
 
 /* Only show the exclamation bubble for below-threshold cells in the yearly dashboard calendar */

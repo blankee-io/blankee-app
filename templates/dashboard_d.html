@@ -297,6 +297,8 @@
         let baseTotalsRemainders = {{ totals_remainders_d | tojson }};
 
         const credit_accounts = {{ credit_accounts|tojson }};
+        // Cards with nothing on them today: drawn nowhere, still offered for entries.
+        const dormant_credit_ids = {{ dormant_credit_ids|tojson }};
         const c_expense_categories = {{ c_expense_categories|tojson }};
         const c_expense_entries = {{ c_expense_entries|tojson }};
         const c_a_balances_d = {{ c_a_balances_d|tojson }};
@@ -1138,6 +1140,7 @@
 
                 // Credit accounts
                 credit_accounts.forEach(account => {
+                    if (dormant_credit_ids.includes(account.id)) { return; }
                     const caDiv = document.createElement('div');
                     caDiv.classList.add('dashboard-d-credit-account');
                     caDiv.setAttribute('data-account-id', account.id);
