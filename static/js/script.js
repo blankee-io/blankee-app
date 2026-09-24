@@ -1187,13 +1187,41 @@ document.addEventListener('DOMContentLoaded', function() {
     var stale = false;    // a newer version was seen; reload on the next touch
     var pending = null;   // {toast} while a Refresh toast is up
 
-    // Restore the scroll position a reload saved.
+    // The scroll position, wherever the page keeps it. style.css gives html
+    // and body `height: 100%; overflow-y: auto`, so on most pages it is the
+    // body that scrolls and window.scrollY stays 0; a page without that
+    // shape scrolls the window. Read all three, write all three - the ones
+    // that do not scroll ignore the write.
+    function scrollPos() {
+        return Math.max(window.scrollY || 0,
+                        document.documentElement.scrollTop || 0,
+                        document.body ? (document.body.scrollTop || 0) : 0);
+    }
+    function scrollTo(y) {
+        window.scrollTo(0, y);
+        document.documentElement.scrollTop = y;
+        if (document.body) { document.body.scrollTop = y; }
+    }
+
+    // Restore the position a reload saved. The dashboards draw their content
+    // after load and some of them then scroll on their own (the daily view
+    // centres today), so one write at load lands before there is anything to
+    // scroll to. Keep putting it back until it has held still on a settled
+    // page, for a few seconds at most.
     var savedScroll = sessionStorage.getItem('_scrollY');
     if (savedScroll !== null) {
         sessionStorage.removeItem('_scrollY');
-        window.addEventListener('load', function() {
-            window.scrollTo(0, parseInt(savedScroll, 10));
-        });
+        var target = parseInt(savedScroll, 10) || 0;
+        var held = 0, ticks = 0, lastHeight = -1;
+        var restore = setInterval(function() {
+            ticks++;
+            var height = Math.max(document.documentElement.scrollHeight,
+                                  document.body ? document.body.scrollHeight : 0);
+            if (scrollPos() !== target) { scrollTo(target); held = 0; }
+            else if (height === lastHeight) { held++; }
+            lastHeight = height;
+            if (held >= 5 || ticks >= 40) { clearInterval(restore); }
+        }, 100);
     }
 
     function newer(v) { return Number(v) > Number(known || 0); }
@@ -1211,7 +1239,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function reload() {
-        try { sessionStorage.setItem('_scrollY', window.scrollY); } catch (e) {}
+        try {
+            sessionStorage.setItem('_scrollY', String(scrollPos()));
+            // Ours to restore, not the browser's: its own restore would
+            // fight the one above on pages that scroll the body.
+            if ('scrollRestoration' in history) { history.scrollRestoration = 'manual'; }
+        } catch (e) {}
         location.reload();
     }
 

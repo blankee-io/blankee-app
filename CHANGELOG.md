@@ -8,6 +8,17 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.48.1 — 2026-09-24
+
+### Fixed
+
+- A page reloading to follow a change made elsewhere came back at the top
+  instead of where you were. The dashboards scroll the body rather than the
+  window, so the saved position was always zero, and the daily view draws its
+  days after load and then centres today itself, so a single restore had
+  nothing to scroll to. The position is now read from whichever element
+  scrolls and put back until the page has settled.
+
 ## 1.48.0 — 2026-09-24
 
 ### Added
