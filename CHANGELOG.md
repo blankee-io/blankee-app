@@ -8,6 +8,20 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.47.3 — 2026-09-24
+
+### Fixed
+- A card's first statement in Blankee carries no interest charge. A card that
+  arrives with a balance is no longer assumed to have been carrying it: its
+  first statement is a first statement, and interest follows only if that
+  statement is not settled by its due date - as for a card opened today. It
+  used to spread the opening balance across the cycle the card joined in and
+  bill it, which put an interest charge on a newly linked card the next
+  morning, for a statement that was in fact paid.
+- A projected interest charge the pull has moved forward now goes away when
+  the cycle stops charging for its statement - the first statement, or a
+  cycle settled in time - instead of standing for ever once moved.
+
 ## 1.47.2 — 2026-09-24
 
 ### Fixed

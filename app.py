@@ -8842,7 +8842,8 @@ def update_daily_ca_totals(user_id, start_date):
             # statement is carried, and the reconciler that the charge stands.
             deferred_interest = {}
             # The first day Blankee knows anything at all about this card,
-            # which is not the day the card was opened. See the backfill below.
+            # which is not the day the card was opened. No statement is judged
+            # before it - see the charge loop below.
             account_first_seen = None
             for entry in c_expense_entries:
                 entry_date = entry.get('date')
@@ -8928,36 +8929,14 @@ def update_daily_ca_totals(user_id, start_date):
                     if entry_account_id == account_id and min_date <= entry_date <= max_date:
                         payments_by_date[entry_date] = payments_by_date.get(entry_date, 0.0) + float(entry.get('amount', 0))
 
-            # A card added to Blankee partway through a billing cycle did not
-            # come into existence then. It was already open and already owed
-            # something - which is what starting_balance records. The days
-            # before it was added read as a zero balance here only because
-            # nothing had been entered yet, and that drags the first
-            # statement's average daily balance down towards nothing: a card
-            # added on the 19th of a cycle closing on the 20th would be billed
-            # on one day's debt instead of a month's.
-            #
-            # So those days carry the opening balance instead. The stored
-            # balance is left alone - the card really did have no history in
-            # Blankee then, and showing a phantom debt across the dashboard
-            # would be a lie about a different thing. Only the cycle's average
-            # is affected.
-            #
-            # Only the cycle the card joined in. Statements before it keep an
-            # empty balance sum and so charge nothing, which is right: there is
-            # no cycle there to bill for.
-            backfill_start = backfill_end = None
-            backfill_balance = 0.0
-            if cycle.active and account_first_seen is not None:
-                opening = float(account_row.get('starting_balance') or 0)
-                joined_cycle_opened = _previous_cycle_date_before(
-                    account_row.get('statement_day'), account_first_seen)
-                if opening > 0 and joined_cycle_opened is not None:
-                    backfill_start = joined_cycle_opened + timedelta(days=1)
-                    backfill_end = account_first_seen - timedelta(days=1)
-                    backfill_balance = opening
-                    if backfill_end < backfill_start:
-                        backfill_start = backfill_end = None
+            # No statement is judged before the card was in Blankee. A card that
+            # arrives with a balance is not assumed to have been carrying it:
+            # its first statement here is a first statement - no charge - and
+            # interest follows only if that statement is not settled by its
+            # due date, as it would for a card opened today. (It used to
+            # backfill the opening balance across the cycle the card joined
+            # in and bill it, which put an interest charge on a card the day
+            # after it was linked, for a statement that was in fact paid.)
 
             # Prepare data for Redis
             redis_updates = []
@@ -8976,22 +8955,31 @@ def update_daily_ca_totals(user_id, start_date):
 
                 # The statement balance includes the day's activity, and the
                 # charge is posted on top of it - so observe first, then close.
-                # What the cycle averages, which is not always what the day
-                # is recorded as holding - see the backfill above.
-                observed = balance
-                if (backfill_start is not None
-                        and backfill_start <= current_date <= backfill_end):
-                    observed = backfill_balance
-                cycle.observe(current_date, observed, total_payments)
+                cycle.observe(current_date, balance, total_payments)
                 # Before the date this pass was actually asked about, replay
                 # what is already on record. A confirmed charge is in the
                 # expenses above and so replays as nothing extra.
                 replay = (stored_interest.get(current_date, 0.0)
                           if current_date < requested_min else None)
-                charge = cycle.charge_for(
-                    current_date, balance,
-                    (current_date in confirmed_interest_dates
-                     or current_date in deferred_interest), replay=replay)
+                if account_first_seen is not None and current_date < account_first_seen:
+                    # Before the card was here there is no statement to judge
+                    # by, so no cycle closes: the first statement the card
+                    # sees in Blankee is its first.
+                    charge = 0.0
+                else:
+                    charge = cycle.charge_for(
+                        current_date, balance,
+                        current_date in confirmed_interest_dates, replay=replay)
+                if current_date in deferred_interest:
+                    # The moved row carries this statement's charge, on its own
+                    # day. The cycle still says its piece - whether a charge is
+                    # due at all - and that is what decides whether the row
+                    # stands: told the charge, the reconciler keeps it; told
+                    # nothing (a first statement, a cycle settled in time), it
+                    # removes the row as no longer projected.
+                    if charge and current_date >= requested_min:
+                        projected_interest[current_date] = deferred_interest[current_date]
+                    charge = 0.0
                 if charge:
                     total_expenses += charge
                     balance += charge
@@ -8999,12 +8987,6 @@ def update_daily_ca_totals(user_id, start_date):
                     # collected. A replayed charge is already an entry.
                     if current_date >= requested_min:
                         projected_interest[current_date] = charge
-                elif current_date in deferred_interest and current_date >= requested_min:
-                    # Nothing posted here - the moved row carries it - but the
-                    # statement is still charged, and the reconciler has to be
-                    # told so, or it reads the silence as "no longer projected"
-                    # and removes the row.
-                    projected_interest[current_date] = deferred_interest[current_date]
 
                 redis_updates.append({
                     'account_id': account_id,
