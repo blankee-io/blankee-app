@@ -18,11 +18,12 @@ So each side is read from where its truth actually lives:
   bill, last        the most recent occurrence that was paid - the confirmed
                     entry, which outlives the record, at the figure that
                     actually came through
-  allowance, last   the period today falls in - it is the one being spent,
-                    so it is what just happened: what is left, from its
-                    record when that is still there and drawn on, otherwise
-                    from the entries that fell inside its dates
-  allowance, coming up  the period after it
+  allowance, coming up  the earliest forecast still open, like a bill's, on
+                    the day it now sits
+  allowance, last   the period before it - the one being spent now, or the
+                    last one finished: what is left, from its record when
+                    that is still there and drawn on, otherwise from the
+                    entries that fell inside its dates
 
 Pure: dicts in, dicts out, no store. `today` is the person's day.
 """
@@ -156,16 +157,6 @@ def _allowance_sides(occurrences, records, spending, today, template_anchors=(),
     if not anchors:
         return None, None
 
-    current = None
-    for a in anchors:
-        if a <= today:
-            current = a
-    if current is None:
-        current = anchors[0]
-    later = [a for a in anchors if a > current]
-    earlier = [a for a in anchors if a < current]
-    nxt = later[0] if later else None
-
     by_period = {o['period']: o for o in occurrences if o['open']}
 
     def figure(anchor):
@@ -173,6 +164,10 @@ def _allowance_sides(occurrences, records, spending, today, template_anchors=(),
         rec = records.get(anchor)
         entry = by_period.get(anchor)
         return (rec[1] if rec else None) or (entry['original'] if entry else None) or (entry['amount'] if entry else None)
+
+    def after(anchor):
+        later = [x for x in anchors if x > anchor]
+        return later[0] if later else None
 
     def period(anchor, end, fallback=None):
         rec = records.get(anchor)
@@ -196,22 +191,37 @@ def _allowance_sides(occurrences, records, spending, today, template_anchors=(),
         shown = entry['shown'] if entry else anchor
         return _side(shown, original, _money(original) - _money(spent), False)
 
-    # The period in progress is the one that just happened - it is being
-    # spent right now - so it goes on the left, and the one coming up on the
-    # right is the period after it: the same shape as a bill's two sides.
-    # A series that has not started yet has nothing on the left.
-    if current > today:
-        return None, period(current, nxt, fallback=figure(nxt) if nxt else None)
-    current_side = period(current, nxt, fallback=figure(nxt) if nxt else None)
+    # The one coming up is the earliest period still ahead - or still open,
+    # like a forecast the pull has pushed to today, which is coming up even
+    # though its period began. Both count, and the earlier wins: a period
+    # whose forecast was already consumed but which has not started yet is
+    # still ahead. What just happened is the period before it: the one being
+    # spent now, or the last one finished. With nothing ahead or open, the
+    # period today falls in is the last thing that happened.
+    ahead = [x for x in anchors if x > today] + [o['period'] for o in occurrences if o['open']]
+    if ahead:
+        up = min(ahead)
+        upcoming_side = period(up, after(up))
+        before = [x for x in anchors if x < up]
+        if not before:
+            return None, upcoming_side
+        last = before[-1]
+        last_side = period(last, up, fallback=figure(up))
+    else:
+        current = None
+        for x in anchors:
+            if x <= today:
+                current = x
+        if current is None:
+            return None, None
+        last, upcoming_side = current, None
+        last_side = period(last, after(last))
     # Not a last occurrence if it is before the category's first known
     # period - the series had not started.
-    if known and current < min(known) and not any(
-            current <= d and (nxt is None or d < nxt) for d, _ in spending):
-        current_side = None
-    if nxt is None:
-        return current_side, None
-    after = [a for a in anchors if a > nxt]
-    return current_side, period(nxt, after[0] if after else None, fallback=figure(current))
+    end = after(last)
+    if known and last < min(known) and not any(last <= d and (end is None or d < end) for d, _ in spending):
+        last_side = None
+    return last_side, upcoming_side
 
 
 def upcoming_rows(categories, entries, records, wage_bill, today, account_names=None,
@@ -256,8 +266,9 @@ def upcoming_rows(categories, entries, records, wage_bill, today, account_names=
                 continue
             is_open = _flag(e.get('is_bucket'))
             amount = _money(e.get('amount'))
-            if is_open and amount <= 0:
-                continue
+            # An open forecast with nothing left - an allowance overspent before
+            # its period even began - is still that period, and still coming
+            # up. The prompt leaves it out; this must not.
             occurrences.append({
                 'period': _as_date(e.get('original_date')) or shown,
                 'shown': shown,

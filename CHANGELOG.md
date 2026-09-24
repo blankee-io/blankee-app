@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.46.9 — 2026-09-23
+
+### Fixed
+- Upcoming Bills: an allowance's "coming up" side is the earliest period
+  still ahead or still open - so a forecast the daily pull has pushed to
+  today is what is coming up, as an overdue bill's is, and the period before
+  it is what just happened. 1.46.8 had put the period today falls in on the
+  right whenever its forecast had been moved, and a period overspent before
+  it began was being left out altogether.
+
 ## 1.46.8 — 2026-09-23
 
 ### Changed
