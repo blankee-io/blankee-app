@@ -98,6 +98,13 @@
             </p>
 
             <div class="sf-row">
+                {# Adding a bank happens on the Bridge - SimpleFIN has no API for it,
+                   by design - so this is a guided hand-off: there, then back here
+                   to Choose accounts again, which fetches the list afresh. #}
+                <button type="button" class="guide-button" id="sf-add-bank-btn"
+                        data-bridge-url="{{ bank.signup_url }}">
+                    <i class="fa-solid fa-building-columns"></i> Add a bank
+                </button>
                 <button type="button" class="guide-button guide-button-secondary" id="sf-choose-accounts-btn">
                     <i class="fa-solid fa-list-check"></i> Choose accounts again
                 </button>

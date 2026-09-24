@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.47.1 — 2026-09-23
+
+### Added
+- Add a bank, on Bank Connections and in Settings. SimpleFIN has no way for
+  an app to connect a bank - by design, everything it offers is read-only -
+  so the button walks through it: connect the bank on the Bridge, let Blankee
+  see it, then Choose accounts again, which fetches the list afresh. Accounts
+  Blankee has no record of yet are marked New.
+
 ## 1.47.0 — 2026-09-23
 
 ### Changed

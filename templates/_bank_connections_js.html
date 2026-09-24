@@ -41,6 +41,41 @@
             .finally(function () { if (chooseBtn) chooseBtn.disabled = false; });
     }
     if (chooseBtn) chooseBtn.addEventListener('click', function () { loadAccounts(true); });
+
+    // Add a bank. SimpleFIN keeps this on the Bridge on purpose - an app
+    // that could open bank connections would not be read-only - so the
+    // button walks the person through it and brings them back to Choose
+    // accounts again, which fetches the list afresh and marks what is new.
+    var addBankBtn = document.getElementById('sf-add-bank-btn');
+    if (addBankBtn) addBankBtn.addEventListener('click', function () {
+        var bridge = addBankBtn.dataset.bridgeUrl || 'https://beta-bridge.simplefin.org/';
+        var body =
+            '<div class="guide-cards sf-add-bank-guide">' +
+              '<div class="guide-card"><div class="guide-num">1</div><div class="guide-body">' +
+                '<h4>Connect it on the Bridge</h4>' +
+                '<p>Sign in to SimpleFIN Bridge and add the bank under <strong>Financial Institutions &rarr; New Connection</strong>.</p>' +
+                '<a class="guide-button" href="' + bridge.replace(/"/g, '&quot;') + '" target="_blank" rel="noopener noreferrer">' +
+                  '<i class="fa-solid fa-arrow-up-right-from-square"></i> Open SimpleFIN Bridge</a>' +
+              '</div></div>' +
+              '<div class="guide-card"><div class="guide-num">2</div><div class="guide-body">' +
+                '<h4>Let Blankee see it</h4>' +
+                '<p>If you gave Blankee access to all your accounts, there is nothing to do. If you chose which accounts it may see, ' +
+                   'go to <strong>Apps &rarr; Blankee</strong> on the Bridge and tick the new ones - or make a new Setup Token and ' +
+                   'paste it under &ldquo;Replace the Setup Token&rdquo; below.</p>' +
+              '</div></div>' +
+              '<div class="guide-card"><div class="guide-num">3</div><div class="guide-body">' +
+                '<h4>Then choose the new accounts</h4>' +
+                '<p>Back here, the new accounts appear marked <span class="sf-new-badge">New</span>. Say what each one is and press Save accounts.</p>' +
+              '</div></div>' +
+            '</div>';
+        showConfirmModal({
+            title: 'Add a bank',
+            message: '',
+            bodyHtml: body,
+            confirmText: 'Choose accounts again',
+            cancelText: 'Close'
+        }).then(function (go) { if (go) loadAccounts(true); });
+    });
     // Connected but nothing chosen yet: the partial loads the accounts by
     // itself (data-autoload); open the fold-out so they are visible.
     if (connected && document.getElementById('sf-nothing-chosen')) {

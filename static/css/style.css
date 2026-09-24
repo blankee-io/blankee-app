@@ -20825,6 +20825,36 @@ label.loaf-holiday {
     color: var(--primary);
     white-space: nowrap;
 }
+
+/* An account the Bridge reports that Blankee has no record of yet. */
+.sf-new-badge {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--accent-lighter);
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+/* The Add a bank guide inside the shared dialog: the cards read left-aligned
+   in a dialog that centres its text. */
+.sf-add-bank-guide {
+    margin: 4px 0 8px;
+}
+
+.sf-add-bank-guide h4 {
+    margin: 0 0 6px;
+    font-size: 15px;
+}
+
+.sf-add-bank-guide p {
+    margin: 0 0 8px;
+    font-size: 14px;
+    line-height: 1.5;
+    text-align: left;
+}
 .sf-paused {
     opacity: 0.6;
 }

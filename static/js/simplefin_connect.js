@@ -48,7 +48,7 @@
         return data;
     }
 
-    function accountRow(acc, cards, stored, seen) {
+    function accountRow(acc, cards, stored, seen, isNew) {
         var chosen = (stored && stored.account_subtype) || acc.guessed_subtype || 'checking';
         if (stored && Number(stored.is_active) === 0) chosen = 'skip';
         // A second guessed checking (or savings) defaults to "Don't import":
@@ -60,6 +60,7 @@
             '<div class="account-selection-info">' +
               '<div class="account-selection-name">' + esc(acc.account_name) +
                 (acc.mask ? ' <span class="account-selection-mask">&middot;&middot;&middot;&middot;' + esc(acc.mask) + '</span>' : '') +
+                (isNew ? ' <span class="sf-new-badge" title="Not seen before">New</span>' : '') +
               '</div>' +
               '<div class="account-selection-details">' + esc(money(acc.current_balance, acc.currency)) + '</div>' +
             '</div>' +
@@ -124,11 +125,15 @@
         (payload.stored_accounts || []).forEach(function (s) { stored[s.account_id] = s; });
         var html = '';
         var seen = {};
+        // An account the Bridge reports that Blankee has no record of is new -
+        // but only once there are records: on a first connection every
+        // account is new, and a badge on all of them would say nothing.
+        var hasStored = (payload.stored_accounts || []).length > 0;
         Object.keys(groups).forEach(function (cid) {
             var conn = byConn[cid] || {};
             html += '<div class="account-group-title">' + esc(conn.institution_name || 'Bank') +
                     (conn.error_msg ? ' <span class="sf-error">' + esc(conn.error_msg) + '</span>' : '') + '</div>';
-            groups[cid].forEach(function (a) { html += accountRow(a, payload.existing_cards, stored[a.account_id], seen); });
+            groups[cid].forEach(function (a) { html += accountRow(a, payload.existing_cards, stored[a.account_id], seen, hasStored && !stored[a.account_id]); });
         });
         if (!html) {
             html = '<p class="sf-status sf-error">SimpleFIN returned no accounts. Add a bank under ' +
