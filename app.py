@@ -26429,6 +26429,14 @@ def bank_simplefin_link_accounts():
             _rm.flush_dirty_tables_for_user(user_id)
         except Exception as e:
             log_warning(app.logger, 'BANK', f'Post-link flush for user {user_id}: {e}')
+        # A card made here has a Starting Balance entry dated today and no
+        # balance rows that know it yet; the walk gives it a figure now
+        # rather than at the next pull.
+        if cards_made:
+            try:
+                _recalc_ca_daily_balance(user_id, _user_today_for(user_id))
+            except Exception as e:
+                log_warning(app.logger, 'BANK', f'user {user_id}: balances for the new card(s) not computed yet: {e}')
         # The nav reads these keys directly; make the next request see them.
         try:
             _bump_data_version(user_id)
@@ -26445,8 +26453,12 @@ def bank_simplefin_link_accounts():
         if not from_wizard and (feed['checking'] is not None or feed['savings'] is not None or feed['cards']):
             try:
                 import auto_balance
+                # Forecasts left out of the app's side, as the daily pull does:
+                # a bill due next week is not money the bank has seen, and
+                # measured with it in, linking wrote a correction its size.
                 reconciled = auto_balance.reconcile_to_feed(
-                    user_id, checking=feed['checking'], savings=feed['savings'], cards=feed['cards'])
+                    user_id, checking=feed['checking'], savings=feed['savings'], cards=feed['cards'],
+                    ignore_forecasts=True)
                 chk = reconciled.get('checking') or {}
                 if chk and not chk.get('ok'):
                     msg += f" Your checking balance could not be matched: {chk.get('error') or 'unknown error'}"

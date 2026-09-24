@@ -118,7 +118,7 @@ def create_linked_credit_account(user_id: int, name: str, linked_account_id: str
     if card_id is None:
         log_error(logger, 'CREDIT_LINK', f'user {user_id}: could not create a card for {linked_account_id}')
         return None
-    _add_categories_batch_to_redis('c_expense_categories', user_id, [
+    default_ids = _add_categories_batch_to_redis('c_expense_categories', user_id, [
         {'account_id': card_id, 'name': 'Interest Charge', 'display_order': 0.0003, 'group_id': None,
          'is_recurring': 0, 'no_end_date': 0, 'hidden': 0, 'is_bundle': 0, 'is_interest': 1,
          'is_auto_adjustment': 0, 'is_system': 1},
@@ -129,6 +129,19 @@ def create_linked_credit_account(user_id: int, name: str, linked_account_id: str
          'is_recurring': 0, 'no_end_date': 0, 'hidden': 0, 'is_bundle': 0, 'is_interest': 0,
          'is_auto_adjustment': 0, 'is_system': 1},
     ])
+    # What the bank says is owed becomes a Starting Balance entry, dated
+    # today, as the Add Credit Account form records one. The figure on the
+    # card row alone is not in the balance the walk computes; without the
+    # entry the card measured as 0 at the next pull and the whole balance was
+    # written in as an Uncategorized correction - the right total, looking
+    # like a purchase.
+    if owed > 0 and len(default_ids or []) >= 3:
+        try:
+            from app import _update_entry_in_redis, _user_today_for
+            _update_entry_in_redis('c_expense_entries', user_id, default_ids[2],
+                                   _user_today_for(user_id).isoformat(), owed, processed=1)
+        except Exception as e:
+            log_warning(logger, 'CREDIT_LINK', f'user {user_id}: could not record the starting balance for card {card_id}: {e}')
     _copy_expense_categories_to_new_credit_account(user_id, card_id)
     expense_categories = _get_categories_from_redis('expense_categories', user_id)
     display_order = _next_display_order(expense_categories or [], tier=1)

@@ -8,6 +8,24 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.47.2 — 2026-09-24
+
+### Fixed
+- A card created from a linked bank account now starts with a Starting
+  Balance entry for what the bank says is owed, dated the day it was linked,
+  and its balance is computed at once - as a card added by hand does. The
+  figure had been kept on the card alone, so the card measured as 0 at the
+  next pull and the whole balance was written in as an Uncategorized
+  correction: the right total, looking like a purchase.
+- The daily pull moves forecasts on a second time after its recalculation.
+  A card's first projected interest charge, laid on today's statement date by
+  that recalculation, was arriving after the pass that moves forecasts and
+  sat there until the next day.
+- Linking a bank account to an existing Blankee card (or checking or savings)
+  balances it to the bank with open forecasts left out, as the daily pull
+  does. A card with a bill due next week was being measured with that bill
+  still in, and the link wrote a correction its size.
+
 ## 1.47.1 — 2026-09-23
 
 ### Added

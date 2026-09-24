@@ -1725,6 +1725,21 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
                 recalc(user_id, since, made['cards'] or bool(moved))
             except Exception as e:
                 log_exception(logger, TAG, f'user {user_id}: recalculation after the pull failed: {e}')
+            # The recalculation can put a forecast on a day the bank has
+            # already spoken for - a card linked yesterday gets its first
+            # projected interest charge on today's statement date - and the
+            # pass above ran before it existed. Once more, so that charge
+            # moves on today rather than sitting there until tomorrow's pull.
+            # Idempotent: everything the first pass moved is past the cutoff.
+            try:
+                moved2, released2, moved_from2 = defer_unmatched(user_id)
+                if moved2 or released2:
+                    result['deferred'] = result.get('deferred', 0) + moved2
+                    result['released'] = result.get('released', 0) + released2
+                    moved += moved2 + released2
+                    recalc(user_id, moved_from2, True)
+            except Exception as e:
+                log_exception(logger, TAG, f'user {user_id}: second deferral pass failed: {e}')
         if made['imported']:
             try:
                 notify(user_id)
