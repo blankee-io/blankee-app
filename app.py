@@ -21,7 +21,7 @@ from flask import (Flask, render_template, request, redirect, url_for, session,
                    flash, send_file, abort, Response, g)
 from flask_bcrypt import Bcrypt
 from flask_wtf.csrf import CSRFProtect, CSRFError
-from flask import jsonify
+from flask import jsonify, make_response
 from datetime import date as datetime_date, date, datetime, timedelta
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import secrets
@@ -509,15 +509,25 @@ class User(UserMixin):
 DATA_VERSION_TTL = 604800  # 7 days, same as other Redis keys
 
 def _bump_data_version(user_id):
-    """Bump the data version for a user (called after any mutation)."""
+    """
+    Bump the data version for a user - called after any real write.
+
+    Every open page polls this (script.js) and reloads when it moves, so it
+    must move for every change and for nothing else: middleware.py bumps it
+    after mutating requests, and the recalculations bump it themselves for
+    the writes that happen outside any request - the pull, a repair.
+    Returns the new version so a response can carry it back (X-Data-Version)
+    and the page that made the change does not mistake it for someone else's.
+    """
     if not _redis_client or not app.config.get('REDIS_OK'):
-        return
+        return None
     try:
         import time
         version = str(int(time.time() * 1000))  # millisecond timestamp
         _redis_client.setex(f"data_version:{user_id}", DATA_VERSION_TTL, version)
+        return version
     except Exception:
-        pass
+        return None
 
 def _get_data_version(user_id):
     """Get the current data version for a user."""
@@ -534,7 +544,11 @@ def _get_data_version(user_id):
 def api_data_version():
     """Return the current data version for the logged-in user."""
     version = _get_data_version(current_user.id)
-    return jsonify({'version': version})
+    response = make_response(jsonify({'version': version}))
+    # A proxy in front of a self-hosted instance may cache GETs, and a cached
+    # answer here is a page that never learns anything changed.
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 def _email_delivery_verified():
@@ -9550,10 +9564,12 @@ def _recalc_totals_remainders(user_id, start_date=None):
             }
             for row in cached_savings
         ]
-        
+
         # Check for negative remainders and create notifications
         check_negative_remainders(user_id)
-        
+
+        # Open pages redraw on this - see the note before the other return.
+        _bump_data_version(user_id)
         return ({
             "status": "success",
             "updated_totals_remainders": results,
@@ -9641,7 +9657,11 @@ def _recalc_totals_remainders(user_id, start_date=None):
 
     # Check for negative remainders and create notifications
     check_negative_remainders(user_id)
-    
+
+    # Whatever asked for this, the figures on every open page are now stale,
+    # and pages redraw only when this moves.
+    _bump_data_version(user_id)
+
     return ({
         "status": "success",
         "updated_totals_remainders": results,
@@ -9869,7 +9889,9 @@ def _recalc_ca_daily_balance(user_id, start_date=None):
             }
             for row in cached_monthly
         ]
-        
+
+        # Open pages redraw on this - see the note before the other return.
+        _bump_data_version(user_id)
         return ({
             "status": "success",
             "updated_ca_balances_d": ca_balances_d,
@@ -13439,6 +13461,7 @@ def check_and_initialize_totals():
         if not fridays:
             return jsonify({"status": "error", "message": "No Fridays provided"}), 400
 
+        inserted = False
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
@@ -13459,11 +13482,17 @@ def check_and_initialize_totals():
                         INSERT INTO totals_remainders (user_id, date, total_income, total_expenses, remainder, last_week_remainder)
                         VALUES (%s, %s, %s, %s, %s, %s)
                     """, (current_user.id, friday_date, 0.00, 0.00, 0.00, 0.00))
+                    inserted = True
 
             # Commit the changes to the database
             cursor.close()
             conn.commit()
 
+        # Every dashboard posts here as it loads, so middleware.py leaves this
+        # route alone; it bumps the data version itself, only when it added
+        # rows - the one time it changed something another page could show.
+        if inserted:
+            _bump_data_version(current_user.id)
         return jsonify({"status": "success", "message": "Missing records initialized."})
     except mysql.connector.Error as e:
         return jsonify({"status": "error", "message": str(e)}), 500

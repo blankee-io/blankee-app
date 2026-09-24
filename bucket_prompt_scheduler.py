@@ -210,6 +210,13 @@ def _raise_balance_prompt(user_id, local_now):
 
     if not auto_balance.claim_due(user_id, local_date):
         return False
+    # claim_due set pending_date, which the dashboard's balance modal reads -
+    # an open page should see the prompt without waiting for a reload.
+    try:
+        from app import _bump_data_version
+        _bump_data_version(user_id)
+    except Exception:
+        pass
 
     if pending and balance:
         body = (f"{pending} {'entry' if pending == 1 else 'entries'} to confirm, "

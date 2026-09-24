@@ -462,9 +462,9 @@
     <script src="{{ url_for('static', filename='js/ai_settings.js') }}"></script>
 
     <script>
-        // Disable data-version auto-reload on setup page — the POST calls during
-        // setup (sync-profile, analyze-transactions) bump data_version, and the
-        // 500 ms race window in script.js causes location.reload() mid-flow.
+        // No auto-reload on the setup page: its steps write as they go, and a
+        // reload mid-flow would drop the person out of the wizard. The change
+        // poller in script.js adopts new versions silently while this is set.
         window._disableDataVersionReload = true;
 
         // Track if bank was connected

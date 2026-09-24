@@ -8,6 +8,26 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.48.0 — 2026-09-24
+
+### Added
+
+- **Every open page follows the data.** A change made in another browser or
+  on another device, the morning bank pull, or a repair is noticed by a page
+  that is already open, and the page refreshes on your very next interaction
+  with it - a click, a scroll, a touch, the mouse moving across it - keeping
+  your place. Pages ask every five seconds while visible, and at once when
+  their window comes to the front. Nothing reloads on its own. If you are
+  typing in a field at the time, a toast offers Refresh instead, so nothing
+  typed is lost.
+
+### Fixed
+
+- The signal behind this existed but was unusable: page-load bookkeeping and
+  the update checker's polling counted as changes, so switching it on reloaded
+  every other tab. Only real writes count now, and the two recalculations that
+  run outside a request (the card balances and the totals) count as well.
+
 ## 1.47.3 — 2026-09-24
 
 ### Fixed

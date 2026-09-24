@@ -237,19 +237,37 @@ def init_redis_middleware(app):
             return response
         if request.method not in ('POST', 'PUT', 'DELETE'):
             return response
-        if response.status_code < 200 or response.status_code >= 300:
+        # 2xx, and 3xx too: POST-then-redirect is this app's form pattern
+        # (/update_balance_threshold and its siblings) and always follows a
+        # write. A 4xx or 5xx wrote nothing worth telling other pages about.
+        if response.status_code < 200 or response.status_code >= 400:
             return response
-        # Skip polling/read endpoints that happen to use POST
-        # Also skip setup-flow bank endpoints that do not represent user data mutations
+        # POSTs that change nothing another page could show. Every one of
+        # these bumping is why cross-browser sync used to reload every tab:
+        # the polls did it every few seconds and the page-load bookkeeping
+        # did it on every page open.
         skip_paths = (
             '/api/data-version', '/health/',
-            '/bank/analyze-transactions-for-categories',
+            # polled from a page while it is open
+            '/admin/update/', '/get-credit-account-status',
+            # checks and previews that read only
+            '/check_username', '/api/recurring-occurrences', '/verify_current_password',
+            '/ai/test', '/bank/analyze-transactions-for-categories',
+            # per-browser bookkeeping a page does as it loads
+            '/api/user/timezone', '/api/tutorial/', '/api/notifications/register',
+            '/api/notifications/unregister',
+            # bumps itself, only when it actually inserted something
+            '/check_and_initialize_totals',
         )
         if any(request.path.startswith(p) for p in skip_paths):
             return response
         try:
             from app import _bump_data_version
-            _bump_data_version(current_user.id)
+            version = _bump_data_version(current_user.id)
+            if version:
+                # So the page that made this change adopts the new version at
+                # once and never mistakes its own write for someone else's.
+                response.headers['X-Data-Version'] = version
         except Exception:
             pass
         return response

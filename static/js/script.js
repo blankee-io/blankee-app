@@ -222,9 +222,13 @@ function setupCategoryDuplicateCheck(inputEl, getCats, opts) {
     });
 })();
 
-function showToast(message, type, duration) {
+function showToast(message, type, duration, opts) {
     if (type === undefined || type === null) type = 'error';
     if (duration === undefined || duration === null) duration = 4000;
+    // opts.action = {label, onClick}: one button before the close, for a toast
+    // that offers something to do - "Refresh" when data changed elsewhere.
+    // opts.onDismiss runs when the toast is closed without the action.
+    opts = opts || {};
 
     // Ensure container exists
     var container = document.getElementById('toast-container');
@@ -246,13 +250,22 @@ function showToast(message, type, duration) {
     toast.innerHTML =
         (icons[type] || icons.error) +
         '<span class="toast-message">' + _escapeHtml(message) + '</span>' +
+        (opts.action ? '<button type="button" class="toast-action">' + _escapeHtml(opts.action.label) + '</button>' : '') +
         '<button class="toast-close" aria-label="Close">&times;</button>';
 
     container.appendChild(toast);
 
+    if (opts.action) {
+        toast.querySelector('.toast-action').addEventListener('click', function() {
+            _removeToast(toast);
+            try { opts.action.onClick(); } catch (e) { /* the toast is gone either way */ }
+        });
+    }
+
     // Close on click
     toast.querySelector('.toast-close').addEventListener('click', function() {
         _removeToast(toast);
+        if (typeof opts.onDismiss === 'function') { opts.onDismiss(); }
     });
 
     // Auto-dismiss
@@ -1146,13 +1159,35 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// CROSS-TAB DATA SYNC (poll for changes made in other tabs/browsers)
+// EVERY OPEN PAGE FOLLOWS THE DATA
 // ═══════════════════════════════════════════════════════════════
-// DISABLED: cross-browser sync is currently broken — skip entirely
+// The server keeps one number per person: the moment their data last
+// changed (data_version, bumped by middleware.py after every real write and
+// by the recalculations that run outside a request). Each page carries the
+// number it was drawn with and asks every five seconds, while the tab is
+// visible, whether it has moved - and at once when the window gets focus,
+// since switching windows on one machine fires no visibility event.
+//
+// When it has, nothing happens yet. A page is never reloaded on its own:
+// it reloads on the very next interaction - a click, a scroll, a key, a
+// touch, the mouse moving across it. The mouse move is the usual trigger
+// on a desktop, so the reload lands before a click does rather than
+// swallowing it. The one exception is a field with the cursor in it: a
+// reload there throws away what was typed, so a toast offers Refresh
+// instead.
+//
+// A page's own writes carry the new number back in X-Data-Version, and the
+// page adopts it, so it never mistakes its own change for someone else's.
+// Comparison is numeric and one-way: versions are timestamps, a poll that
+// arrives late carries an older one, and '0' (nothing recorded) is inert.
 (function() {
-    return;
+    var INTERVAL = 5000;
+    var known = null;
+    var timer = null;
+    var stale = false;    // a newer version was seen; reload on the next touch
+    var pending = null;   // {toast} while a Refresh toast is up
 
-    // Restore scroll position after auto-refresh
+    // Restore the scroll position a reload saved.
     var savedScroll = sessionStorage.getItem('_scrollY');
     if (savedScroll !== null) {
         sessionStorage.removeItem('_scrollY');
@@ -1161,102 +1196,138 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function pollDataVersion() {
-        fetch('/api/data-version', { credentials: 'same-origin' })
+    function newer(v) { return Number(v) > Number(known || 0); }
+
+    function adopt(v) {
+        if (v == null || !newer(v)) { return; }
+        known = String(v);
+        // This page has caught up on its own - its write finished after the
+        // poll saw the change - so there is nothing to reload for.
+        stale = false;
+        if (pending) {
+            _removeToast(pending.toast);
+            pending = null;
+        }
+    }
+
+    function reload() {
+        try { sessionStorage.setItem('_scrollY', window.scrollY); } catch (e) {}
+        location.reload();
+    }
+
+    // A field with the cursor in it: a reload would lose what was typed.
+    function typing() {
+        var el = document.activeElement;
+        if (!el) { return false; }
+        var tag = (el.tagName || '').toLowerCase();
+        if (tag === 'textarea' || tag === 'select') { return true; }
+        if (tag === 'input') {
+            var type = (el.getAttribute('type') || 'text').toLowerCase();
+            return ['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'file', 'hidden'].indexOf(type) === -1;
+        }
+        return !!el.isContentEditable;
+    }
+
+    function offerRefresh() {
+        if (pending) { return; }
+        showToast('Data changed in another session.', 'info', 0, {
+            action: { label: 'Refresh', onClick: reload },
+            onDismiss: function() { pending = null; stale = false; }
+        });
+        var toasts = document.querySelectorAll('#toast-container .toast');
+        pending = { toast: toasts[toasts.length - 1] };
+    }
+
+    // The next interaction after a change: reload, or offer it if they are
+    // in the middle of typing something.
+    function touched() {
+        if (!stale || window._disableDataVersionReload) { return; }
+        if (typing()) { offerRefresh(); } else { reload(); }
+    }
+    ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach(function(name) {
+        document.addEventListener(name, touched, { capture: true, passive: true });
+    });
+
+    function changed(v) {
+        if (window._disableDataVersionReload) { known = String(v); return; }
+        // Noted, and that is all - see the note at the top. The version
+        // itself is not adopted: a reload is what catches the page up.
+        stale = true;
+    }
+
+    function stop() {
+        if (timer) { clearInterval(timer); timer = null; }
+    }
+
+    function poll() {
+        if (known === null) { return; }
+        fetch('/api/data-version', { credentials: 'same-origin', cache: 'no-store' })
             .then(function(r) {
-                if (r.status === 401 || r.status === 302) {
-                    // Not logged in; stop polling
-                    clearInterval(_pollTimer);
+                // Signed out: login_required answers with a redirect to a page,
+                // never a 401. Nothing to follow any more.
+                if (r.redirected || !r.ok ||
+                    (r.headers.get('content-type') || '').indexOf('application/json') === -1) {
+                    stop();
                     return null;
                 }
                 return r.json();
             })
             .then(function(data) {
-                if (!data) return;
-                var v = data.version;
-                if (_knownVersion === null) {
-                    // First fetch — just record the baseline
-                    _knownVersion = v;
-                    return;
-                }
-                if (v !== _knownVersion && v !== '0') {
-                    if (window._disableDataVersionReload) {
-                        // Page opted out of auto-reload (e.g. setup_profile)
-                        _knownVersion = v;
-                        return;
-                    }
-                    // Save scroll position before reload
-                    sessionStorage.setItem('_scrollY', window.scrollY);
-                    location.reload();
-                }
+                if (!data || data.version == null) { return; }
+                if (newer(data.version)) { changed(data.version); }
             })
-            .catch(function() {
-                // Silently ignore network errors
+            .catch(function() { /* a network blip; the next poll will tell */ });
+    }
+
+    function start() {
+        stop();
+        if (known === null || document.hidden) { return; }
+        timer = setInterval(poll, INTERVAL);
+    }
+
+    // The page's own writes: any non-GET fetch or jQuery call whose response
+    // carries X-Data-Version is this page catching up with itself.
+    var origFetch = window.fetch;
+    if (typeof origFetch === 'function') {
+        window.fetch = function(input, init) {
+            var p = origFetch.apply(this, arguments);
+            var method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+            if (method === 'GET' || method === 'HEAD') { return p; }
+            return p.then(function(res) {
+                try { adopt(res.headers.get('X-Data-Version')); } catch (e) {}
+                return res;
             });
+        };
     }
-
-    function showDataChangedToast() {
-        // Create a persistent toast with a refresh button
-        var toast = document.createElement('div');
-        toast.className = 'data-changed-toast';
-        toast.innerHTML =
-            '<i class="fa-solid fa-arrows-rotate"></i> ' +
-            '<span>Data updated in another session.</span> ' +
-            '<button onclick="location.reload()">Refresh</button>' +
-            '<button class="data-changed-dismiss" title="Dismiss">&times;</button>';
-        document.body.appendChild(toast);
-
-        // Animate in
-        requestAnimationFrame(function() {
-            toast.classList.add('visible');
-        });
-
-        // Dismiss button
-        toast.querySelector('.data-changed-dismiss').addEventListener('click', function() {
-            toast.classList.remove('visible');
-            setTimeout(function() { toast.remove(); }, 300);
-            _toastShowing = false;
-            // Update known version so we don't show again until next change
-            fetch('/api/data-version', { credentials: 'same-origin' })
-                .then(function(r) { return r.json(); })
-                .then(function(data) { if (data) _knownVersion = data.version; })
-                .catch(function() {});
-        });
-    }
-
-    // Reset known version on every successful AJAX mutation (same tab)
-    // so polling doesn't trigger for your own changes
-    if (typeof $ !== 'undefined') {
-        $(document).ajaxSuccess(function(event, xhr, settings) {
-            if (settings.type && settings.type !== 'GET') {
-                // Bump known version after a short delay to let the server set it
-                setTimeout(function() {
-                    fetch('/api/data-version', { credentials: 'same-origin' })
-                        .then(function(r) { return r.json(); })
-                        .then(function(data) { if (data) _knownVersion = data.version; })
-                        .catch(function() {});
-                }, 500);
+    if (typeof $ !== 'undefined' && $(document).ajaxComplete) {
+        $(document).ajaxComplete(function(event, xhr, settings) {
+            if (settings && settings.type && settings.type.toUpperCase() !== 'GET') {
+                try { adopt(xhr.getResponseHeader('X-Data-Version')); } catch (e) {}
             }
         });
     }
 
-    // Re-check immediately when user focuses this tab
     document.addEventListener('visibilitychange', function() {
-        if (!document.hidden && _knownVersion !== null) {
-            pollDataVersion();
-        }
+        if (document.hidden) { stop(); }
+        else { poll(); start(); }
+    });
+    window.addEventListener('focus', function() {
+        if (!document.hidden) { poll(); }
     });
 
-    // Start polling after page loads
+    function begin() {
+        // The baseline is the version this page was drawn with (nav.html).
+        // A page without it - signed out, no nav - simply never reloads.
+        var bar = document.querySelector('.nav-bar[data-version]');
+        var v = bar ? bar.getAttribute('data-version') : null;
+        if (v === null || v === '') { return; }
+        known = String(v);
+        start();
+    }
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-            _pollTimer = setInterval(pollDataVersion, DATA_POLL_INTERVAL);
-            // Initial baseline fetch
-            pollDataVersion();
-        });
+        document.addEventListener('DOMContentLoaded', begin);
     } else {
-        _pollTimer = setInterval(pollDataVersion, DATA_POLL_INTERVAL);
-        pollDataVersion();
+        begin();
     }
 })();
 

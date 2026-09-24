@@ -1777,6 +1777,13 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
     except Exception as e:
         log_exception(logger, TAG, f'user {user_id}: pull failed: {e}')
         result.update(error='internal', message='The pull failed on this server. Try again later.')
+        # Rows, deferrals and balances may already have been written before
+        # it failed; open pages should still catch up with those.
+        try:
+            from app import _bump_data_version
+            _bump_data_version(user_id)
+        except Exception:
+            pass
         return result
 
 

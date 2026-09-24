@@ -1,5 +1,9 @@
 <!-- Top navigation bar -->
-<div class="nav-bar">
+{# data-version is the page's baseline for the change poller in script.js:
+   the data version at the moment this page was rendered. Anything newer is
+   a change made elsewhere. On the nav root rather than a <meta>, because
+   this partial is included at body level. #}
+<div class="nav-bar" data-version="{{ data_version }}">
     <div class="nav-bar-container">
         <div class="nav-left-content">
             <!-- Opens the Blankee menu. Left of the logo, so the control that
