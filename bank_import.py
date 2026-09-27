@@ -829,7 +829,7 @@ def apply_guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
             return None
         update_entry(table, forecast['entry_id'], {'date': when, 'original_date': None, 'pending': 1,
                                                    'auto_confirmed': 0}, user_id)
-        _add_mirror_payment(user_id, entry_type, cid, when, amount)
+        _sync_mirror_payment(user_id, entry_type, cid, when, snapshot.get('date'))
         return dict(mark, imported_to_entry_id=int(forecast['entry_id']), depleted_bucket=snapshot, **suggestion)
 
     # A category, not a particular forecast: a new entry, depleting the
@@ -855,17 +855,24 @@ def apply_guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
         process_manual_entry_with_bucket(table, cid, when, Decimal(str(amount)), user_id, as_of=_parse(when))
     except Exception as e:
         log_exception(logger, TAG, f'user {user_id}: depleting the forecast for {table}/{cid} failed: {e}')
-    _add_mirror_payment(user_id, entry_type, cid, when, amount)
+    _sync_mirror_payment(user_id, entry_type, cid, when, snapshot.get('date') if snapshot else None)
     return dict(mark, imported_to_entry_id=int(eid), depleted_bucket=snapshot, **suggestion)
 
 
-def _add_mirror_payment(user_id: int, entry_type: str, category_id: int, when: str, amount: float) -> None:
+def _sync_mirror_payment(user_id: int, entry_type: str, category_id: int, *dates: Optional[str]) -> None:
     """
     An expense in a card's mirror category ("Payment to Visa") is a payment
-    towards that card, and the app records the c_payment when one is typed.
-    The same here, linked card or not: the card's own feed does not bring
-    payments in (see normalize), so this is the only place the payment
-    reaches the card.
+    towards that card, held on the card side as a c_payment on the same day.
+    The card's own feed does not bring payments in (see normalize), so this
+    is the only place an imported payment reaches the card.
+
+    The mirror is set to what the budget holds for that day, not added to.
+    A payment the person had already forecast has a mirror standing for it
+    before the bank ever sees the money: on BA-01 a 79.99 forecast met its
+    own transaction, the forecast was consumed on the budget side and the
+    card was paid twice - 159.98 - and the card went 79.99 into credit. The
+    day the forecast sat on is synced too, since a transaction on a later
+    day consumes a forecast that stays where it was.
     """
     if entry_type != 'expense':
         return
@@ -876,11 +883,16 @@ def _add_mirror_payment(user_id: int, entry_type: str, category_id: int, when: s
         return
     account_id = int(cat['credit_account_id'])
     try:
-        from app import _update_payment_entry_in_redis, _get_entries_from_redis
-        existing = next((p for p in (_get_entries_from_redis('c_payment_entries', user_id) or [])
-                         if str(p.get('account_id')) == str(account_id) and str(p.get('date'))[:10] == when), None)
-        total = float(amount) + (float(existing.get('amount') or 0) if existing else 0.0)
-        _update_payment_entry_in_redis(user_id, account_id, when, total)
+        from app import _update_payment_entry_in_redis, _delete_payment_entry_in_redis
+        rows = redis_manager.get_table_cache('expense_entries', user_id) or []
+        for when in {str(d)[:10] for d in dates if d}:
+            total = round(sum(float(e.get('amount') or 0) for e in rows
+                              if int(e.get('category_id') or 0) == int(category_id)
+                              and str(e.get('date'))[:10] == when), 2)
+            if total > 0:
+                _update_payment_entry_in_redis(user_id, account_id, when, total)
+            else:
+                _delete_payment_entry_in_redis(user_id, account_id, _parse(when), _parse(when))
     except Exception as e:
         log_warning(logger, TAG, f'user {user_id}: could not record the card payment for category {category_id}: {e}')
 
@@ -1347,7 +1359,12 @@ def confirm(user_id: int, transaction_id: str, entry_id: int, entry_type: str,
                                              as_of=_parse(when))
         except Exception as e:
             log_exception(logger, TAG, f'user {user_id}: depleting the forecast for {table}/{new_cid} failed: {e}')
-        _add_mirror_payment(user_id, entry_type, new_cid, when, amount)
+        # Both cards' sides follow the budget: the one the entry left (its
+        # restored forecast, or nothing) and the one it joined.
+        if old_cid is not None:
+            _sync_mirror_payment(user_id, entry_type, old_cid, when,
+                                 (snap or {}).get('date') if isinstance(snap, dict) else None)
+        _sync_mirror_payment(user_id, entry_type, new_cid, when, new_snap.get('date') if new_snap else None)
         row_update['depleted_bucket'] = new_snap
 
     direction = 'incoming' if entry_type == 'income' else 'outgoing'

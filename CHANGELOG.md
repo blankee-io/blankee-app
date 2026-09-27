@@ -8,6 +8,18 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.48.2 — 2026-09-26
+
+### Fixed
+
+- A card payment the bank brought in was counted twice on the card when a
+  forecast for it already existed. The forecast's card-side mirror stood for
+  the payment before the bank saw it; the import consumed the forecast on the
+  budget side and then added the payment to the card again, so a 79.99 payment
+  put the card 79.99 into credit. The card's mirror is now set to what the
+  budget holds for that day, never added to, and the day the forecast sat on
+  is brought into line as well.
+
 ## 1.48.1 — 2026-09-24
 
 ### Fixed
