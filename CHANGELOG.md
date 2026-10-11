@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.49.1 — 2026-10-10
+
+### Changed
+
+- The Current Status column is gone from the three recurring pages (income,
+  expenses, credit expenses). The dashboards are not affected.
+- The Every column reads on one line - "1, calendar, 15th" - and drops the
+  day below only when the cell is too narrow for both. It takes most of the
+  removed column's width; the rest went to the row's action buttons.
+
 ## 1.49.0 — 2026-10-10
 
 ### Added

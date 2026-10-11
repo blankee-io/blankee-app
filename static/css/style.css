@@ -9455,12 +9455,18 @@ transform: scale(1.2);
     display: none;
 }
 
-/* Cadence two-line stacking on mobile */
+/* The cadence on one line - "1 [calendar] 15th" - and the detail drops below
+   only when the cell is too narrow for both. inline-block keeps each part
+   whole, so a wrap falls between them and never inside "Mo, We, Fr". */
+.cadence-top {
+    white-space: nowrap;
+}
+
 .cadence-detail {
-    display: block;
+    display: inline-block;
+    margin-left: 0.4em;
     font-size: 0.85em;
     color: var(--secondary-dark);
-    margin-top: 1px;
 }
 
 .income-recurring-table {
@@ -9530,7 +9536,9 @@ transform: scale(1.2);
 
 .income-recurring-table th.income-cadence-col,
 .income-recurring-table td.income-cadence-col {
-    width: 12%;
+    /* The Current Status column's share came here when it went (2026-10-10),
+       less four points given on to the actions. */
+    width: 23%;
 }
 
 /* Setup profile recommended categories - different widths */
@@ -9568,14 +9576,10 @@ transform: scale(1.2);
     font-size: clamp(10px, 1.3vw, 14px);
 }
 
-.income-recurring-table th.income-bucket-col,
-.income-recurring-table td.income-bucket-col {
-    width: 15%;
-}
 
 .income-recurring-table th.income-action-col,
 .income-recurring-table td.income-action-col {
-    width: 18%;
+    width: 22%;
 }
 
 .recommended-categories-table.income-recurring-table th.income-action-col,
@@ -9891,7 +9895,7 @@ transform: scale(1.2);
 
     .income-recurring-table th.income-cadence-col,
     .income-recurring-table td.income-cadence-col {
-        width: 11%;
+        width: 21%;
     }
 
     .income-recurring-table th.income-start-date-col,
@@ -9908,18 +9912,14 @@ transform: scale(1.2);
         font-size: clamp(9px, 1.3vw, 14px);
     }
 
-    .income-recurring-table th.income-bucket-col,
-    .income-recurring-table td.income-bucket-col {
-        width: 14%;
-    }
 
     /* 45px fitted two icons and nothing more. Three need the room, and the
        min-width above is what keeps them on one line. */
     .income-recurring-table th.income-action-col,
     .income-recurring-table td.income-action-col {
-        width: 87px;
-        min-width: 87px;
-        max-width: 87px;
+        width: 110px;
+        min-width: 110px;
+        max-width: 110px;
     }
 }
 
@@ -9996,10 +9996,8 @@ transform: scale(1.2);
     .income-recurring-table td.income-amount { width: 18%; }
 
     .income-recurring-table th.income-cadence-col,
-    .income-recurring-table td.income-cadence { width: 17%; }
+    .income-recurring-table td.income-cadence { width: 35%; }
 
-    .income-recurring-table th.income-bucket-col,
-    .income-recurring-table td.income-bucket { width: 18%; }
 
     .income-recurring-table th.income-start-date-col,
     .income-recurring-table td.income-start-date { width: 18%; }
@@ -11237,7 +11235,9 @@ form button[type="submit"] {
 
 .expense-recurring-table th.expense-cadence-col,
 .expense-recurring-table td.expense-cadence-col {
-    width: 12%;
+    /* The Current Status column's share came here when it went (2026-10-10),
+       less four points given on to the actions. */
+    width: 23%;
 }
 
 /* Setup profile recommended categories - different widths */
@@ -11261,10 +11261,6 @@ form button[type="submit"] {
     width: 20%;
 }
 
-.expense-recurring-table th.expense-bucket-col,
-.expense-recurring-table td.expense-bucket-col {
-    width: 15%;
-}
 
 .expense-recurring-table th.expense-start-date-col,
 .expense-recurring-table td.expense-start-date-col {
@@ -11282,7 +11278,7 @@ form button[type="submit"] {
 
 .expense-recurring-table th.expense-action-col,
 .expense-recurring-table td.expense-action-col {
-    width: 18%;
+    width: 22%;
 }
 
 .recommended-categories-table.expense-recurring-table th.expense-action-col,
@@ -11414,7 +11410,7 @@ form button[type="submit"] {
 
     .expense-recurring-table th.expense-cadence-col,
     .expense-recurring-table td.expense-cadence-col {
-        width: 11%;
+        width: 21%;
     }
 
     .expense-recurring-table th.expense-start-date-col,
@@ -11431,16 +11427,12 @@ form button[type="submit"] {
         font-size: clamp(9px, 1.3vw, 14px);
     }
 
-    .expense-recurring-table th.expense-bucket-col,
-    .expense-recurring-table td.expense-bucket-col {
-        width: 14%;
-    }
 
     .expense-recurring-table th.expense-action-col,
     .expense-recurring-table td.expense-action-col {
-        width: 45px;
-        min-width: 45px;
-        max-width: 45px;
+        width: 110px;
+        min-width: 110px;
+        max-width: 110px;
     }
 }
 
@@ -11502,10 +11494,8 @@ form button[type="submit"] {
     .expense-recurring-table td.expense-amount { width: 18%; }
 
     .expense-recurring-table th.expense-cadence-col,
-    .expense-recurring-table td.expense-cadence { width: 17%; }
+    .expense-recurring-table td.expense-cadence { width: 35%; }
 
-    .expense-recurring-table th.expense-bucket-col,
-    .expense-recurring-table td.expense-bucket { width: 18%; }
 
     .expense-recurring-table th.expense-start-date-col,
     .expense-recurring-table td.expense-start-date { width: 18%; }
@@ -11812,13 +11802,11 @@ form button[type="submit"] {
 
 .ca-recurring-table th.ca-cadence-col,
 .ca-recurring-table td.ca-cadence-col {
-    width: 12%;
+    /* The Current Status column's share came here when it went (2026-10-10),
+       less four points given on to the actions. */
+    width: 23%;
 }
 
-.ca-recurring-table th.ca-bucket-col,
-.ca-recurring-table td.ca-bucket-col {
-    width: 15%;
-}
 
 .ca-recurring-table th.ca-start-date-col,
 .ca-recurring-table td.ca-start-date-col {
@@ -11836,7 +11824,7 @@ form button[type="submit"] {
 
 .ca-recurring-table th.ca-action-col,
 .ca-recurring-table td.ca-action-col {
-    width: 18%;
+    width: 22%;
 }
 
 .ca-action-col {
@@ -11963,7 +11951,7 @@ form button[type="submit"] {
 
     .ca-recurring-table th.ca-cadence-col,
     .ca-recurring-table td.ca-cadence-col {
-        width: 11%;
+        width: 21%;
     }
 
     .ca-recurring-table th.ca-start-date-col,
@@ -11980,16 +11968,12 @@ form button[type="submit"] {
         font-size: clamp(9px, 1.3vw, 14px);
     }
 
-    .ca-recurring-table th.ca-bucket-col,
-    .ca-recurring-table td.ca-bucket-col {
-        width: 14%;
-    }
 
     .ca-recurring-table th.ca-action-col,
     .ca-recurring-table td.ca-action-col {
-        width: 45px;
-        min-width: 45px;
-        max-width: 45px;
+        width: 110px;
+        min-width: 110px;
+        max-width: 110px;
     }
 }
 
@@ -12051,10 +12035,8 @@ form button[type="submit"] {
     .ca-recurring-table td.ca-amount { width: 18%; }
 
     .ca-recurring-table th.ca-cadence-col,
-    .ca-recurring-table td.ca-cadence { width: 17%; }
+    .ca-recurring-table td.ca-cadence { width: 35%; }
 
-    .ca-recurring-table th.ca-bucket-col,
-    .ca-recurring-table td.ca-bucket { width: 18%; }
 
     .ca-recurring-table th.ca-start-date-col,
     .ca-recurring-table td.ca-start-date { width: 18%; }

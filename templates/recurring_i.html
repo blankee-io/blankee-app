@@ -70,7 +70,6 @@
                             <th class="income-type-col">Type</th>
                             <th class="income-amount-col">Amount</th>
                             <th class="income-cadence-col">Every...</th>
-                            <th class="income-bucket-col">Current<br>Status</th>
                             <th class="income-start-date-col"><span class="th-full">Start<br>Date</span><span class="th-mobile">Dates</span></th>
                             <th class="income-end-date-col">End<br>Date</th>
                             <th class="income-action-col"></th>
@@ -88,7 +87,7 @@
                         {% if record.group_key and record.group_key != ns.group %}
                         {% set ns.group = record.group_key %}
                         <tr class="recurring-group-header" data-group-key="{{ record.group_key }}">
-                            <td colspan="8">
+                            <td colspan="7">
                                 <button type="button" class="recurring-group-toggle" aria-expanded="true"
                                         title="Collapse or expand this group">
                                     <i class="fa-solid fa-chevron-down"></i>
@@ -118,87 +117,6 @@
                             {% endif %}
                             <td class="editable income-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
                             <td class="editable income-cadence" data-column="cadence" title="{{ record.cadence_description }}"><span class="cadence-top">{{ record.cadence_interval }} {% if record.cadence_unit == 'years' %}<i class="fa-solid fa-calendars"></i>{% elif record.cadence_unit == 'months' %}<i class="fa-solid fa-calendar-days"></i>{% elif record.cadence_unit == 'weeks' %}<i class="fa-solid fa-calendar-week"></i>{% else %}<i class="fa-solid fa-calendar-day"></i>{% endif %}</span>{% if record.cadence_unit == 'years' and record.yearly_month and record.yearly_day %}<span class="cadence-detail">{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][record.yearly_month | int] }} {{ record.yearly_day | ordinal }}</span>{% elif record.cadence_unit == 'months' and record.monthly_days %}<span class="cadence-detail">{{ record.monthly_days | ordinal }}</span>{% elif record.cadence_unit == 'weeks' and record.weekdays %}<span class="cadence-detail">{{ record.weekdays | replace('monday','Mo') | replace('tuesday','Tu') | replace('wednesday','We') | replace('thursday','Th') | replace('friday','Fr') | replace('saturday','Sa') | replace('sunday','Su') }}</span>{% endif %}</td>
-                            {# Current Status is the bucket for the period happening now, which
-                               belongs to whichever link is running today. On a raise that has not
-                               started yet there is no such period, and showing the active link's
-                               bucket against a future row would claim it had already begun. #}
-                            {% if record.is_raise %}
-                            <td class="income-bucket raise-blank" data-column="bucket"></td>
-                            {% else %}
-                            <td class="income-bucket" data-column="bucket">
-                                {% set CUR = "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type %}
-                                {# Latest bucket beside the next one, for every kind. This was gated on
-                                   wage_bill == 1, so only Bills and Wages showed both and an
-                                   Allowance showed the upcoming one alone - with no way to see
-                                   whether the period just gone was spent. The wage_bill
-                                   branches inside were written for both cases and were simply
-                                   unreachable for one of them. #}
-                                {% if record.prev_bucket_original is not none %}
-                                <div class="bucket-dual">
-                                    <div class="bucket-side bucket-prev">
-                                        {% if record.wage_bill == 1 %}
-                                            <div class="bucket-date">{{ record.prev_bucket_date[5:7] }}-{{ record.prev_bucket_date[8:] }}</div>
-                                            {% if record.prev_bucket_spent >= record.prev_bucket_original %}<span class="status-paid"><i class="fa-solid fa-hand-holding-dollar"></i></span>{% else %}<span class="status-unpaid"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i></span>{% endif %}
-                                        {% else %}
-                                            <div class="bucket-status">
-                                                <div class="bucket-date">{{ record.prev_bucket_date[5:7] }}-{{ record.prev_bucket_date[8:] }}</div>
-                                                <div class="bucket-bar-container"><div class="bucket-bar {% if record.prev_bucket_spent > record.prev_bucket_original %}bucket-bar-over{% else %}bucket-bar-income{% endif %}" style="width: {{ [((record.prev_bucket_spent / record.prev_bucket_original) * 100) if record.prev_bucket_original > 0 else 0, 100] | min }}%"></div></div>
-                                                <div class="bucket-text {% if record.prev_bucket_spent > record.prev_bucket_original %}bucket-over{% endif %}"><span class="bucket-spent">{{ CUR }}{{ "%.0f"|format(record.prev_bucket_spent) }}</span><span class="bucket-separator">/</span><span class="bucket-total">{{ CUR }}{{ "%.0f"|format(record.prev_bucket_original) }}</span></div>
-                                            </div>
-                                        {% endif %}
-                                    </div>
-                                    <div class="bucket-dual-divider"></div>
-                                    <div class="bucket-side bucket-cur">
-                                        {% if record.wage_bill == 1 %}
-                                            {% if record.bucket_original is not none %}
-                                                <div class="bucket-date">{{ record.bucket_date[5:7] }}-{{ record.bucket_date[8:] }}</div>
-                                                {% if record.bucket_spent >= record.bucket_original %}<span class="status-paid" title="Received"><i class="fa-solid fa-hand-holding-dollar"></i></span>{% else %}<span class="status-unpaid" title="Pending"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i></span>{% endif %}
-                                            {% else %}<span class="bucket-none">—</span>{% endif %}
-                                        {% else %}
-                                            {% if record.bucket_original is not none %}
-                                                <div class="bucket-status">
-                                                    <div class="bucket-date">{{ record.bucket_date[5:7] }}-{{ record.bucket_date[8:] }}</div>
-                                                    <div class="bucket-bar-container"><div class="bucket-bar {% if record.bucket_spent > record.bucket_original %}bucket-bar-over{% else %}bucket-bar-income{% endif %}" style="width: {{ [((record.bucket_spent / record.bucket_original) * 100) if record.bucket_original > 0 else 0, 100] | min }}%"></div></div>
-                                                    <div class="bucket-text {% if record.bucket_spent > record.bucket_original %}bucket-over{% endif %}"><span class="bucket-spent">{{ CUR }}{{ "%.0f"|format(record.bucket_spent) }}</span><span class="bucket-separator">/</span><span class="bucket-total">{{ CUR }}{{ "%.0f"|format(record.bucket_original) }}</span></div>
-                                                </div>
-                                            {% else %}<span class="bucket-none">—</span>{% endif %}
-                                        {% endif %}
-                                    </div>
-                                </div>
-                                {% else %}
-                                {# ── Single bucket (no prev) — original layout ── #}
-                                {% if record.wage_bill == 1 %}
-                                    {% if record.bucket_original is not none %}
-                                        {% if record.bucket_spent >= record.bucket_original %}
-                                            {% if record.bucket_date %}<div class="bucket-date bucket-date-paid">{{ record.bucket_date[5:7] }}-{{ record.bucket_date[8:] }}-{{ record.bucket_date[2:4] }}</div>{% endif %}
-                                            <span class="status-paid" title="Received"><i class="fa-solid fa-hand-holding-dollar"></i></span>
-                                        {% else %}
-                                            {% if record.bucket_date %}<div class="bucket-date bucket-date-unpaid">{{ record.bucket_date[5:7] }}-{{ record.bucket_date[8:] }}-{{ record.bucket_date[2:4] }}</div>{% endif %}
-                                            <span class="status-unpaid" title="Pending"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i></span>
-                                        {% endif %}
-                                    {% else %}
-                                        <span class="bucket-none">—</span>
-                                    {% endif %}
-                                {% else %}
-                                    {% if record.bucket_original is not none %}
-                                        <div class="bucket-status">
-                                            {% if record.bucket_date %}<div class="bucket-date {% if record.bucket_spent > record.bucket_original %}bucket-date-unpaid{% else %}bucket-date-paid{% endif %}">{{ record.bucket_date[5:7] }}-{{ record.bucket_date[8:] }}-{{ record.bucket_date[2:4] }}</div>{% endif %}
-                                            <div class="bucket-bar-container">
-                                                <div class="bucket-bar {% if record.bucket_spent > record.bucket_original %}bucket-bar-over{% else %}bucket-bar-income{% endif %}" style="width: {{ [((record.bucket_spent / record.bucket_original) * 100) if record.bucket_original > 0 else 0, 100] | min }}%"></div>
-                                            </div>
-                                            <div class="bucket-text {% if record.bucket_spent > record.bucket_original %}bucket-over{% endif %}">
-                                                <span class="bucket-spent">{{ CUR }}{{ "%.2f"|format(record.bucket_spent) }}</span>
-                                                <span class="bucket-separator">/</span>
-                                                <span class="bucket-total">{{ CUR }}{{ "%.2f"|format(record.bucket_original) }}</span>
-                                            </div>
-                                        </div>
-                                    {% else %}
-                                        <span class="bucket-none">—</span>
-                                    {% endif %}
-                                {% endif %}
-                                {% endif %}
-                            </td>
-                            {% endif %}
                             <td class="editable income-start-date" data-column="start_date">{{ record.start_date[5:7] }}-{{ record.start_date[8:] }}-{{ record.start_date[2:4] }}<span class="mobile-end-date">→ {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}No End{% else %}{{ record.end_date[5:7] }}-{{ record.end_date[8:] }}-{{ record.end_date[2:4] }}{% endif %}</span></td>
                             <td class="editable income-end-date" data-column="end_date">
                                 {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}
@@ -230,7 +148,7 @@
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="8" class="recurring-footer"></td>
+                            <td colspan="7" class="recurring-footer"></td>
                         </tr>
                     </tfoot>
                 </table>
@@ -1805,13 +1723,12 @@
                                 '<th class="income-type-col">Type</th>' +
                                 '<th class="income-amount-col">Amount</th>' +
                                 '<th class="income-cadence-col">Every...</th>' +
-                                '<th class="income-bucket-col">Current<br>Status</th>' +
                                 '<th class="income-start-date-col"><span class="th-full">Start<br>Date</span><span class="th-mobile">Dates</span></th>' +
                                 '<th class="income-end-date-col">End<br>Date</th>' +
                                 '<th class="income-action-col"></th>' +
                             '</tr></thead>' +
                             '<tbody></tbody>' +
-                            '<tfoot><tr><td colspan="8" class="recurring-footer"></td></tr></tfoot>';
+                            '<tfoot><tr><td colspan="7" class="recurring-footer"></td></tr></tfoot>';
                         var container = document.querySelector('.recurring-income-container');
                         if (container) container.appendChild(existingTable);
                         createdTable = true;
@@ -1825,7 +1742,6 @@
                         '<td class="income-type" data-column="type">Wages</td>' +
                         '<td class="editable income-amount" data-column="amount">' + cs + '2,500.00</td>' +
                         '<td class="editable income-cadence" data-column="cadence" title="Every 2 weeks on Friday"><span class="cadence-top">2 <i class="fa-solid fa-calendar-week"></i></span><span class="cadence-detail">Fr</span></td>' +
-                        '<td class="income-bucket" data-column="bucket"><span class="status-paid" title="Received"><i class="fa-solid fa-hand-holding-dollar"></i></span></td>' +
                         '<td class="editable income-start-date" data-column="start_date">25/01/01<span class="mobile-end-date">\u2192 No End</span></td>' +
                         '<td class="editable income-end-date" data-column="end_date">No End</td>' +
                         '<td class="income-actions"><div class="row-actions">' +
@@ -1840,10 +1756,6 @@
                         '<td class="income-type" data-column="type">Variable</td>' +
                         '<td class="editable income-amount" data-column="amount">' + cs + '800.00</td>' +
                         '<td class="editable income-cadence" data-column="cadence" title="Every 1 month on the 1st"><span class="cadence-top">1 <i class="fa-solid fa-calendar-days"></i></span><span class="cadence-detail">1st</span></td>' +
-                        '<td class="income-bucket" data-column="bucket">' +
-                            '<div class="bucket-status"><div class="bucket-bar-container"><div class="bucket-bar bucket-bar-income" style="width:62%"></div></div>' +
-                            '<div class="bucket-text"><span class="bucket-spent">' + cs + '500.00</span><span class="bucket-separator">/</span><span class="bucket-total">' + cs + '800.00</span></div></div>' +
-                        '</td>' +
                         '<td class="editable income-start-date" data-column="start_date">25/06/01<span class="mobile-end-date">\u2192 No End</span></td>' +
                         '<td class="editable income-end-date" data-column="end_date">No End</td>' +
                         '<td class="income-actions"><div class="row-actions">' +
@@ -1871,7 +1783,7 @@
                         },
                         {
                             selector: '.income-recurring-table',
-                            text: 'Each row shows a recurring income entry with its category, amount, cadence, and current status.'
+                            text: 'Each row shows a recurring income entry with its category, amount and cadence.'
                         },
                         {
                             selector: '#add-income-btn',
@@ -1886,11 +1798,6 @@
                         {
                             selector: '.tutorial-temp-row .income-cadence, .income-recurring-table tbody tr:first-child .income-cadence',
                             text: 'The <b>cadence</b> shows how often this entry repeats — e.g. every 2 weeks on Friday, or monthly on the 1st.',
-                            padding: 4
-                        },
-                        {
-                            selector: '.tutorial-temp-row .income-bucket, .income-recurring-table tbody tr:first-child .income-bucket',
-                            text: '<b>Current Status</b> tracks whether this period\'s income has been received. Wages show a checkmark or pending icon; variable entries show a progress bar.',
                             padding: 4
                         },
                         {
