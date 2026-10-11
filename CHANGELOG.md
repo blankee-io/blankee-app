@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.50.2 — 2026-10-11
+
+### Fixed
+
+- Following the link inside a notification now marks it read, as tapping the
+  rest of the card already did. Opening the link in a new tab marks it read
+  too, and a notification that was already read stays read.
+
 ## 1.50.1 — 2026-10-11
 
 ### Fixed

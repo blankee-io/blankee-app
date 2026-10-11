@@ -105,25 +105,50 @@
         // link buried in its text - a tap on a phone lands on the card far
         // more often than on the words "Click here". Only cards with a link
         // do it; the envelope and the bin keep their own jobs. Opening it is
-        // reading it, so an unread card is marked read on the way.
+        // reading it, so an unread card is marked read on the way - whether
+        // the tap lands on the card or on the link itself. The link used to
+        // be let through untouched, and following it left the card unread.
         $(function () {
             $('.notification-item').each(function () {
                 const item = $(this);
                 const link = item.find('.notification-message a[href^="/"]').first();
                 if (!link.length) return;
                 item.addClass('notification-item-linked');
-                item.on('click', function (e) {
-                    if ($(e.target).closest('button, a').length) return;
-                    const href = link.attr('href');
-                    const go = function () { window.location.href = href; };
-                    if (item.hasClass('notification-read')) { go(); return; }
+
+                // Only while unread: the endpoint toggles, so calling it on a
+                // read card would mark it unread again.
+                function markRead(then) {
+                    if (item.hasClass('notification-read')) { if (then) then(); return; }
                     $.ajax({
                         url: '/mark-notification-read',
                         method: 'POST',
                         contentType: 'application/json',
                         data: JSON.stringify({ notification_id: item.data('notification-id') }),
-                        complete: go
+                        success: function (response) {
+                            if (response && response.success && response.is_read === 1) {
+                                item.addClass('notification-read');
+                                const btn = item.find('.mark-read-button');
+                                btn.addClass('is-read');
+                                btn.find('i').removeClass('fa-envelope').addClass('fa-envelope-open');
+                                updateNotificationBadge();
+                            }
+                        },
+                        complete: function () { if (then) then(); }
                     });
+                }
+
+                item.on('click', function (e) {
+                    const onLink = $(e.target).closest('.notification-message a[href^="/"]');
+                    if (!onLink.length && $(e.target).closest('button, a').length) return;
+                    const href = (onLink.length ? onLink : link).attr('href');
+                    // Opened in a new tab: let the browser do it, mark it read here.
+                    if (onLink.length && (e.metaKey || e.ctrlKey || e.shiftKey)) { markRead(); return; }
+                    e.preventDefault();
+                    markRead(function () { window.location.href = href; });
+                });
+                // A middle click opens the link in a new tab without a click event.
+                item.on('auxclick', '.notification-message a[href^="/"]', function (e) {
+                    if (e.button === 1) { markRead(); }
                 });
             });
         });
