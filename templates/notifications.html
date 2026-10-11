@@ -51,7 +51,10 @@
                         {% for notification in notifications %}
                             {# The date is the card's tab - drawn by ::before from data-date - rather
                                than a line of its own above the message. #}
-                            <div class="profile-section notification-section notification-item {% if notification.is_read %}notification-read{% endif %}" data-notification-id="{{ notification.id }}" data-date="{{ notification.date.strftime('%b %d, %Y at %I:%M %p') }}" id="notification-section">
+                            {# The whole card is the link, as in the bell's dropdown: the message is
+                               shown without its "Click here", and the link rides on the card. #}
+                            {% set note_link = notification.message | notification_link %}
+                            <div class="profile-section notification-section notification-item {% if notification.is_read %}notification-read{% endif %}{% if note_link %} notification-item-linked{% endif %}" data-notification-id="{{ notification.id }}" data-date="{{ notification.date.strftime('%b %d, %Y at %I:%M %p') }}"{% if note_link %} data-link="{{ note_link }}"{% endif %} id="notification-section">
                                 <div class="notification-header">
                                     <div class="notification-buttons">
                                         <button class="mark-read-button {% if notification.is_read %}is-read{% endif %}" onclick="toggleReadStatus({{ notification.id }})">
@@ -63,7 +66,7 @@
                                     </div>
                                 </div>
                                 <div class="notification-message">
-                                    {{ notification.message | notification_html }}
+                                    {{ notification.message | notification_text_html }}
                                 </div>
                             </div>
                         {% endfor %}
@@ -100,19 +103,15 @@
             }
         }
 
-        // The whole card opens what the notification is about, not only the
-        // link buried in its text - a tap on a phone lands on the card far
-        // more often than on the words "Click here". Only cards with a link
-        // do it; the envelope and the bin keep their own jobs. Opening it is
-        // reading it, so an unread card is marked read on the way - whether
-        // the tap lands on the card or on the link itself. The link used to
-        // be let through untouched, and following it left the card unread.
+        // The whole card opens what the notification is about - the message
+        // carries no link of its own any more, the card does (data-link), as
+        // the rows of the bell's dropdown do. Only cards with a link; the
+        // envelope and the bin keep their own jobs. Opening it is reading it,
+        // so an unread card is marked read on the way.
         $(function () {
-            $('.notification-item').each(function () {
+            $('.notification-item[data-link]').each(function () {
                 const item = $(this);
-                const link = item.find('.notification-message a[href^="/"]').first();
-                if (!link.length) return;
-                item.addClass('notification-item-linked');
+                const href = item.attr('data-link');
 
                 // Only while unread: the endpoint toggles, so calling it on a
                 // read card would mark it unread again.
@@ -137,17 +136,21 @@
                 }
 
                 item.on('click', function (e) {
-                    const onLink = $(e.target).closest('.notification-message a[href^="/"]');
-                    if (!onLink.length && $(e.target).closest('button, a').length) return;
-                    const href = (onLink.length ? onLink : link).attr('href');
-                    // Opened in a new tab: let the browser do it, mark it read here.
-                    if (onLink.length && (e.metaKey || e.ctrlKey || e.shiftKey)) { markRead(); return; }
-                    e.preventDefault();
+                    if ($(e.target).closest('button, a').length) return;
+                    // Ctrl/Cmd/Shift-click opens it in a new tab, as a link would.
+                    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+                        window.open(href, '_blank');
+                        markRead();
+                        return;
+                    }
                     markRead(function () { window.location.href = href; });
                 });
-                // A middle click opens the link in a new tab without a click event.
-                item.on('auxclick', '.notification-message a[href^="/"]', function (e) {
-                    if (e.button === 1) { markRead(); }
+                // A middle click, likewise.
+                item.on('auxclick', function (e) {
+                    if (e.button !== 1 || $(e.target).closest('button').length) return;
+                    e.preventDefault();
+                    window.open(href, '_blank');
+                    markRead();
                 });
             });
         });

@@ -182,28 +182,49 @@ app.jinja_env.filters['ordinal'] = ordinal_filter
 # A notification's message may carry one kind of markup: a link into the app,
 # written by the server ("<a href="/dashboard_d?date=...">Click here to view</a>").
 # It also carries text a person typed - a category name, a bundle name - which
-# must never be rendered as markup. So the page neither escapes the whole
-# message (the link shows as its source, which is what happened when `| safe`
-# was dropped) nor trusts it whole (a category called "<script>" would run).
-# Only an anchor with a relative href survives, its text escaped like the rest.
+# must never be rendered as markup. The pages show the message without the link
+# (the card or row is the link - notification_parts below) and escape the rest,
+# so a category called "<script>" shows as its name and runs nothing.
 _NOTIFICATION_LINK = re.compile(r'<a href="(/[^"<>\s]*)">([^<]*)</a>')
 
 
-def notification_html(message):
-    from markupsafe import escape
+# The link with the space before it and the full stop after it, so "... on
+# Oct 30. Click here to view." comes out as "... on Oct 30."
+_NOTIFICATION_LINK_WITH_STOP = re.compile(r'\s*<a href="/[^"<>\s]*">[^<]*</a>\.?')
+
+
+def notification_parts(message):
+    """
+    A notification as the app shows it: its text, line by line, without the
+    link, and the link on its own - the card or row is what is clicked, so the
+    link's words ("Open the day", "Click here to view") would only be noise.
+    The notifications page and the bell's dropdown both read it from here.
+    The stored message keeps its link: email and push still need one.
+    """
     text = str(message or '')
-    parts, pos = [], 0
-    for m in _NOTIFICATION_LINK.finditer(text):
-        parts.append(escape(text[pos:m.start()]))
-        parts.append(Markup('<a href="%s">%s</a>') % (m.group(1), m.group(2)))
-        pos = m.end()
-    parts.append(escape(text[pos:]))
-    # A message written as lines (the bills-due list) keeps them. Escaped
-    # first, so the only markup a line break can introduce is the <br> itself.
-    return Markup('<br>').join(Markup('').join(parts).split('\n'))
+    link = _NOTIFICATION_LINK.search(text)
+    # Only the server's own link comes out. Anything else that looks like a
+    # tag is somebody's text - a category named "Spending <cash>" - and stays,
+    # to be escaped by whoever shows it.
+    text = _NOTIFICATION_LINK_WITH_STOP.sub('', text)
+    lines = [' '.join(line.split()) for line in text.splitlines() if line.strip()]
+    return lines, (link.group(1) if link else None)
 
 
-app.jinja_env.filters['notification_html'] = notification_html
+def notification_text_html(message):
+    """The notification's text for a page: escaped, its lines kept, no link."""
+    from markupsafe import escape
+    lines, _link = notification_parts(message)
+    return Markup('<br>').join(escape(line) for line in lines)
+
+
+def notification_link(message):
+    """The notification's link, or None."""
+    return notification_parts(message)[1]
+
+
+app.jinja_env.filters['notification_text_html'] = notification_text_html
+app.jinja_env.filters['notification_link'] = notification_link
 
 # Define the upload folder and allowed file extensions
 UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')  # Relative to application root
@@ -17191,20 +17212,12 @@ def api_recent_notifications():
 
     items = []
     for row in rows:
-        message = str(row.get('message') or '')
-        link = _NOTIFICATION_LINK.search(message)
-        # The link's own words ("Open the day", "Click here to view") go with
-        # the link; the row is what is clicked now.
-        text = re.sub(r'\s*<a href="[^"]*">[^<]*</a>\.?', '', message)
-        text = re.sub(r'<[^>]+>', '', text)
-        text = (text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<')
-                    .replace('&gt;', '>').replace('&quot;', '"').replace('&#39;', "'"))
-        lines = [' '.join(line.split()) for line in text.splitlines() if line.strip()]
+        lines, link = notification_parts(row.get('message'))
         when = row.get('date')
         items.append({
             'id': row['id'],
             'text': ' '.join(lines),
-            'link': link.group(1) if link else None,
+            'link': link,
             'is_read': bool(row.get('is_read')),
             'date': when.strftime('%b %-d, %-I:%M %p') if hasattr(when, 'strftime') else str(when or ''),
         })

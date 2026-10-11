@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.51.1 — 2026-10-11
+
+### Changed
+
+- On the notifications page a notification no longer carries a "Click here to
+  view" or "Open the day" link: the whole card is the link, as each row of the
+  bell's dropdown is, and opening it marks it read. A card that opens something
+  turns pale teal under the pointer, its date tab with it. The read and delete
+  buttons keep their own jobs. Emails and phone notifications are unchanged.
+
 ## 1.51.0 — 2026-10-11
 
 ### Added

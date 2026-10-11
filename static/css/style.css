@@ -8975,8 +8975,21 @@ transform: scale(1.2);
 }
 
 /* A card that opens something reads as one. */
+/* A card that is a link answers the pointer as a link does: the card and its
+   date tab - the ::before - turn pale teal together, so the tab reads as part
+   of the same thing. Only these: a card with nothing to open stays still. */
+.notification-item-linked,
+#notifications-body .notification-item-linked::before {
+    transition: background-color 0.15s ease;
+}
+
 .notification-item-linked {
     cursor: pointer;
+}
+
+.notification-item-linked:hover,
+#notifications-body .notification-item-linked:hover::before {
+    background-color: var(--primary-lighter);
 }
 
 .notification-item.notification-read .notification-message {

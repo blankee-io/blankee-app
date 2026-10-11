@@ -164,7 +164,7 @@ def message(items, day=None):
 
     The line breaks are real newlines in the stored text. Every place a
     notification is shown keeps them: the notifications page turns them into
-    <br> (notification_html), the email's HTML part likewise, and the push and
+    <br> (notification_text_html), the email's HTML part likewise, and the push and
     the iOS extension's fetch keep them as the alert's own line breaks. The
     link goes to the day view, which is where the bills sit; the push takes its
     deep link from the first link in the message.
