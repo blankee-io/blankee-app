@@ -1322,8 +1322,10 @@ body {
 
 /* The collapse itself is .menu-collapse now, shared with Dashboards; only the
    height this one opens to is its own. */
+/* Four rows of 40px: Income, Expenses, Credit Expenses, Suggested. Add
+   a row to the group and this has to grow with it, or the last is cut off. */
 #recurring-sections.expanded {
-    max-height: 120px;
+    max-height: 160px;
 }
 
 /* Mobile Options - the dropdown row, shown only in the iOS app. It ships
@@ -21081,4 +21083,260 @@ label.loaf-holiday {
     color: var(--secondary-dark);
     letter-spacing: 1px;
     background: var(--secondary-lighter);
+}
+
+/* /////////////////////////////  Suggested Recurring /////////////////////////// */
+/* templates/recurring_suggested.html, and the convert dialog it opens
+   (templates/_convert_recurring_modal.html). */
+
+/* The cadence sections are shown with the hidden attribute; the id rules
+   above set their display, which would otherwise win over it. */
+#convert-weekly-options[hidden],
+#convert-monthly-options[hidden],
+#convert-yearly-options[hidden] {
+    display: none;
+}
+
+.convert-occurrences-count {
+    width: 60px;
+}
+
+.recurring-suggested-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 760px;
+    margin: 0 auto 40px;
+    padding: 0 16px;
+}
+
+.recurring-suggested-container .recurring-header {
+    margin-bottom: 0;
+}
+
+.recurring-suggested-intro {
+    margin: 0;
+    color: var(--secondary-dark);
+    font-size: 14px;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.recurring-suggested-reading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--primary-lighter);
+    color: var(--text-dark);
+    font-size: 14px;
+}
+
+.recurring-suggested-reading i {
+    color: var(--primary);
+    font-size: 20px;
+}
+
+.recurring-suggested-reading p {
+    margin: 0;
+}
+
+/* The dialog's category: new (a name) or existing (a list). */
+.convert-category-choice {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.convert-category-choice[hidden],
+.convert-category-name-input[hidden] {
+    display: none;
+}
+
+.convert-recurring-form-container .convert-category-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 0;
+    font-weight: normal;
+    cursor: pointer;
+}
+
+.convert-recurring-form-container .convert-category-option input[type="radio"] {
+    width: auto;
+    margin: 0;
+}
+
+/* The read-only name's look, made editable for the new category's name. */
+.convert-category-choice .convert-category-name-input {
+    margin: 0;
+    color: var(--text-dark);
+    cursor: text;
+}
+
+.convert-recurring-form-container .convert-category-choice input:disabled,
+.convert-recurring-form-container .convert-category-choice select:disabled {
+    opacity: 0.5;
+}
+
+.recurring-suggested-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-top: 24px;
+    padding: 28px 20px;
+    border-radius: 12px;
+    background: var(--primary-lighter);
+    color: var(--text-dark);
+    text-align: center;
+}
+
+.recurring-suggested-empty[hidden] {
+    display: none;
+}
+
+.recurring-suggested-empty i {
+    color: var(--primary);
+    font-size: 26px;
+}
+
+.recurring-suggested-empty p {
+    margin: 0;
+    font-size: 14px;
+}
+
+.recurring-suggested-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.recurring-suggested-group-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--primary);
+    color: var(--primary);
+    font-size: 16px;
+}
+
+.recurring-suggested-group--expense .recurring-suggested-group-title,
+.recurring-suggested-group--ca .recurring-suggested-group-title {
+    border-bottom-color: var(--accent);
+    color: var(--accent);
+}
+
+.recurring-suggested-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 10px;
+    background: var(--white);
+    box-shadow: 0 1px 3px var(--shadow-sm);
+}
+
+.recurring-suggested-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    color: var(--text-dark);
+    font-size: 13px;
+}
+
+.recurring-suggested-name {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: bold;
+    overflow-wrap: anywhere;
+}
+
+.recurring-suggested-type {
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: var(--secondary-lighter);
+    color: var(--secondary-dark);
+    font-size: 11px;
+    font-weight: normal;
+}
+
+.recurring-suggested-sentence {
+    font-size: 14px;
+}
+
+.recurring-suggested-recent,
+.recurring-suggested-next {
+    color: var(--secondary-dark);
+    font-size: 12px;
+}
+
+.recurring-suggested-hit {
+    white-space: nowrap;
+}
+
+.recurring-suggested-hit + .recurring-suggested-hit::before {
+    content: " \00b7  ";
+}
+
+.recurring-suggested-actions {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    gap: 6px;
+}
+
+.recurring-suggested-actions button {
+    padding: 7px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.recurring-suggested-make {
+    border: 1px solid var(--primary);
+    background: var(--primary);
+    color: var(--text-light);
+}
+
+.recurring-suggested-make:hover {
+    border-color: var(--primary-mid);
+    background: var(--primary-mid);
+}
+
+.recurring-suggested-dismiss {
+    border: 1px solid var(--secondary-hover);
+    background: var(--white);
+    color: var(--secondary-dark);
+}
+
+.recurring-suggested-dismiss:hover {
+    background: var(--secondary-lighter);
+}
+
+@media (max-width: 600px) {
+    .recurring-suggested-card {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .recurring-suggested-actions {
+        flex-direction: row;
+    }
+
+    .recurring-suggested-actions button {
+        flex: 1;
+    }
 }

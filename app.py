@@ -21365,6 +21365,385 @@ def get_cadence_description(cadence_interval, cadence_unit, weekdays=None, month
 ############################### RECURRING EXPENSES #################################
 ####################################################################################
 
+# ==================== Suggested recurring ====================
+# Bank charges from the same place, for the same amount, on a steady cadence,
+# that no recurring category covers yet. The rules are in recurring_detect.py;
+# the history behind them in bank_history.py. Only with a bank
+# connected - the menu row and the page both ask _bank_suggestions_available.
+#
+# "Make recurring" opens the shared dialog (_convert_recurring_modal.html)
+# with a category choice - a new one named after the merchant, or an
+# existing one - and posts to the existing add/convert routes. Then
+# /api/recurring-suggested/remember teaches the merchant memory that
+# category, so the bank's next charge from there lands in it and settles its
+# forecast. Past charges stay where they are.
+#
+# "Not recurring" stores a dismissed recurring_suggestions row. Its
+# category_id is a negative number derived from the group key - no category
+# id is negative, so it can never collide with a real one - and its
+# transaction_id is the key itself (recurring_detect.group_key).
+
+_SUGGESTED_RECURRING_TYPES = {'income': 'recurring_income', 'expense': 'recurring_expense',
+                              'ca': 'recurring_c_expense'}
+
+
+def _bank_suggestions_available(user_id):
+    """A bank provider is configured and at least one account imports."""
+    try:
+        from providers import get_bank_provider
+        if getattr(get_bank_provider(), 'name', 'null') != 'simplefin':
+            return False
+        from bank_import import importable_accounts
+        return bool(importable_accounts(user_id))
+    except Exception:
+        return False
+
+
+@app.context_processor
+def inject_bank_suggestions():
+    """Whether the menu shows Recurring > Suggested."""
+    if not current_user.is_authenticated:
+        return {}
+    return {'bank_suggestions': _bank_suggestions_available(current_user.id)}
+
+
+def _suggested_rows(table, user_id, sql, params):
+    """A table's rows for the user from Redis, or from MySQL when it is not cached."""
+    if table.endswith('_categories'):
+        rows = _get_categories_from_redis(table, user_id)
+    else:
+        rows = _get_entries_from_redis(table, user_id)
+    if rows is not None:
+        return rows
+    with get_db_pool().get_cursor(dictionary=True) as cursor:
+        cursor.execute(sql, params)
+        return cursor.fetchall() or []
+
+
+def _suggested_categories(user_id):
+    """{'income': [...], 'expense': [...], 'ca': [...]} - the user's category rows."""
+    return {
+        'income': _suggested_rows('income_categories', user_id,
+                                  "SELECT * FROM income_categories WHERE user_id = %s", (user_id,)),
+        'expense': _suggested_rows('expense_categories', user_id,
+                                   "SELECT * FROM expense_categories WHERE user_id = %s", (user_id,)),
+        'ca': _suggested_rows('c_expense_categories', user_id,
+                              "SELECT c.* FROM c_expense_categories c JOIN credit_accounts a ON a.id = c.account_id "
+                              " WHERE a.user_id = %s", (user_id,)),
+    }
+
+
+def _flag_on(row, name):
+    try:
+        return int(row.get(name) or 0) == 1
+    except (TypeError, ValueError):
+        return False
+
+
+def _covers(category):
+    """A category whose charges are not suggested: recurring already, a card payment, or savings."""
+    return bool(category) and any(_flag_on(category, f) for f in ('is_recurring', 'is_credit_account', 'is_savings'))
+
+
+def _suggested_transactions(user_id):
+    """
+    The posted bank charges as recurring_detect wants them: the stored feed
+    and the kept history, once each, from the accounts the import wants.
+    Card charges carry the Blankee card; money arriving on a card is skipped,
+    as the import skips it.
+    """
+    import bank_history
+    from bank_import import importable_accounts
+    from bank_redis import get_linked_transactions, linked_account_kind, get_credit_account_for_linked_account
+    accounts = importable_accounts(user_id)
+    cards = {}
+    for aid, acc in accounts.items():
+        if linked_account_kind(acc) == 'credit':
+            card = get_credit_account_for_linked_account(user_id, aid)
+            cards[aid] = int(card['id']) if card and card.get('id') is not None else None
+    seen, out = set(), []
+    for t in list(get_linked_transactions(user_id) or []) + bank_history.rows(user_id):
+        tid = str(t.get('transaction_id') or '')
+        aid = str(t.get('account_id') or '')
+        if not tid or tid in seen or _flag_on(t, 'pending') or aid not in accounts:
+            continue
+        seen.add(tid)
+        outflow = (t.get('transaction_type') == 'expense')
+        if aid in cards:
+            if not outflow or cards[aid] is None:
+                continue
+            kind, card_id = 'ca', cards[aid]
+        else:
+            kind, card_id = ('expense' if outflow else 'income'), None
+        out.append(dict(t, kind=kind, card_id=card_id))
+    return out
+
+
+def _suggested_dismissed(user_id):
+    """The group keys answered "Not recurring"."""
+    from redis_crud import get_recurring_suggestions
+    return {str(r.get('transaction_id')) for r in get_recurring_suggestions(user_id, dismissed=True) or []
+            if int(r.get('dismissed') or 0) and str(r.get('transaction_id') or '').startswith('bank|')}
+
+
+def _suggested_find(user_id, today):
+    """
+    (suggestions, categories) - every group recurring_detect finds, less
+    the ones a recurring category already covers: a charge imported into
+    one, or a merchant the memory already files under one. Each suggestion
+    also says where its charges land today ('lands_in'), when that is known.
+    """
+    import recurring_detect
+    from redis_crud import lookup_category_memory
+    cats = _suggested_categories(user_id)
+    by_id = {kind: {int(c['id']): c for c in rows if c.get('id') is not None} for kind, rows in cats.items()}
+    entry_cats = {}
+    for etype, table, kind, sql in (
+            ('income', 'income_entries', 'income',
+             "SELECT e.id, e.category_id FROM income_entries e JOIN income_categories c ON c.id = e.category_id "
+             " WHERE c.user_id = %s"),
+            ('expense', 'expense_entries', 'expense',
+             "SELECT e.id, e.category_id FROM expense_entries e JOIN expense_categories c ON c.id = e.category_id "
+             " WHERE c.user_id = %s"),
+            ('c_expense', 'c_expense_entries', 'ca',
+             "SELECT e.id, e.category_id FROM c_expense_entries e JOIN c_expense_categories c ON c.id = e.category_id "
+             "  JOIN credit_accounts a ON a.id = c.account_id WHERE a.user_id = %s")):
+        for e in _suggested_rows(table, user_id, sql, (user_id,)) or []:
+            if e.get('id') is not None and e.get('category_id') is not None:
+                entry_cats[(etype, int(e['id']))] = by_id[kind].get(int(e['category_id']))
+
+    def mirror(card_id, expense_id):
+        expense = by_id['expense'].get(int(expense_id))
+        if not expense:
+            return None
+        return next((c for c in cats['ca'] if int(c.get('account_id') or 0) == card_id
+                     and (c.get('name') or '') == (expense.get('name') or '')), None)
+
+    found = []
+    dismissed = _suggested_dismissed(user_id)
+    for key, txns in recurring_detect.groups(_suggested_transactions(user_id), today).items():
+        if key in dismissed:
+            continue
+        s = recurring_detect.detect_group(key, txns, today)
+        if not s:
+            continue
+        landed = [entry_cats.get((t.get('imported_entry_type'), int(t['imported_to_entry_id'])))
+                  for t in txns if t.get('imported_to_entry_id') not in (None, '')]
+        remembered = None
+        direction = 'incoming' if s['kind'] == 'income' else 'outgoing'
+        for name in s['names']:
+            m = lookup_category_memory(user_id, description=name, category_type=direction,
+                                       account_type='CREDIT' if s['kind'] == 'ca' else 'DEPOSITORY')
+            if m and m.get('category_id'):
+                cid = int(m['category_id'])
+                remembered = mirror(s['card_id'], cid) if s['kind'] == 'ca' else by_id[s['kind']].get(cid)
+                break
+        if any(_covers(c) for c in landed) or _covers(remembered):
+            continue
+        current = remembered or next((c for c in reversed(landed) if c), None)
+        s['lands_in'] = (current or {}).get('name')
+        found.append(s)
+    found.sort(key=lambda s: (s['merchant'].lower(), s['amount']))
+    return found, cats
+
+
+def _suggested_options(cats):
+    """The categories the dialog offers as existing ones: not recurring, not special."""
+    skip = ('is_recurring', 'hidden', 'is_system', 'is_bundle', 'is_auto_adjustment', 'is_savings',
+            'is_credit_account', 'is_interest')
+    def usable(c):
+        return c.get('id') is not None and c.get('name') and not any(_flag_on(c, f) for f in skip)
+    def shape(rows):
+        return sorted(({'id': int(c['id']), 'name': c['name']} for c in rows if usable(c)),
+                      key=lambda o: o['name'].lower())
+    cards = {}
+    for c in cats['ca']:
+        cards.setdefault(str(int(c.get('account_id') or 0)), []).append(c)
+    return {'income': shape(cats['income']), 'expense': shape(cats['expense']),
+            'ca': {aid: shape(rows) for aid, rows in cards.items()}}
+
+
+def _short_date(d, today):
+    text = f"{d.strftime('%b')} {d.day}"
+    return text if d.year == today.year else f'{text}, {d.year}'
+
+
+@app.route('/recurring-suggested')
+@login_required
+def recurring_suggested():
+    import bank_history
+    import recurring_detect
+    user_id = current_user.id
+    if not _bank_suggestions_available(user_id):
+        abort(404)
+    today = _user_today_for(user_id)
+
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT profile_picture, first_name, last_name, landing_page, currency_type "
+                       "FROM users WHERE id = %s", (user_id,))
+        user_data = cursor.fetchone()
+        cursor.close()
+    user_data = user_data or {}
+    currency_type = user_data.get('currency_type') or 'USD'
+    symbol = '$' if currency_type == 'USD' else '€' if currency_type == 'EUR' else currency_type
+
+    # The months before the bank was linked: read once in the background -
+    # again only when an account is added - and the page reloads when it lands.
+    from bank_import import importable_accounts
+    reading = bank_history.fetching(user_id)
+    if not reading and bank_history.needed(user_id, importable_accounts(user_id)):
+        reading = bank_history.fetch_in_background(user_id, app)
+    kept = bank_history.read(user_id)
+    history_failed = bool(kept and kept.get('failed'))
+
+    found, cats = _suggested_find(user_id, today)
+    cards = {}
+    for a in _get_credit_accounts_from_redis(user_id) or []:
+        if a.get('id') is not None:
+            cards[int(a['id'])] = a.get('name') or ''
+    if not cards:
+        with get_db_pool().get_cursor(dictionary=True) as cursor:
+            cursor.execute("SELECT id, name FROM credit_accounts WHERE user_id = %s", (user_id,))
+            cards = {int(a['id']): a.get('name') or '' for a in cursor.fetchall() or []}
+
+    for s in found:
+        s['sentence'] = recurring_detect.sentence(s, symbol)
+        s['card_name'] = cards.get(s['card_id']) if s['card_id'] else None
+        s['recent_text'] = [(_short_date(d, today), f'{symbol}{a:,.2f}') for d, a in s['recent']]
+        s['next_text'] = _short_date(s['next_date'], today)
+        s['prefill'] = {
+            'amount': f"{s['amount']:.2f}", 'wage_bill': s['wage_bill'],
+            'cadence_interval': s['cadence_interval'], 'cadence_unit': s['cadence_unit'],
+            'weekdays': s['weekdays'], 'monthly_days': s['monthly_days'],
+            'yearly_day': s['yearly_day'], 'yearly_month': s['yearly_month'],
+            'start_date': s['next_date'].isoformat(), 'no_end_date': True,
+        }
+
+    groups = [
+        {'key': 'income', 'title': 'Income', 'rows': [s for s in found if s['kind'] == 'income']},
+        {'key': 'expense', 'title': 'Expenses', 'rows': [s for s in found if s['kind'] == 'expense']},
+    ]
+    for card_id, name in sorted(cards.items(), key=lambda kv: kv[1].lower()):
+        groups.append({'key': 'ca', 'title': name, 'rows': [s for s in found if s['kind'] == 'ca' and s['card_id'] == card_id]})
+    groups = [g for g in groups if g['rows']]
+
+    return render_template(
+        'recurring_suggested.html',
+        groups=groups,
+        found_count=len(found),
+        reading=reading,
+        history_failed=history_failed,
+        category_options=_suggested_options(cats),
+        profile_picture=user_data.get('profile_picture'),
+        first_name=user_data.get('first_name') or '',
+        last_name=user_data.get('last_name') or '',
+        current_date=today,
+        landing_page=user_data.get('landing_page') or 'dashboard_3m',
+        currency_type=currency_type,
+    )
+
+
+def _suggested_group(user_id, key):
+    """The suggestion for a group key as it stands now, or None."""
+    import recurring_detect
+    today = _user_today_for(user_id)
+    txns = recurring_detect.groups(_suggested_transactions(user_id), today).get(key)
+    return recurring_detect.detect_group(key, txns, today) if txns else None
+
+
+@app.route('/api/recurring-suggested/dismiss', methods=['POST'])
+@login_required
+def recurring_suggested_dismiss():
+    """Not recurring: this place and amount is not suggested again."""
+    import zlib
+    data = request.get_json(silent=True) or {}
+    key = str(data.get('key') or '')
+    kind = key.split('|')[1] if key.count('|') >= 4 else None
+    if not key.startswith('bank|') or kind not in _SUGGESTED_RECURRING_TYPES or len(key) > 255:
+        return jsonify({'status': 'error', 'message': 'Unknown suggestion.'}), 400
+    user_id = current_user.id
+    found = _suggested_group(user_id, key)
+    if found is None:
+        return jsonify({'status': 'error', 'message': 'That suggestion was not found.'}), 404
+    monthly = [d for d in found['monthly_days'] if str(d).isdigit()]
+    row_id = upsert_recurring_suggestion({
+        'suggestion_type': _SUGGESTED_RECURRING_TYPES[kind],
+        'category_id': -((zlib.crc32(key.encode('utf-8')) & 0x7fffffff) or 1),
+        'transaction_id': key,
+        'detected_amount': found['amount'],
+        'detected_cadence_interval': found['cadence_interval'],
+        'detected_cadence_unit': found['cadence_unit'],
+        'detected_weekday': found['weekdays'][0] if found['weekdays'] else None,
+        'detected_monthly_day': int(monthly[0]) if monthly else None,
+    }, user_id=user_id, dismissed=True)
+    if row_id is None:
+        return jsonify({'status': 'error', 'message': 'Could not save that.'}), 500
+    log_info(app.logger, 'SUGGESTED_RECURRING', f'user {user_id}: {key} marked not recurring')
+    return jsonify({'status': 'success'})
+
+
+@app.route('/api/recurring-suggested/card-category')
+@login_required
+def recurring_suggested_card_category():
+    """
+    A card's own copy of an expense category, by name, with its real id.
+    A category made a moment ago holds a temporary id until the flush; this
+    flushes first, so the card's recurring is made on the real one. A GET:
+    it writes nothing anyone could see.
+    """
+    user_id = current_user.id
+    try:
+        account_id = int(request.args.get('account_id'))
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error', 'message': 'Unknown card.'}), 400
+    name = (request.args.get('name') or '').strip()
+    import redis_manager as _rm
+    _rm.flush_dirty_tables_for_user(user_id)
+    for c in _suggested_categories(user_id)['ca']:
+        if int(c.get('account_id') or 0) == account_id and (c.get('name') or '').strip() == name:
+            return jsonify({'status': 'success', 'category_id': int(c['id'])})
+    return jsonify({'status': 'error', 'message': 'That category was not found on the card.'}), 404
+
+
+@app.route('/api/recurring-suggested/remember', methods=['POST'])
+@login_required
+def recurring_suggested_remember():
+    """
+    After Make recurring: file this place's charges under the category it
+    was made recurring in, so the bank's next charge lands there. The
+    category comes by name - a new one still holds a temporary id in the
+    browser - and is looked up after the flush.
+    """
+    from redis_crud import upsert_category_memory
+    data = request.get_json(silent=True) or {}
+    key = str(data.get('key') or '')
+    name = (data.get('category_name') or '').strip()
+    user_id = current_user.id
+    found = _suggested_group(user_id, key) if key.startswith('bank|') else None
+    if found is None or not name:
+        return jsonify({'status': 'error', 'message': 'That suggestion was not found.'}), 404
+    import redis_manager as _rm
+    _rm.flush_dirty_tables_for_user(user_id)
+    rows = _suggested_categories(user_id)[found['kind']]
+    if found['kind'] == 'ca':
+        rows = [c for c in rows if int(c.get('account_id') or 0) == found['card_id']]
+    category = next((c for c in rows if (c.get('name') or '').strip() == name), None)
+    if category is None:
+        return jsonify({'status': 'error', 'message': 'That category was not found.'}), 404
+    category_id = int(category['id'])
+    if found['kind'] == 'ca':
+        category_id = _canonical_expense_category_id(user_id, category_id)
+        if not category_id:
+            return jsonify({'status': 'error', 'message': 'That category was not found.'}), 404
+    direction = 'incoming' if found['kind'] == 'income' else 'outgoing'
+    for merchant in found['names']:
+        upsert_category_memory(user_id, merchant_id=None, description=merchant,
+                               category_id=category_id, category_type=direction)
+    log_info(app.logger, 'SUGGESTED_RECURRING', f'user {user_id}: {key} filed under {found["kind"]} category {category_id}')
+    return jsonify({'status': 'success'})
+
+
 @app.route('/recurring-expense')
 @login_required
 def recurring_expense():

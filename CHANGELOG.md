@@ -8,6 +8,42 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.52.0 — 2026-10-11
+
+### Added
+
+- **Suggested recurring** (Menu, Recurring, Suggested - shown when a bank is
+  connected). The bank charges that come from the same place, for the same
+  amount, on a steady schedule, and that no recurring category covers yet:
+  money coming in, money going out of checking, and each card's charges.
+  Each one says what was found - "$11.99 every month on the 7th" - with its
+  last few dates, when the next is expected and which category it goes to
+  now. Weekly, fortnightly, twice a month, monthly, every 2, 3 or 6 months
+  and yearly are recognised; it takes three charges, the schedule has to
+  hold, and something that stopped is not suggested. A charge already filed
+  under a recurring category is left out.
+- So that three months of charges are there from the start, the first visit
+  reads the months before the bank was linked - two requests to SimpleFIN,
+  in the background, and the page updates when they are in. They are used
+  for suggestions only and never become entries. The daily pull is
+  unchanged.
+- **Make recurring** opens the recurring form filled in with what was found,
+  starting at the next expected date, with a choice of a new category (named
+  after where the charges come from) or one you already have. Once saved,
+  the bank's next charge from there lands in that category and settles its
+  forecast; charges already in your budget stay where they are. **Not
+  recurring** stops that charge being suggested again.
+
+### Changed
+
+- A page can now ask the change poller to reload as soon as the data
+  changes, rather than on the next touch - for a page that is only waiting
+  on work done elsewhere. Suggested recurring uses it while it reads the
+  bank.
+- The date helpers the recurring forms share now live once in `script.js`
+  instead of a copy in each recurring page. The convert-to-recurring form that
+  sat unused in both month dashboards is now the Make Recurring dialog.
+
 ## 1.51.1 — 2026-10-11
 
 ### Changed

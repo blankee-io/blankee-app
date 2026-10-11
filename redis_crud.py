@@ -1137,11 +1137,13 @@ def get_recurring_suggestions(user_id=None, dismissed=False):
         return []
 
 
-def upsert_recurring_suggestion(suggestion_data, user_id=None):
+def upsert_recurring_suggestion(suggestion_data, user_id=None, dismissed=False):
     """
     Insert or update a recurring suggestion record (Redis-first).
     Uses (suggestion_type, category_id) as the unique key.
-    Always overwrites with latest — un-dismisses if previously dismissed.
+    Always overwrites with latest — un-dismisses if previously dismissed,
+    unless dismissed=True: then the row is written already dismissed, in one
+    write. That is how Suggested recurring stores a "Not recurring" answer.
     
     Args:
         suggestion_data: Dict with: suggestion_type, category_id, transaction_id,
@@ -1186,7 +1188,7 @@ def upsert_recurring_suggestion(suggestion_data, user_id=None):
                 cached_data[i]['detected_cadence_unit'] = suggestion_data.get('detected_cadence_unit')
                 cached_data[i]['detected_weekday'] = suggestion_data.get('detected_weekday')
                 cached_data[i]['detected_monthly_day'] = suggestion_data.get('detected_monthly_day')
-                cached_data[i]['dismissed'] = 0
+                cached_data[i]['dismissed'] = 1 if dismissed else 0
                 cached_data[i]['created_at'] = datetime.now().isoformat()
                 db_id = cached_data[i].get('id')
                 found = True
@@ -1210,7 +1212,7 @@ def upsert_recurring_suggestion(suggestion_data, user_id=None):
                 'detected_cadence_unit': suggestion_data.get('detected_cadence_unit'),
                 'detected_weekday': suggestion_data.get('detected_weekday'),
                 'detected_monthly_day': suggestion_data.get('detected_monthly_day'),
-                'dismissed': 0,
+                'dismissed': 1 if dismissed else 0,
                 'created_at': datetime.now().isoformat()
             }
             cached_data.append(new_suggestion)

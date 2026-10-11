@@ -57,6 +57,13 @@
                 <a href="{{ url_for('recurring_ca_expense') }}">Credit Expenses</a>
                 <i class="fa-kit fa-light-credit-card-circle-minus"></i>
             </div>
+            {# Suggestions come from the bank feed, so only with a bank connected. #}
+            {% if bank_suggestions %}
+            <div class="dropdown-link dropdown-sublink">
+                <a href="{{ url_for('recurring_suggested') }}">Suggested</a>
+                <i class="fa-light fa-lightbulb"></i>
+            </div>
+            {% endif %}
         </div>
         <div class="dropdown-link"><a href="{{ url_for('credit_accounts') }}">Credit Accounts</a><i class="fa-light fa-credit-card"></i></div>
         {# The bank connection and AI categorization live on the Settings

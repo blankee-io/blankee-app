@@ -45,7 +45,7 @@ These keys are hydrated from MySQL when a user becomes active, and flushed back 
 | `notifications:v1:{user_id}` | STRING (JSON array) | User notifications |
 | `password_resets:v1:{user_id}` | STRING (JSON array) | Password reset tokens |
 | `recurring_mismatches:v1:{user_id}` | STRING (JSON array) | Detected recurring bill/wage mismatches from provider enrichment |
-| `recurring_suggestions:v1:{user_id}` | STRING (JSON array) | Suggested recurring entries based on enriched transaction patterns |
+| `recurring_suggestions:v1:{user_id}` | STRING (JSON array) | Suggestion rows. Suggested recurring stores its "Not recurring" answers here: transaction_id is the bank group key (`bank|kind|card|place|cents`), category_id a negative hash of it |
 | `setup_state:v1:{user_id}` | STRING (JSON object) | Profile setup wizard state |
 | `loaf_baskets:v1:{user_id}` | STRING (JSON array) | Loaf: PTO/UTO baskets. Hydrate-only - written MySQL-first by loaf_data.py, never flushed |
 | `loaf_entries:v1:{user_id}` | STRING (JSON array) | Loaf: booked time off. Hydrate-only, as above |
@@ -61,6 +61,8 @@ These keys are hydrated from MySQL when a user becomes active, and flushed back 
 | `linked_connections:v1:{user_id}` | STRING (JSON array) | Bank connections (institution, status) |
 | `linked_accounts:v1:{user_id}` | STRING (JSON array) | Individual linked bank accounts |
 | `linked_transactions:v1:{user_id}` | STRING (JSON array) | Imported bank transactions, with provider enrichment fields |
+| `bank_history:v1:{user_id}` | STRING (JSON object) | The last 87 days of posted bank transactions, for Suggested recurring only - never imported. Redis only, no MySQL table; read once (two requests), again when an account is added; TTL 120 days (bank_history.py) |
+| `bank_history_fetching:{user_id}` | STRING | Set while a background history fetch runs; TTL 600 s |
 | `category_memory:v1:{user_id}` | STRING (JSON array) | Category memory — maps merchant/description to budget categories |
 | `bank_last_txn_date:v1:{user_id}` | STRING | Cached latest posted transaction date; also the entry-locking cutoff |
 
