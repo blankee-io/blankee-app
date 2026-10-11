@@ -8,6 +8,36 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.50.0 — 2026-10-10
+
+### Added
+
+- **A price change with an end date hands back to the old amount.** Schedule
+  a change that ends before the amount it replaces would have - a promotional
+  price, a temporary rate - and the old amount comes back the day after, until
+  its own end. Before, the category simply stopped when the change ran out.
+
+### Changed
+
+- On the recurring pages a category shows the amount in force today on top,
+  and any changes still to come under it in date order. Amounts that have ended are no longer listed; their payments stay on
+  the dashboards. Worked out on your own date, not the server's.
+- A scheduled change reads as part of its category: the category and its
+  changes share one stripe colour - the table alternates by category now, not
+  by row - and a bar in the page's colour runs down the left of all of them.
+  The arrow on a change row is no longer faded.
+
+### Fixed
+
+- Deleting a price change that had already started wiped everything it had
+  done, payments already confirmed included, and laid the old amount back
+  over those dates as unpaid forecasts. It now stops the change from today:
+  what was paid at it stays as it was, and the previous amount runs from today
+  on.
+- Deleting a change that has not started yet, when the old amount was due to
+  come back after it, left two identical rows side by side. They are one row
+  again.
+
 ## 1.49.3 — 2026-10-10
 
 ### Fixed

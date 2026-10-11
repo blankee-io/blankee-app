@@ -4650,9 +4650,15 @@ window.recurringGroups = (function () {
 
 window.recurringSearch = (function () {
 
+    // Striped by category, not by row. A scheduled price change is a row of
+    // its own under the category it changes, and striping it as a row gave it
+    // the opposite colour from its parent - so it read as a separate category.
+    // A change row takes the colour of the visible row above it (the parent,
+    // or the change before it) and does not move the count on.
     function stripe(tbody, oddClass, evenClass) {
         var rows = tbody.querySelectorAll('tr');
         var index = 0;
+        var last = null;
         for (var i = 0; i < rows.length; i++) {
             var row = rows[i];
             row.classList.remove(oddClass, evenClass);
@@ -4660,7 +4666,12 @@ window.recurringSearch = (function () {
             // A group header is not one of the striped rows; counting it would
             // flip the colours of everything below it.
             if (row.classList.contains('recurring-group-header')) { continue; }
-            row.classList.add(index % 2 === 0 ? evenClass : oddClass);
+            if (row.classList.contains('recurring-raise-row') && last) {
+                row.classList.add(last);
+                continue;
+            }
+            last = index % 2 === 0 ? evenClass : oddClass;
+            row.classList.add(last);
             index++;
         }
         return index;
@@ -4712,16 +4723,10 @@ window.recurringSearch = (function () {
                         ? '' : 'none';
             }
 
-            if (query) {
-                stripe(tbody, opts.odd, opts.even);
-            } else {
-                // Nothing filtered, so hand the striping back to the stylesheet.
-                // Its :nth-child rules skip any row carrying a zebra class, so
-                // they only resume once these are off.
-                for (var j = 0; j < rows.length; j++) {
-                    rows[j].classList.remove(opts.odd, opts.even);
-                }
-            }
+            // Always striped here, searched or not: the stylesheet's
+            // :nth-child striping (left as the no-script fallback) counts rows,
+            // and it is categories that have to alternate - see stripe().
+            stripe(tbody, opts.odd, opts.even);
 
             if (empty) { empty.style.display = (query && shown === 0) ? '' : 'none'; }
         }
@@ -4739,8 +4744,9 @@ window.recurringSearch = (function () {
             });
         }
 
-        // Not called up front any more: with an empty box there is nothing to
-        // filter and the stylesheet's own striping is already correct.
+        // Up front too, for the striping: nothing is filtered yet, but a
+        // category and its price changes have to share a colour from the start.
+        apply();
     }
 
     return { attach: attach };

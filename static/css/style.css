@@ -14774,11 +14774,13 @@ transform: scale(1.2);
     opacity: 0.85;
 }
 
-/* ===== Raises on a recurring income =========================================
-   A category with raises is several rows of this table: the original, then one
-   per change, ordered by start date. The rows are indented under the first so
-   they read as one income with a history rather than as separate incomes that
-   happen to share a name. */
+/* ===== Price changes on a recurring category ================================
+   A category with scheduled changes is several rows of its table - on the
+   income, expense and credit expense pages alike: the original, then one per
+   change, ordered by start date. Three things make them read as one category
+   with a history rather than as separate categories that share a name: the
+   indent here, the shared stripe colour (recurringSearch.stripe in script.js
+   stripes by category), and the bar down the left below. */
 .recurring-raise-row .income-category,
 .recurring-raise-label {
     padding-left: 18px;
@@ -14790,17 +14792,31 @@ transform: scale(1.2);
 .raise-arrow {
     margin-right: 5px;
     color: var(--primary);
-    opacity: 0.7;
+}
+
+.expense-recurring-table .raise-arrow,
+.ca-recurring-table .raise-arrow {
+    color: var(--accent);
 }
 
 .raise-from {
     font-weight: 500;
 }
 
-/* A tint down the left of a raise row, so the chain is visible as a block even
-   when the rows are tall enough that the indent alone is easy to lose. */
+/* A bar down the left of the category and every change under it, unbroken, so
+   the family is visible as a block. It was a 3px tint in --primary-lighter on
+   the change rows only, which vanished on the pale stripe. An inset shadow, so
+   it takes no width from the column. */
+.recurring-has-raises > td:first-child,
 .recurring-raise-row > td:first-child {
-    box-shadow: inset 3px 0 0 var(--primary-lighter);
+    box-shadow: inset 4px 0 0 var(--primary);
+}
+
+.expense-recurring-table .recurring-has-raises > td:first-child,
+.expense-recurring-table .recurring-raise-row > td:first-child,
+.ca-recurring-table .recurring-has-raises > td:first-child,
+.ca-recurring-table .recurring-raise-row > td:first-child {
+    box-shadow: inset 4px 0 0 var(--accent);
 }
 
 /* The line the edit dialog shows when it is asking for a raise rather than an
