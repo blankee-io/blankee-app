@@ -198,7 +198,9 @@ def notification_html(message):
         parts.append(Markup('<a href="%s">%s</a>') % (m.group(1), m.group(2)))
         pos = m.end()
     parts.append(escape(text[pos:]))
-    return Markup('').join(parts)
+    # A message written as lines (the bills-due list) keeps them. Escaped
+    # first, so the only markup a line break can introduce is the <br> itself.
+    return Markup('<br>').join(Markup('').join(parts).split('\n'))
 
 
 app.jinja_env.filters['notification_html'] = notification_html
@@ -16601,9 +16603,12 @@ def widget_notification():
     text = re.sub(r'<[^>]+>', '', message)
     text = (text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<')
                 .replace('&gt;', '>').replace('&quot;', '"').replace('&#39;', "'"))
+    # Whitespace collapsed within each line, and the line breaks kept: a
+    # message written as a list (bills due today) shows as one in the alert.
+    text = '\n'.join(' '.join(line.split()) for line in text.splitlines() if line.strip())
     return jsonify({
         'id': row['id'],
-        'message': ' '.join(text.split()).strip(),
+        'message': text,
         'url': deep_link_from(message),
         'unread_count': int(unread or 0),
     })

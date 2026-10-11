@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.49.2 — 2026-10-10
+
+### Changed
+
+- The Bills due today reminder is a list, one bill to a line, instead of a
+  sentence - in the notifications list, on the phone and in the email.
+  Line breaks in a notification are kept everywhere it is shown now; every
+  other notification is a single line and looks as it did.
+
 ## 1.49.1 — 2026-10-10
 
 ### Changed

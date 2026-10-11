@@ -155,22 +155,29 @@ def _money(amount):
 
 def message(items, day=None):
     """
-    'Due today: Rent $1,650.00, Phone $54.99 and Streaming $17.99 on Coastal
-    Visa.' A link to the day view, which is where they sit; the push takes
-    its deep link from the first link in the message.
+    A list, one bill to a line:
+
+        Due today:
+        • Rent $1,650.00
+        • Gym $45.00 on Coastal Visa
+        Open the day
+
+    The line breaks are real newlines in the stored text. Every place a
+    notification is shown keeps them: the notifications page turns them into
+    <br> (notification_html), the email's HTML part likewise, and the push and
+    the iOS extension's fetch keep them as the alert's own line breaks. The
+    link goes to the day view, which is where the bills sit; the push takes its
+    deep link from the first link in the message.
     """
-    parts = []
+    lines = ['Due today:']
     for it in items:
-        text = f"{it['name']} {_money(it['amount'])}"
+        text = f"\u2022 {it['name']} {_money(it['amount'])}"
         if it.get('account'):
             text += f" on {it['account']}"
-        parts.append(text)
-    if len(parts) > 1:
-        listed = ', '.join(parts[:-1]) + ' and ' + parts[-1]
-    else:
-        listed = parts[0]
+        lines.append(text)
     href = '/dashboard_d' + (f'?date={day.isoformat()}' if day else '')
-    return f'Due today: {listed}. <a href="{href}">Open the day</a>.'
+    lines.append(f'<a href="{href}">Open the day</a>')
+    return '\n'.join(lines)
 
 
 def raise_if_due(user_id, local_now):

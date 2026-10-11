@@ -114,7 +114,10 @@ def send_apns_notification(device_token, title, body, badge=None, sound="default
             .replace('&quot;', '"')
             .replace('&#39;', "'")
             .replace('&apos;', "'"))
-        clean_body = ' '.join(clean_body.split()).strip()
+        # Spaces collapsed within a line; the line breaks of a message written
+        # as a list (bills due today) are kept - an alert body shows them.
+        clean_body = '\n'.join(' '.join(line.split()) for line in clean_body.splitlines()
+                               if line.strip())
 
     aps = {
         "alert": {"title": title, "body": clean_body},

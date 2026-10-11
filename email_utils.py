@@ -235,6 +235,10 @@ def send_notification_email(to_email, user_name, message, notification_date):
     subject = "Blankee Notification"
     
     formatted_date = notification_date.strftime('%B %d, %Y at %I:%M %p')
+    # The message is placed as HTML, where a newline is only a space. A message
+    # written as lines (bills due today) needs them as <br>; the plain-text
+    # part below keeps the newlines as they are.
+    html_message = str(message or '').replace('\n', '<br>')
     
     html_content = f"""
     <!DOCTYPE html>
@@ -313,7 +317,7 @@ def send_notification_email(to_email, user_name, message, notification_date):
             
             <div class="notification-box">
                 <div class="notification-date">{formatted_date}</div>
-                <div class="notification-message">{message}</div>
+                <div class="notification-message">{html_message}</div>
             </div>
             
             <center>
