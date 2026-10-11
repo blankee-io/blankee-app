@@ -124,6 +124,23 @@
                                 <p class="balance-next-check" id="balance-next-check"></p>
                                 </div>
                             </form>
+
+                            <!-- The Bills due today reminder: one time of day. Same
+                                 arrangement as the form above - rendered here, moved
+                                 under its row in the list by script, the row's switch
+                                 is its switch. -->
+                            <form id="bills-reminder-form" class="profile-form" hidden>
+                                <input type="checkbox" id="bills_reminder_enabled" class="hidden-checkbox">
+                                <div id="bills-reminder-panel" class="balance-notification-panel" hidden>
+                                    <div class="input-group">
+                                        <label for="bills-notify-time">At:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The time of day to send it, in your own timezone. It names the bills that fall on that day; allowances are not included.</span></span></label>
+                                        <input type="time" id="bills-notify-time" name="notify_time" class="login-input" value="08:00" required>
+                                        <button type="submit" class="submit-button">
+                                            <i class="fas fa-check"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
                         </div>
                     </div>
                     <div class="data-section">
@@ -833,6 +850,55 @@
             load();
         })();
 
+        // ---- Bills due today --------------------------------------------
+        // One switch and one time. The switch is the row in the list below
+        // (placed there by the email-types script, like the balance reminder);
+        // this only loads, paints and saves.
+        (function () {
+            var form = document.getElementById('bills-reminder-form');
+            if (!form) { return; }
+            var enabled = document.getElementById('bills_reminder_enabled');
+            var timeField = document.getElementById('bills-notify-time');
+            var panel = document.getElementById('bills-reminder-panel');
+
+            function paint() {
+                if (panel) { panel.hidden = !enabled.checked; }
+                if (window.syncBillsDueRow) { window.syncBillsDueRow(); }
+            }
+            function load() {
+                fetch('/api/bill-reminder', { headers: { 'Accept': 'application/json' } })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (d) {
+                        if (!d || !d.success) { return; }
+                        enabled.checked = !!d.enabled;
+                        if (d.notify_time) { timeField.value = d.notify_time.slice(0, 5); }
+                        paint();
+                    })
+                    .catch(function () { /* leave the defaults showing */ });
+            }
+            function save() {
+                fetch('/api/bill-reminder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: enabled.checked, notify_time: timeField.value || '08:00' })
+                })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (!d || !d.success) {
+                            showToast((d && d.error) || 'Could not save that.', 'error');
+                            return;
+                        }
+                        showToast('Bills due reminder saved.', 'success');
+                        load();
+                    })
+                    .catch(function () { showToast('Could not reach the server.', 'error'); });
+            }
+            form.addEventListener('submit', function (e) { e.preventDefault(); save(); });
+            // jQuery: the row's toggle flips the box with .prop() and $.trigger.
+            $(enabled).on('change', function () { paint(); save(); });
+            load();
+        })();
+
         // ---- Which notifications get emailed ------------------------------
         // The list comes from the server (notification_kinds), not from here, so
         // a kind added in the code gets a switch without anyone remembering to
@@ -890,6 +956,10 @@
                         var enabled = document.getElementById('balance_reminder_enabled');
                         if (enabled) { enabled.checked = box.checked; $(enabled).trigger('change'); }
                     }
+                    if (t.key === BILLS_KIND) {
+                        var billsOn = document.getElementById('bills_reminder_enabled');
+                        if (billsOn) { billsOn.checked = box.checked; $(billsOn).trigger('change'); }
+                    }
                 });
 
                 wrap.appendChild(label);
@@ -942,17 +1012,32 @@
             // syncEntriesToConfirmRow is what keeps the row in step with it,
             // whichever of the two fetches lands last.
             var REMINDER_KIND = 'entries_to_confirm';
-            function placeReminder() {
-                var box = document.getElementById('email-type-' + REMINDER_KIND);
-                var form = document.getElementById('balance-notification-form');
+            var BILLS_KIND = 'bills_due';
+            function placeUnder(kind, formId) {
+                var box = document.getElementById('email-type-' + kind);
+                var form = document.getElementById(formId);
                 if (!box || !form) { return; }
                 var rowEl = box.closest('.input-group');
                 if (rowEl && form.previousElementSibling !== rowEl) {
                     rowEl.parentNode.insertBefore(form, rowEl.nextSibling);
                 }
                 form.hidden = false;
-                window.syncEntriesToConfirmRow();
             }
+            function placeReminder() {
+                placeUnder(REMINDER_KIND, 'balance-notification-form');
+                window.syncEntriesToConfirmRow();
+                // Bills due today: same shape, one time field instead of a cadence.
+                placeUnder(BILLS_KIND, 'bills-reminder-form');
+                window.syncBillsDueRow();
+            }
+            window.syncBillsDueRow = function () {
+                var box = document.getElementById('email-type-' + BILLS_KIND);
+                var enabled = document.getElementById('bills_reminder_enabled');
+                if (!box || !enabled) { return; }
+                box.checked = enabled.checked;
+                var icon = box.parentNode.querySelector('.toggle-switch[data-checkbox="' + box.id + '"] .toggle-icon');
+                if (icon) { icon.classList.toggle('toggle-off', !box.checked); }
+            };
             window.syncEntriesToConfirmRow = function () {
                 var box = document.getElementById('email-type-' + REMINDER_KIND);
                 var enabled = document.getElementById('balance_reminder_enabled');

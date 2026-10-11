@@ -30,8 +30,13 @@ KINDS = (
      'Sent when your projected remainder falls below zero on some future date, '
      'so a shortfall shows up before it arrives.'),
     ('allowance_spent', 'Allowance spent',
-     'Sent when a recurring allowance is used up, or when income for a category '
-     'comes in higher than forecast.'),
+     'Sent when a recurring allowance is used up, or when variable income for a '
+     'category comes in higher than forecast. Bills and wages are not included.'),
+    # On by its own switch and at its own hour, like the reminder above: the
+    # row's switch is the reminder's, and the time field sits under it.
+    ('bills_due', 'Bills due today',
+     'Sent at the time you set here, naming the bills that fall on that day. '
+     'Bills only - allowances are not included.'),
     ('pending_transactions', 'Pending transactions',
      'Sent when transactions synced from a bank account are waiting to be given '
      'a category.'),

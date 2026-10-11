@@ -57,6 +57,7 @@ MIGRATIONS = [
     'add_bank_record_match.sql',
     'add_device_relay.sql',
     'add_recurring_drift.sql',
+    'add_bill_reminders.sql',
 ]
 
 # install/sql/ holds only what a fresh install applies. The rollback scripts and

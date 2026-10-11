@@ -8,6 +8,24 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.49.0 — 2026-10-10
+
+### Added
+
+- **Bills due today.** A reminder, at a time of day you choose in Settings,
+  naming the bills that fall on that day: recurring expenses set up as bills,
+  card payments, and on the cards themselves subscriptions set up as bills and
+  projected interest. Bills only; allowances are never listed. It arrives in
+  the app, on the phone, and by email if that is on, with its own switch under
+  Email Notifications like the entries-to-confirm reminder.
+
+### Fixed
+
+- The "spent more than the allowance" notification went out for bills and
+  wages too, because a bill is settled in full the moment it is paid and that
+  looked like an allowance used up. It is now sent for allowances and variable
+  income only.
+
 ## 1.48.2 — 2026-09-26
 
 ### Fixed

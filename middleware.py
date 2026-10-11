@@ -255,7 +255,7 @@ def init_redis_middleware(app):
             '/ai/test', '/bank/analyze-transactions-for-categories',
             # per-browser bookkeeping a page does as it loads
             '/api/user/timezone', '/api/tutorial/', '/api/notifications/register',
-            '/api/notifications/unregister',
+            '/api/notifications/unregister', '/api/bill-reminder',
             # bumps itself, only when it actually inserted something
             '/check_and_initialize_totals',
         )

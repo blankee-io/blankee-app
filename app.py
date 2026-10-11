@@ -18544,6 +18544,29 @@ def api_autobalance_settings():
                     'next_due': str(settings.get('next_due')) if settings.get('next_due') else None})
 
 
+@app.route('/api/bill-reminder', methods=['GET', 'POST'])
+@login_required
+def api_bill_reminder():
+    """
+    Read or write the bills-due reminder: on or off, and the time of day.
+    Bills only, never allowances - see bill_reminders.py for what counts.
+    """
+    import bill_reminders
+    if request.method == 'GET':
+        settings = bill_reminders.get_settings(current_user.id) or {}
+        return jsonify({
+            'success': True,
+            'enabled': bool(settings.get('enabled')),
+            'notify_time': bill_reminders.notify_at(settings).strftime('%H:%M'),
+            'last_sent': str(settings['last_sent']) if settings.get('last_sent') else None,
+        })
+    data = request.get_json(silent=True) or {}
+    ok, message = bill_reminders.save_settings(current_user.id, data.get('enabled'), data.get('notify_time'))
+    if not ok:
+        return jsonify({'success': False, 'error': message}), 400
+    return jsonify({'success': True, 'message': message})
+
+
 @app.route('/api/autobalance/categories', methods=['GET', 'POST'])
 @login_required
 def api_autobalance_categories():

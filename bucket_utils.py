@@ -612,7 +612,20 @@ def _create_bucket_depleted_notification(user_id, table, category_id, bucket_dat
     """
     from datetime import datetime
     from flask import current_app
-    
+
+    # Allowances and variable income only. A bill or a wage is settled in full
+    # the moment it is paid - its bucket always reaches zero - so "spent more
+    # than the allowance" is not news about it, and this went out for every
+    # bill paid on or before its day. Asked for on 2026-10-10.
+    try:
+        if int(_get_wage_bill_for_category(table, category_id, user_id) or 0) == 1:
+            log_info(logger, 'BUCKET_NOTIFICATION',
+                     f"Category {category_id} is a bill or wage; no allowance notification")
+            return
+    except Exception as e:
+        log_warning(logger, 'BUCKET_NOTIFICATION',
+                    f"Could not tell whether category {category_id} is a bill: {e}")
+
     try:
         # Map entry table to category table and recurring table
         table_map = {

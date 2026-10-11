@@ -145,6 +145,15 @@ def run_once(now_utc=None):
         except Exception as e:
             log_exception(logger, 'AUTOBALANCE',
                           f"Failed to raise the reminder for user {user_id}: {e}")
+        # The bills-due reminder rides the same pass: same users, same local
+        # clock, its own switch, hour and claim (bill_reminders.py).
+        try:
+            import bill_reminders
+            if bill_reminders.raise_if_due(user_id, local_now):
+                raised += 1
+        except Exception as e:
+            log_exception(logger, 'BILLS_DUE',
+                          f"Failed to raise the bills-due reminder for user {user_id}: {e}")
 
     return raised
 
