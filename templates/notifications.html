@@ -49,11 +49,10 @@
                 <div class="profile-actions">
                     {% if notifications %}
                         {% for notification in notifications %}
-                            <div class="profile-section notification-section notification-item {% if notification.is_read %}notification-read{% endif %}" data-notification-id="{{ notification.id }}" id="notification-section">
+                            {# The date is the card's tab - drawn by ::before from data-date - rather
+                               than a line of its own above the message. #}
+                            <div class="profile-section notification-section notification-item {% if notification.is_read %}notification-read{% endif %}" data-notification-id="{{ notification.id }}" data-date="{{ notification.date.strftime('%b %d, %Y at %I:%M %p') }}" id="notification-section">
                                 <div class="notification-header">
-                                    <span class="notification-date">
-                                        {{ notification.date.strftime('%b %d, %Y at %I:%M %p') }}
-                                    </span>
                                     <div class="notification-buttons">
                                         <button class="mark-read-button {% if notification.is_read %}is-read{% endif %}" onclick="toggleReadStatus({{ notification.id }})">
                                             <i class="fa-solid {% if notification.is_read %}fa-envelope-open{% else %}fa-envelope{% endif %}"></i>

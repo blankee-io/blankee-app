@@ -1175,6 +1175,118 @@ body {
     font-weight: 300;
 }
 
+/* ===== The bell's dropdown =================================================
+   The latest five notifications, under the bell in the nav bar. It is a
+   .dropdown-content like the profile menu - same panel, same grow-open in
+   nav.html - with a list of its own in place of the menu rows. The wrapper is
+   what it hangs from, as .sidenav-profile is for the profile menu. */
+.nav-notifications-wrap {
+    position: relative;
+    display: flex;
+}
+
+/* After .dropdown-content in the file, so its display wins: shut until the
+   bell opens it. Wider than the profile menu - these are sentences. */
+.notifications-dropdown {
+    display: none;
+    min-width: 340px;
+    max-width: calc(100vw - 24px);
+    /* White, not the profile menu's teal: a list to read rather than a menu. */
+    background-color: var(--text-light);
+}
+
+.notifications-dropdown .dropdown-profile-label {
+    color: var(--secondary-dark);
+}
+
+.notifications-dropdown .dropdown-link:hover {
+    background-color: var(--primary-lighter);
+}
+
+.notifications-dropdown .dropdown-link a,
+.notifications-dropdown .dropdown-link i {
+    color: var(--primary);
+}
+
+.notif-dd-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.notif-dd-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 20px;
+    color: var(--text-dark);
+    text-decoration: none;
+    transition: background-color 0.15s ease;
+}
+
+.notif-dd-item:hover {
+    background-color: var(--primary-lighter);
+}
+
+/* Red, like the bell's own badge: unread. Kept in the layout when read, so
+   the text lines up whichever it is. */
+.notif-dd-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    margin-top: 6px;
+    border-radius: 50%;
+}
+
+.notif-dd-item.is-unread .notif-dd-dot {
+    background-color: var(--danger);
+}
+
+.notif-dd-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+/* Two lines at most: the full text is a tap away. */
+.notif-dd-text {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 1.35;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.notif-dd-item.is-unread .notif-dd-text {
+    font-weight: 600;
+}
+
+.notif-dd-date {
+    color: var(--secondary-dark);
+    font-size: 11px;
+}
+
+.notif-dd-empty {
+    padding: 8px 20px;
+    color: var(--secondary-dark);
+    font-size: 13px;
+}
+
+/* On a phone the bell is not at the screen's edge, so a panel hung from it
+   would run off the left. There it spans the screen under the nav bar
+   instead. */
+@media (max-width: 600px) {
+    .notifications-dropdown {
+        position: fixed;
+        top: 58px;
+        left: 12px;
+        right: 12px;
+        min-width: 0;
+        max-width: none;
+    }
+}
+
 /* The menu's icons name their own face - fa-light - so the weight comes from
    Font Awesome rather than from here: Light where Pro is installed, and
    whatever fa-pro-fallback.css maps .fa-light onto where it is not, which is
@@ -8262,9 +8374,11 @@ transform: scale(1.2);
     }
 }
 
-/* Notification item label override (singular for notifications page) */
+/* On the notifications page each card's tab is its date (data-date, set in
+   notifications.html) - it used to say "Notification", with the date on a
+   line of its own under it. */
 #notifications-body .notification-section::before {
-    content: "Notification";
+    content: attr(data-date);
 }
 
 /* Settings section label */
@@ -8865,22 +8979,24 @@ transform: scale(1.2);
     cursor: pointer;
 }
 
-.notification-item.notification-read .notification-date,
 .notification-item.notification-read .notification-message {
     opacity: 0.6;
 }
 
+/* Only the envelope and the bin now - the date moved to the card's tab - so
+   they sit in the card's top-right corner rather than taking a row of their
+   own, which left a blank band above the message where the date had been.
+   The message keeps clear of them on its right. */
 .notification-header {
+    position: absolute;
+    top: 16px;
+    right: 16px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
 }
 
-.notification-date {
-    font-size: 12px;
-    color: var(--primary);
-    font-weight: 600;
+#notifications-body .notification-section .notification-message {
+    padding-right: 64px;
 }
 
 .notification-message {

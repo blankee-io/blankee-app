@@ -8,6 +8,23 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.51.0 — 2026-10-11
+
+### Added
+
+- **The bell opens your latest notifications.** A click on the bell in the
+  nav bar shows the last five in a dropdown, unread ones marked, with **Go to
+  notifications** at the bottom. A notification in the list opens what it is
+  about - or the notifications page, if it has no link - and is marked read on
+  the way. On a phone the list spans the screen under the nav bar. A new-tab
+  click on the bell still opens the notifications page.
+
+### Changed
+
+- On the notifications page each notification's tab shows its date instead of
+  the word "Notification", and the read and delete buttons sit in the card's
+  corner, so the message starts at the top of the card.
+
 ## 1.50.2 — 2026-10-11
 
 ### Fixed

@@ -17161,6 +17161,56 @@ def notifications():
     )
 
 
+@app.route('/api/notifications/recent', methods=['GET'])
+@login_required
+def api_recent_notifications():
+    """
+    The latest five notifications, for the bell's dropdown in the nav bar.
+
+    Plain text rather than the message's markup: the dropdown is a short list,
+    and each row is itself the way in - it follows the message's link (or opens
+    the notifications page), so the "Click here" text inside the message would
+    only be noise. The link comes back separately. Read straight from MySQL: it
+    is five rows, and a stale cache is exactly what a list of what just
+    happened must not show.
+    """
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("""
+            SELECT id, date, message, is_read
+              FROM notifications
+             WHERE user_id = %s
+             ORDER BY date DESC, id DESC
+             LIMIT 5
+        """, (current_user.id,))
+        rows = cursor.fetchall() or []
+        cursor.execute("SELECT COUNT(*) AS n FROM notifications WHERE user_id = %s AND is_read = 0",
+                       (current_user.id,))
+        unread = (cursor.fetchone() or {}).get('n', 0)
+        cursor.close()
+
+    items = []
+    for row in rows:
+        message = str(row.get('message') or '')
+        link = _NOTIFICATION_LINK.search(message)
+        # The link's own words ("Open the day", "Click here to view") go with
+        # the link; the row is what is clicked now.
+        text = re.sub(r'\s*<a href="[^"]*">[^<]*</a>\.?', '', message)
+        text = re.sub(r'<[^>]+>', '', text)
+        text = (text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<')
+                    .replace('&gt;', '>').replace('&quot;', '"').replace('&#39;', "'"))
+        lines = [' '.join(line.split()) for line in text.splitlines() if line.strip()]
+        when = row.get('date')
+        items.append({
+            'id': row['id'],
+            'text': ' '.join(lines),
+            'link': link.group(1) if link else None,
+            'is_read': bool(row.get('is_read')),
+            'date': when.strftime('%b %-d, %-I:%M %p') if hasattr(when, 'strftime') else str(when or ''),
+        })
+    return jsonify({'success': True, 'items': items, 'unread': int(unread or 0)})
+
+
 def _admin_user_rows():
     """Every account, for the console list. Ordered by id: creation order."""
     with get_db_pool().get_cursor(dictionary=True) as cursor:

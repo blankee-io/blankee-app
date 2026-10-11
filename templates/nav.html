@@ -61,13 +61,27 @@
                 <i class="fa-solid fa-scale-balanced"></i>
             </button>
 
-            <!-- Notifications bell icon -->
-            <a href="{{ url_for('notifications') }}" class="nav-notifications">
-                <i class="fa-solid fa-bell"></i>
-                {% if unread_notifications_count > 0 %}
-                <span class="notification-badge"></span>
-                {% endif %}
-            </a>
+            <!-- Notifications bell. A click opens the latest five in a dropdown
+                 shaped like the profile one; the link is still the notifications
+                 page, for a new-tab click and for a page without script. -->
+            <div class="nav-notifications-wrap">
+                <a href="{{ url_for('notifications') }}" class="nav-notifications" id="navNotifications"
+                   title="Notifications" aria-haspopup="true" aria-expanded="false"
+                   aria-controls="notificationsDropdown">
+                    <i class="fa-solid fa-bell"></i>
+                    {% if unread_notifications_count > 0 %}
+                    <span class="notification-badge"></span>
+                    {% endif %}
+                </a>
+                <div id="notificationsDropdown" class="dropdown-content notifications-dropdown">
+                    <div class="dropdown-profile-label"><span>Notifications</span></div>
+                    <div class="notif-dd-list" id="notificationsDropdownList"></div>
+                    <div class="dropdown-divider"></div>
+                    <div class="dropdown-menu-section">
+                        <div class="dropdown-link"><a href="{{ url_for('notifications') }}">Go to notifications</a><i class="fa-regular fa-bell"></i></div>
+                    </div>
+                </div>
+            </div>
 
             {% endif %}
 
@@ -178,45 +192,39 @@
     document.addEventListener('DOMContentLoaded', function() {
         const profile = document.querySelector('.sidenav-profile');
         const dropdown = document.getElementById('profileDropdown');
+        const bell = document.getElementById('navNotifications');
+        const bellPanel = document.getElementById('notificationsDropdown');
+        const bellList = document.getElementById('notificationsDropdownList');
+        var backdrop = document.getElementById('profileBackdrop');
+        var DROPDOWN_MS = 160;
 
-        // The two panels in the top bar are siblings, and only one of them
-        // should ever be up. Each one's toggle calls stopPropagation - it has
-        // to, or the window handler below would close the thing that had just
-        // been opened - and that is exactly why neither could see the other's
-        // click. This is the handle they close each other by.
-        var closeProfileDropdown = function () {};
-
-        if (profile && dropdown) {
-            // The dropdown grows taller to open and shortens to close. height
-            // cannot animate to auto, so each direction sets a pixel height to
-            // transition to and releases it afterwards: to nothing on open, so
-            // the menu can still change size while it is up, and to
-            // display:none on close.
-            //
-            // Its own state rather than reading style.display back, because
-            // through the closing transition the element is still displayed -
-            // the same reason the overlay observer in script.js keeps a phase.
-            var backdrop = document.getElementById('profileBackdrop');
-            var dropdownOpen = false;
-            var dropdownTimer = null;
-            var DROPDOWN_MS = 160;
-
+        // A panel in the top bar - the profile menu, the notifications list.
+        // Each grows taller to open and shortens to close. height cannot
+        // animate to auto, so each direction sets a pixel height to transition
+        // to and releases it afterwards: to nothing on open, so the panel can
+        // still change size while it is up, and to display:none on close.
+        //
+        // Its own state rather than reading style.display back, because
+        // through the closing transition the element is still displayed -
+        // the same reason the overlay observer in script.js keeps a phase.
+        var panels = [];
+        function syncBackdrop() {
+            if (!backdrop) { return; }
+            backdrop.classList.toggle('open', panels.some(function (p) { return p.isOpen(); }));
+        }
+        function growPanel(panel) {
+            var isOpen = false;
+            var timer = null;
             function collapse() {
-                dropdown.style.height = '0px';
-                dropdown.style.paddingTop = '0px';
-                dropdown.style.paddingBottom = '0px';
+                panel.style.height = '0px';
+                panel.style.paddingTop = '0px';
+                panel.style.paddingBottom = '0px';
             }
-
-            function setDropdown(open) {
-                if (open === dropdownOpen) { return; }
-                dropdownOpen = open;
-                clearTimeout(dropdownTimer);
-
-                // Padding as well as height. Everything here is border-box,
-                // so height:0 on its own still leaves the 20px and 10px above
-                // and below - the menu would shrink to 30px and then be cut
-                // off by display:none rather than closing.
-                if (backdrop) { backdrop.classList.toggle('open', open); }
+            function set(open) {
+                if (open === isOpen) { return; }
+                isOpen = open;
+                clearTimeout(timer);
+                syncBackdrop();
 
                 // The dashboards draw the current week and month outlines from
                 // element positions and redraw them on resize. Covering the
@@ -227,59 +235,156 @@
                 window.requestAnimationFrame(nudge);
                 setTimeout(nudge, DROPDOWN_MS + 30);
 
+                // Padding as well as height. Everything here is border-box,
+                // so height:0 on its own still leaves the padding above and
+                // below - the panel would shrink to that and then be cut off
+                // by display:none rather than closing.
                 if (open) {
-                    dropdown.style.display = 'block';
+                    panel.style.display = 'block';
                     // Its full height including padding, measured before it is
                     // collapsed and while nothing has been painted yet.
-                    var target = dropdown.offsetHeight;
+                    var target = panel.offsetHeight;
                     collapse();
-                    void dropdown.offsetHeight;   // start from 0, not from auto
-                    dropdown.style.height = target + 'px';
-                    dropdown.style.paddingTop = '';
-                    dropdown.style.paddingBottom = '';
-                    dropdownTimer = setTimeout(function () {
-                        dropdown.style.height = '';
-                    }, DROPDOWN_MS + 20);
+                    void panel.offsetHeight;   // start from 0, not from auto
+                    panel.style.height = target + 'px';
+                    panel.style.paddingTop = '';
+                    panel.style.paddingBottom = '';
+                    timer = setTimeout(function () { panel.style.height = ''; }, DROPDOWN_MS + 20);
                 } else {
-                    dropdown.style.height = dropdown.offsetHeight + 'px';
-                    void dropdown.offsetHeight;
+                    panel.style.height = panel.offsetHeight + 'px';
+                    void panel.offsetHeight;
                     collapse();
-                    dropdownTimer = setTimeout(function () {
-                        dropdown.style.display = 'none';
-                        dropdown.style.height = '';
-                        dropdown.style.paddingTop = '';
-                        dropdown.style.paddingBottom = '';
+                    timer = setTimeout(function () {
+                        panel.style.display = 'none';
+                        panel.style.height = '';
+                        panel.style.paddingTop = '';
+                        panel.style.paddingBottom = '';
                     }, DROPDOWN_MS + 20);
                 }
+                if (panel === bellPanel && bell) {
+                    bell.setAttribute('aria-expanded', open ? 'true' : 'false');
+                }
             }
+            var handle = { set: set, isOpen: function () { return isOpen; } };
+            panels.push(handle);
+            return handle;
+        }
 
-            // Toggle the dropdown menu on profile click
-            closeProfileDropdown = function () { setDropdown(false); };
+        // The panels and the side menu are siblings, and only one of them
+        // should ever be up. Each toggle calls stopPropagation - it has to, or
+        // the window handler below would close the thing just opened - and
+        // that is exactly why none could see another's click. This is the
+        // handle they close each other by.
+        var profilePanel = (profile && dropdown) ? growPanel(dropdown) : null;
+        var notificationsPanel = (bell && bellPanel) ? growPanel(bellPanel) : null;
+        function closeNavPanels(except) {
+            panels.forEach(function (p) { if (p !== except) { p.set(false); } });
+        }
+        var closeProfileDropdown = function () { closeNavPanels(); };
 
+        if (profilePanel) {
             profile.addEventListener('click', function(event) {
                 event.stopPropagation();
-                var opening = !dropdownOpen;
+                var opening = !profilePanel.isOpen();
                 // Resolved at click time, not now: blankeeSideMenu is defined
                 // further down this same handler.
                 if (opening && window.blankeeSideMenu) {
                     window.blankeeSideMenu.close();
                 }
-                setDropdown(opening);
+                closeNavPanels(profilePanel);
+                profilePanel.set(opening);
             });
 
             // Prevent dropdown from closing when clicking inside it
             dropdown.addEventListener('click', function(event) {
                 event.stopPropagation();
             });
-
-            // Close dropdown only if clicking outside the dropdown-content
-            window.addEventListener('click', function(event) {
-                if (!event.target.closest('.dropdown-content') && dropdownOpen) {
-                    setDropdown(false);
-                }
-            });
-        } else {
         }
+
+        // ── Notifications: the latest five ───────────────────────────────
+        // Loaded each time it opens, so it is what has just happened rather
+        // than what had happened when the page was drawn. A row follows its
+        // notification's link, or opens the notifications page if it has
+        // none, and marks it read first - opening it is reading it, the same
+        // rule as the notifications page. Only while unread: the endpoint
+        // toggles, so calling it on a read one would mark it unread again.
+        if (notificationsPanel) {
+            var bellMessage = function (text) {
+                bellList.innerHTML = '';
+                var p = document.createElement('div');
+                p.className = 'notif-dd-empty';
+                p.textContent = text;
+                bellList.appendChild(p);
+            };
+            var bellRow = function (item) {
+                var row = document.createElement('a');
+                row.className = 'notif-dd-item' + (item.is_read ? '' : ' is-unread');
+                row.href = item.link || bell.getAttribute('href');
+                var dot = document.createElement('span');
+                dot.className = 'notif-dd-dot';
+                var body = document.createElement('span');
+                body.className = 'notif-dd-body';
+                var text = document.createElement('span');
+                text.className = 'notif-dd-text';
+                text.textContent = item.text;
+                var when = document.createElement('span');
+                when.className = 'notif-dd-date';
+                when.textContent = item.date;
+                body.appendChild(text);
+                body.appendChild(when);
+                row.appendChild(dot);
+                row.appendChild(body);
+                row.addEventListener('click', function (event) {
+                    if (item.is_read) { return; }
+                    var newTab = event.metaKey || event.ctrlKey || event.shiftKey;
+                    var mark = fetch('/mark-notification-read', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ notification_id: item.id }),
+                        keepalive: true
+                    }).catch(function () {});
+                    if (newTab) { return; }
+                    event.preventDefault();
+                    mark.then(function () { window.location.href = row.href; });
+                });
+                return row;
+            };
+            var loadBell = function () {
+                bellMessage('Loading…');
+                fetch('/api/notifications/recent', { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (d) {
+                        if (!d || !d.success) { bellMessage('Could not load notifications.'); return; }
+                        if (!d.items.length) { bellMessage('No notifications yet.'); return; }
+                        bellList.innerHTML = '';
+                        d.items.forEach(function (item) { bellList.appendChild(bellRow(item)); });
+                    })
+                    .catch(function () { bellMessage('Could not load notifications.'); });
+            };
+
+            bell.addEventListener('click', function (event) {
+                // A new-tab click still opens the page, as the link it is.
+                if (event.metaKey || event.ctrlKey || event.shiftKey) { return; }
+                event.preventDefault();
+                event.stopPropagation();
+                var opening = !notificationsPanel.isOpen();
+                if (opening && window.blankeeSideMenu) { window.blankeeSideMenu.close(); }
+                closeNavPanels(notificationsPanel);
+                if (opening) { loadBell(); }
+                notificationsPanel.set(opening);
+            });
+            bellPanel.addEventListener('click', function (event) {
+                event.stopPropagation();
+            });
+        }
+
+        // Close any panel when clicking outside it, or on Escape.
+        window.addEventListener('click', function(event) {
+            if (!event.target.closest('.dropdown-content')) { closeNavPanels(); }
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') { closeNavPanels(); }
+        });
 
         // ── The Blankee menu ─────────────────────────────────────────────
         // Opened by the hamburger, closed by the backdrop or Escape.
