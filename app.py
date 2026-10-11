@@ -20149,6 +20149,18 @@ def _delete_chain_link(kind, user_id, category_id, recurring_id):
     spec = _CHAIN_KINDS[kind]
     today = _user_today_for(user_id)
     doomed = chain[index]
+
+    # The row the table shows on top - today's link, or the next to come - is
+    # the recurring itself, and its delete is "Stop Recurring", as the dialog
+    # says: None, so the route stops the whole category. Only a row nested
+    # under it is a change, to be undone here. Treating the top row as a change
+    # brought back an amount that had ended and was no longer shown: on BA-01's
+    # AT&T each delete made a new row at the old price, and AT&T could not be
+    # stopped (2026-10-11).
+    head = _lay_out_family([dict(link) for link in chain], today)[0]
+    if int(head.get('id')) == int(doomed.get('id')):
+        return None
+
     doomed_start = _as_date(doomed.get('start_date'))
     doomed_open = _chain_link_is_open_ended(doomed)
     doomed_end = None if doomed_open else _as_date(doomed.get('end_date'))
@@ -20976,15 +20988,19 @@ def delete_recurring_income():
         # 2. Delete all buckets for this category from Redis
         _delete_buckets_in_redis('recurring_income_buckets', current_user.id, category_id)
         
-        # 3. Delete the recurring record from Redis (marks for deletion)
-        _delete_recurring_in_redis('recurring_income', current_user.id, recurring_id)
-        
-        # 3b. Clean up any associated mismatch record
-        try:
-            from redis_crud import delete_recurring_mismatch
-            delete_recurring_mismatch('recurring_income', recurring_id, user_id=current_user.id)
-        except Exception:
-            pass
+        # 3. Delete the recurring rows from Redis (marks for deletion) - every
+        #    one of the category's: stopping a recurring with scheduled changes
+        #    stops all of it, not the one link that was clicked.
+        stop_ids = {int(recurring_id)} | {int(link.get('id')) for link in
+                                          _recurring_chain('income', current_user.id, int(category_id))}
+        for stop_id in stop_ids:
+            _delete_recurring_in_redis('recurring_income', current_user.id, stop_id)
+            # 3b. Clean up any associated mismatch record
+            try:
+                from redis_crud import delete_recurring_mismatch
+                delete_recurring_mismatch('recurring_income', stop_id, user_id=current_user.id)
+            except Exception:
+                pass
         
         # 4. Set category to non-recurring (keep the category itself)
         _update_category_in_redis('income_categories', current_user.id, category_id, {
@@ -21876,15 +21892,19 @@ def delete_recurring_expense():
         # 2. Delete all buckets for this category from Redis
         _delete_buckets_in_redis('recurring_expense_buckets', current_user.id, category_id)
         
-        # 3. Delete the recurring record from Redis (marks for deletion)
-        _delete_recurring_in_redis('recurring_expense', current_user.id, recurring_id)
-        
-        # 3b. Clean up any associated mismatch record
-        try:
-            from redis_crud import delete_recurring_mismatch
-            delete_recurring_mismatch('recurring_expense', recurring_id, user_id=current_user.id)
-        except Exception:
-            pass
+        # 3. Delete the recurring rows from Redis (marks for deletion) - every
+        #    one of the category's: stopping a recurring with scheduled changes
+        #    stops all of it, not the one link that was clicked.
+        stop_ids = {int(recurring_id)} | {int(link.get('id')) for link in
+                                          _recurring_chain('expense', current_user.id, int(category_id))}
+        for stop_id in stop_ids:
+            _delete_recurring_in_redis('recurring_expense', current_user.id, stop_id)
+            # 3b. Clean up any associated mismatch record
+            try:
+                from redis_crud import delete_recurring_mismatch
+                delete_recurring_mismatch('recurring_expense', stop_id, user_id=current_user.id)
+            except Exception:
+                pass
         
         # 4. Set category to non-recurring (keep the category itself)
         _update_category_in_redis('expense_categories', current_user.id, category_id, {
@@ -22823,15 +22843,19 @@ def delete_recurring_ca_expense():
         # 2. Delete all buckets for this category from Redis
         _delete_buckets_in_redis('recurring_c_expense_buckets', current_user.id, category_id)
         
-        # 3. Delete the recurring record from Redis (marks for deletion)
-        _delete_recurring_in_redis('recurring_c_expense', current_user.id, recurring_id)
-        
-        # 3b. Clean up any associated mismatch record
-        try:
-            from redis_crud import delete_recurring_mismatch
-            delete_recurring_mismatch('recurring_c_expense', recurring_id, user_id=current_user.id)
-        except Exception:
-            pass
+        # 3. Delete the recurring rows from Redis (marks for deletion) - every
+        #    one of the category's: stopping a recurring with scheduled changes
+        #    stops all of it, not the one link that was clicked.
+        stop_ids = {int(recurring_id)} | {int(link.get('id')) for link in
+                                          _recurring_chain('c_expense', current_user.id, int(category_id))}
+        for stop_id in stop_ids:
+            _delete_recurring_in_redis('recurring_c_expense', current_user.id, stop_id)
+            # 3b. Clean up any associated mismatch record
+            try:
+                from redis_crud import delete_recurring_mismatch
+                delete_recurring_mismatch('recurring_c_expense', stop_id, user_id=current_user.id)
+            except Exception:
+                pass
         
         # 4. Set category to non-recurring (keep the category itself)
         _update_category_in_redis('c_expense_categories', current_user.id, category_id, {

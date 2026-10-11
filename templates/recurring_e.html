@@ -138,7 +138,7 @@
                                 <button class="edit-recurring-btn" onclick="openEditModal('{{ record.id }}')">
                                     <i class="fa-solid fa-pen-to-square"></i>
                                 </button>
-                                <button class="delete-recurring-btn" onclick="openRecurringDeleteModal('{{ record.id }}', event)"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>
+                                <button class="delete-recurring-btn"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></button>
                                 </div>
                             </td>
                         </tr>
@@ -1288,7 +1288,7 @@
             }
 
             // Open the delete modal with the correct recurringId
-            openRecurringDeleteModal(recurringId, event);
+            openRecurringDeleteModal(recurringId, event, $(this).closest('tr').hasClass('recurring-raise-row'));
         });
 
         function saveTotalsAndRemainders() {
@@ -1335,8 +1335,22 @@
         }
 
         // Function to open the delete confirmation modal and handle delete logic
-        async function openRecurringDeleteModal(recurringId, event) {
-            const confirmed = await showConfirmModal({
+        // One request per click. The button used to carry an inline onclick as
+        // well as the delegated handler above, so every click opened the dialog
+        // twice and sent the delete twice - two deletes racing on one chain.
+        let deleteInFlight = false;
+        async function openRecurringDeleteModal(recurringId, event, isChange) {
+            if (deleteInFlight) return;
+            // A row nested under a category is a scheduled change, and deleting
+            // it cancels just that change. The top row is the recurring itself.
+            // The server makes the same call from the same rule, so the two agree.
+            const confirmed = await showConfirmModal(isChange ? {
+                title: 'Remove Change',
+                message: 'Remove this scheduled change? The amount above it carries on instead.',
+                confirmText: 'Remove Change',
+                cancelText: 'Cancel',
+                danger: true
+            } : {
                 title: 'Stop Recurring',
                 message: 'Stop this recurring expense? Future entries will be removed, but past entries will be kept. The category will remain as a regular (non-recurring) category.',
                 confirmText: 'Stop Recurring',
@@ -1344,6 +1358,7 @@
                 danger: true
             });
             if (!confirmed) return;
+            deleteInFlight = true;
             document.getElementById('loading-screen').style.display = 'flex';
             $.ajax({
                 url: '/delete-recurring-expense',
@@ -1352,14 +1367,21 @@
                 data: JSON.stringify({ recurring_id: recurringId }),
                 success: function(response) {
                     if (response.status === 'success') {
-                        $(`tr[data-recurring-id="${recurringId}"]`).remove();
                         saveDailyTotalsAndRemainders();
-                        document.getElementById('loading-screen').style.display = 'none';
+                        // Redrawn rather than one row removed: stopping takes every
+                        // row of the category, and a removed change hands its dates
+                        // to the row above. The recalculation above is synchronous,
+                        // so it has finished by now.
+                        location.reload();
                     } else {
+                        deleteInFlight = false;
+                        document.getElementById('loading-screen').style.display = 'none';
                         showToast('Failed to delete recurring expense: ' + response.message, 'error');
                     }
                 },
                 error: function(xhr, status, error) {
+                    deleteInFlight = false;
+                    document.getElementById('loading-screen').style.display = 'none';
                     showToast('An error occurred: ' + xhr.responseText, 'error');
                 }
             });

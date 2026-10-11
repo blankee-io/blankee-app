@@ -8,6 +8,20 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.50.1 — 2026-10-11
+
+### Fixed
+
+- A recurring with a scheduled price change could not be stopped. Deleting its
+  top row was taken as "undo this change", so it brought back an older amount
+  that had already ended - each delete made a new row, and the recurring never
+  went away. Delete on a category's top row now does what its dialog says: it
+  stops the whole recurring, every row of it, keeping past entries. Delete on a
+  row nested under it removes just that scheduled change, and its dialog now
+  says so ("Remove Change").
+- Every click on a recurring row's delete sent the delete twice, which made the
+  above worse. One click, one request.
+
 ## 1.50.0 — 2026-10-10
 
 ### Added
