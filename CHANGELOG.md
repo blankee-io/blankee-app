@@ -8,6 +8,19 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.49.3 — 2026-10-10
+
+### Fixed
+
+- A link to a day - the Bills due today notification, a projected shortfall,
+  the calendar - opened the day view on that day alone when it was not a
+  Friday: a Saturday came up as a week of one day. It opens the whole week the
+  day falls in now, scrolled to the day, in either week mode and any
+  timezone.
+- The scroll to that day could be dropped while the week was still drawing,
+  leaving the page at the top. It checks that it landed and tries again for a
+  few seconds, and stops the moment you scroll yourself.
+
 ## 1.49.2 — 2026-10-10
 
 ### Changed

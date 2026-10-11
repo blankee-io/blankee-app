@@ -1781,6 +1781,31 @@
             const monthParam = url.searchParams.get("month");
             const dayParam = url.searchParams.get("day");
 
+            // The Friday that closes (or, in goofy mode, opens) the week a day
+            // belongs to - what storeLastViewedFriday and calculateWeek expect.
+            // Handing them the day itself only works when the day is a Friday:
+            // a Saturday became a week of one day, and that is what a
+            // notification's link to Saturday's bills opened on. Returned as
+            // UTC midnight of that Friday, the form goToCurrentWeek stores and
+            // calculateWeek and next/previousWeek read: a local time read in
+            // UTC slips to the day before east of Greenwich.
+            function weekFridayFor(day) {
+                const dow = day.getDay(); // 0 = Sunday ... 6 = Saturday
+                let offset;
+                if (goofyWeekMode) {
+                    // Friday to Thursday: back to this week's Friday.
+                    offset = dow >= 5 ? -(dow - 5) : -(dow + 2);
+                } else {
+                    // Saturday to Friday: forward to the Friday that ends it.
+                    offset = dow === 6 ? 6 : (dow < 5 ? 5 - dow : 0);
+                }
+                return new Date(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate() + offset));
+            }
+            function localIso(day) {
+                return day.getFullYear() + '-' + String(day.getMonth() + 1).padStart(2, '0') +
+                       '-' + String(day.getDate()).padStart(2, '0');
+            }
+
             if (dateParam) {
                 // Remove the 'date' query parameter from the URL
                 window.history.replaceState({}, document.title, "/dashboard_d");
@@ -1793,7 +1818,7 @@
                     parseInt(dateParts[1], 10) - 1,
                     parseInt(dateParts[2], 10)
                 );
-                storeLastViewedFriday(selectedDate);
+                storeLastViewedFriday(weekFridayFor(selectedDate));
                 // The week is the right one, but the eye still has to find
                 // the day: a notification's link names a date, and landing
                 // on its week scrolled to today is not landing on it. Same
@@ -1811,44 +1836,10 @@
                     // Remove the query parameters from the URL
                     window.history.replaceState({}, document.title, "/dashboard_d");
                     
-                    // Create a date object for the clicked date
+                    // The week this day falls in, and the day itself to scroll to.
                     const clickedDate = new Date(year, month, day);
-                    const dayOfWeek = clickedDate.getDay(); // 0 = Sunday, 6 = Saturday
-                    
-                    // Calculate the Friday for the week containing this date
-                    let fridayDate;
-                    if (goofyWeekMode) {
-                        // Goofy week mode: week starts on Friday, ends on Thursday
-                        if (dayOfWeek >= 5) {
-                            // If clicked date is Friday (5) or Saturday (6), use this Friday
-                            fridayDate = new Date(clickedDate);
-                            fridayDate.setDate(clickedDate.getDate() - (dayOfWeek - 5));
-                        } else {
-                            // If clicked date is Sunday (0) to Thursday (4), use the previous Friday
-                            fridayDate = new Date(clickedDate);
-                            fridayDate.setDate(clickedDate.getDate() - (dayOfWeek + 2));
-                        }
-                    } else {
-                        // Regular week mode: week starts on Saturday, ends on Friday
-                        if (dayOfWeek === 6) {
-                            // If clicked date is Saturday, move forward to the next Friday
-                            fridayDate = new Date(clickedDate);
-                            fridayDate.setDate(clickedDate.getDate() + 6);
-                        } else if (dayOfWeek < 5) {
-                            // If before Friday (Sunday - Thursday), move forward to the upcoming Friday
-                            fridayDate = new Date(clickedDate);
-                            fridayDate.setDate(clickedDate.getDate() + (5 - dayOfWeek));
-                        } else {
-                            // If clicked date is Friday, use it
-                            fridayDate = new Date(clickedDate);
-                        }
-                    }
-                    
-                    // Store the calculated Friday
-                    storeLastViewedFriday(fridayDate);
-                    
-                    // Store the clicked date for scrolling after load
-                    sessionStorage.setItem('scrollToDate', clickedDate.toISOString().split('T')[0]);
+                    storeLastViewedFriday(weekFridayFor(clickedDate));
+                    sessionStorage.setItem('scrollToDate', localIso(clickedDate));
                 }
             }
 
@@ -1863,9 +1854,34 @@
             const scrollToDate = sessionStorage.getItem('scrollToDate');
             if (scrollToDate) {
                 sessionStorage.removeItem('scrollToDate');
+                const findDay = () => document.querySelector(`.dashboard-d-date-container[data-date="${scrollToDate}"]`);
+                // The week redraws its cards once more as the page settles, and
+                // a smooth scroll in flight when that happens is dropped - the
+                // page stayed at the top, the day out of sight. So after the
+                // first scroll, look again for a few seconds and put the day
+                // back in view if it is not there - unless the person has
+                // started scrolling themselves, which is theirs to win.
+                let touched = false;
+                const mine = () => { touched = true; };
+                ['wheel', 'touchstart', 'keydown', 'pointerdown'].forEach(
+                    (name) => document.addEventListener(name, mine, { capture: true, passive: true, once: true }));
+                let checks = 0, settled = 0;
+                const keep = setInterval(() => {
+                    checks++;
+                    const el = findDay();
+                    if (touched || !el || checks > 12) { clearInterval(keep); return; }
+                    const r = el.getBoundingClientRect();
+                    const inView = r.top < window.innerHeight * 0.75 && r.bottom > window.innerHeight * 0.25;
+                    if (inView) {
+                        if (++settled >= 3) { clearInterval(keep); }
+                    } else {
+                        settled = 0;
+                        el.scrollIntoView({ block: 'center' });
+                    }
+                }, 300);
                 // Wait for the DOM to be fully rendered
                 setTimeout(() => {
-                    const dateContainer = document.querySelector(`.dashboard-d-date-container[data-date="${scrollToDate}"]`);
+                    const dateContainer = findDay();
                     if (dateContainer) {
                         dateContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         // Optionally highlight the date briefly
