@@ -8,6 +8,32 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.53.0 — 2026-10-12
+
+### Added
+
+- **A new category goes into the group it belongs in.** With AI
+  categorization on (Settings - the same switch, verified key and linked
+  bank the bank's categorizing needs), creating a category asks Claude which
+  of your groups it fits, files it there, and says so: "AI put "Netflix" in
+  Streaming", with **Show** to find it in Manage Categories. That works
+  wherever a category is made - Manage Categories, the dashboards, the
+  recurring forms, Suggested recurring. When no group fits, or the AI is off,
+  it lands Ungrouped as before. Only the new name and your group names are
+  sent.
+- **Search on Manage Categories and Credit Accounts**, the same box the
+  recurring pages have. Each list narrows as you type and its groups follow;
+  dragging to reorder is paused while a search is on.
+- **Groups can be searched too**, on Manage Categories and the recurring
+  pages: a group's name shows the group with everything in it.
+
+### Fixed
+
+- On the recurring pages, a search now finds categories inside a group you
+  had collapsed; they stayed hidden before.
+- The clear-search button beside these search boxes now appears while there
+  is something typed, as it does on the dashboards; it was never shown.
+
 ## 1.52.1 — 2026-10-12
 
 ### Fixed

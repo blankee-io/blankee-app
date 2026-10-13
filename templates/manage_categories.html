@@ -49,6 +49,16 @@
                 </div>
             </div>
 
+            <div class="table-toolbar manage-cat-toolbar">
+                <div class="search-btn-container recurring-search income">
+                    <button class="clear-filter-btn income" id="income-manage-clear" type="button" title="Clear Filter">
+                        <i class="fa-solid fa-filter-slash"></i>
+                    </button>
+                    <input type="text" class="category-search-field income" id="income-manage-search"
+                           placeholder="Search income categories and groups..." autocomplete="off">
+                </div>
+            </div>
+
             <table class="manage-cat-table income-manage-table" id="income-manage-table">
                 <thead>
                     <tr>
@@ -234,6 +244,7 @@
                     </tr>
                 </tfoot>
             </table>
+            <p class="recurring-search-empty" id="income-manage-empty" hidden>No categories match that search.</p>
         </div>
 
         <!-- ======================== EXPENSE SECTION ======================== -->
@@ -247,6 +258,16 @@
                     <button class="manage-cat-btn add-cat-btn" id="add-expense-btn" title="Add Category">
                         <i class="fa-kit fa-solid-folder-minus-circle-plus"></i>
                     </button>
+                </div>
+            </div>
+
+            <div class="table-toolbar manage-cat-toolbar">
+                <div class="search-btn-container recurring-search expense">
+                    <button class="clear-filter-btn expense" id="expense-manage-clear" type="button" title="Clear Filter">
+                        <i class="fa-solid fa-filter-slash"></i>
+                    </button>
+                    <input type="text" class="category-search-field expense" id="expense-manage-search"
+                           placeholder="Search expense categories and groups..." autocomplete="off">
                 </div>
             </div>
 
@@ -450,6 +471,7 @@
                     </tr>
                 </tfoot>
             </table>
+            <p class="recurring-search-empty" id="expense-manage-empty" hidden>No categories match that search.</p>
         </div>
     </div>
 
@@ -1585,6 +1607,43 @@
 
             initSortable('income-manage-table', 'income');
             initSortable('expense-manage-table', 'expense');
+
+            // Search, the recurring pages' own. Dragging is off while a search
+            // narrows a list: a drop among hidden rows lands somewhere unseen.
+            ['income', 'expense'].forEach(function (type) {
+                recurringSearch.attach({
+                    input: type + '-manage-search',
+                    clear: type + '-manage-clear',
+                    empty: type + '-manage-empty',
+                    tbody: '#' + type + '-groups-body',
+                    header: 'group-header-row',
+                    nameSelector: '.category-name',
+                    groupName: '.group-name',
+                    onFilter: function (query) {
+                        var $tbody = $('#' + type + '-groups-body');
+                        if ($tbody.data('ui-sortable')) { $tbody.sortable(query ? 'disable' : 'enable'); }
+                        zebraStripeManageRows();
+                    }
+                });
+            });
+
+            // ?find=<name> - where Show on the AI's "put it in" toast lands:
+            // the list that holds it is searched for it, and it is scrolled to.
+            var find = (new URLSearchParams(location.search).get('find') || '').trim();
+            if (find) {
+                var wanted = find.toLowerCase();
+                ['income', 'expense'].forEach(function (type) {
+                    var rows = document.querySelectorAll('#' + type + '-groups-body .category-name');
+                    var hit = Array.prototype.find.call(rows, function (el) {
+                        return el.textContent.trim().toLowerCase() === wanted;
+                    });
+                    if (!hit) { return; }
+                    var input = document.getElementById(type + '-manage-search');
+                    input.value = find;
+                    input.dispatchEvent(new Event('input'));
+                    hit.closest('tr').scrollIntoView({ block: 'center' });
+                });
+            }
         });
 
 

@@ -43,6 +43,15 @@
         </div>
             {% if credit_accounts and credit_accounts|length > 0 %}
             <div class="credit-accounts-container">
+                <div class="table-toolbar manage-cat-toolbar">
+                    <div class="search-btn-container recurring-search expense">
+                        <button class="clear-filter-btn expense" id="credit-accounts-clear" type="button" title="Clear Filter">
+                            <i class="fa-solid fa-filter-slash"></i>
+                        </button>
+                        <input type="text" class="category-search-field expense" id="credit-accounts-search"
+                               placeholder="Search credit accounts..." autocomplete="off">
+                    </div>
+                </div>
                 <div class="credit-accounts-header">
                 </div>
                 <table class="credit-accounts-table">
@@ -123,6 +132,7 @@
                         </tr>
                     </tfoot>
                 </table>
+                <p class="recurring-search-empty" id="credit-accounts-empty" hidden>No accounts match that search.</p>
             </div>
         {% else %}
             <div class="cas-empty-info">
@@ -581,6 +591,23 @@
                 if (e.key === 'Enter') {
                     e.preventDefault();
                     $('#add-credit-account-form').submit();
+                }
+            });
+        });
+
+        // ===================== SEARCH =====================
+        // The recurring pages' search, by account name. Dragging is off while
+        // it narrows the list: a drop among hidden rows lands somewhere unseen.
+        $(function() {
+            recurringSearch.attach({
+                input: 'credit-accounts-search',
+                clear: 'credit-accounts-clear',
+                empty: 'credit-accounts-empty',
+                tbody: '.credit-accounts-table tbody',
+                nameAttr: 'data-name',
+                onFilter: function (query) {
+                    var $tbody = $('.credit-accounts-table tbody');
+                    if ($tbody.data('ui-sortable')) { $tbody.sortable(query ? 'disable' : 'enable'); }
                 }
             });
         });

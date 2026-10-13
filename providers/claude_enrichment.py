@@ -9,6 +9,8 @@ categories, by name, which is then checked against the list that was sent
 all that is sent: each transaction's description, amount and direction, and
 the names of the person's categories. enrich() still returns its input
 untouched - there is no per-transaction enrichment beyond the category.
+suggest_group() is the one other request: a new category's name and the
+names of the person's groups, so a new category can be filed in one.
 
 The first half:
 
@@ -74,6 +76,18 @@ SYSTEM_PROMPT = (
 )
 
 CONFIDENCES = ('high', 'medium', 'low')
+
+# Filing a new category into one of the person's groups. Someone is waiting
+# on the category being made, so the request is short and gives up quickly;
+# without an answer the category simply stays Ungrouped.
+GROUP_PROMPT = (
+    "You file a new budget category into one of the person's category groups.\n"
+    "You are given the new category's name, whether it is for money coming in or going out, "
+    "and the names of their groups for that kind, one per line.\n\n"
+    "Answer with JSON and nothing else: {\"group\": \"<name exactly as listed>\"} when one "
+    "group clearly fits, or {\"group\": null} when none does. Never invent a group."
+)
+GROUP_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
 
 
 def _fernet():
@@ -343,7 +357,8 @@ class ClaudeEnrichmentProvider(EnrichmentProvider):
 
     @staticmethod
     def _messages(api_key: str, model: str, system: Optional[str], user_text: str,
-                  max_tokens: int = 4000) -> Tuple[bool, str, Optional[int]]:
+                  max_tokens: int = 4000, timeout: Optional[httpx.Timeout] = None,
+                  retry: bool = True) -> Tuple[bool, str, Optional[int]]:
         """
         One Messages request. Returns (ok, text, status): the answer's text
         when ok, a sentence for the person when not.
@@ -365,9 +380,9 @@ class ClaudeEnrichmentProvider(EnrichmentProvider):
             payload['output_config'] = {'effort': 'low'}
         headers = {'x-api-key': api_key, 'anthropic-version': API_VERSION, 'content-type': 'application/json'}
         resp = None
-        for attempt in (1, 2):
+        for attempt in ((1, 2) if retry else (2,)):
             try:
-                with httpx.Client(timeout=_TIMEOUT) as client:
+                with httpx.Client(timeout=timeout or _TIMEOUT) as client:
                     resp = client.post(API_URL, json=payload, headers=headers)
             except httpx.HTTPError as e:
                 if attempt == 1:
@@ -471,6 +486,41 @@ class ClaudeEnrichmentProvider(EnrichmentProvider):
                           'category_name': option['name'], 'confidence': confidence}
         log_info(logger, 'AI', f'user {user_id}: {len(out)} of {len(items)} transaction(s) sorted by Claude')
         return out
+
+    def suggest_group(self, user_id: int, category_name: str, direction: str,
+                      groups: List[str]) -> Optional[str]:
+        """
+        The group a new category belongs in, by name exactly as listed in
+        `groups`, or None - none fits, the gate is closed, or the request
+        failed. direction is 'incoming' or 'outgoing'.
+
+        What leaves the server: the new category's name, its direction and
+        the group names. One short request, no retry: someone is waiting.
+        """
+        names = [g for g in (groups or []) if g]
+        if not names or not (category_name or '').strip() or not self.is_active(user_id):
+            return None
+        cfg = self.get_config(user_id)
+        if not cfg['api_key'] or not cfg['verified']:
+            return None
+        user_text = (f"New category: {category_name.strip()[:120]}\n"
+                     f"For money: {'coming in' if direction == 'incoming' else 'going out'}\n"
+                     "Groups:\n" + '\n'.join('- ' + n for n in names))
+        ok, answer, status = self._messages(cfg['api_key'], cfg['model'], GROUP_PROMPT, user_text,
+                                            max_tokens=100, timeout=GROUP_TIMEOUT, retry=False)
+        if not ok:
+            log_warning(logger, 'AI', f'user {user_id}: group suggestion failed ({status}): {answer}')
+            return None
+        text = (answer or '').strip()
+        start, end = text.find('{'), text.rfind('}')
+        try:
+            picked = json.loads(text[start:end + 1]).get('group') if start != -1 and end > start else None
+        except (ValueError, AttributeError):
+            picked = None
+        if not isinstance(picked, str):
+            return None
+        # Only a name from the list counts, matched as the list spells it.
+        return next((n for n in names if n.strip().lower() == picked.strip().lower()), None)
 
     # ------------------------------------------------------- the contract
 

@@ -4623,6 +4623,16 @@ transform: scale(1.2);
     margin: 0;
 }
 
+/* Manage Categories and Credit Accounts: the search alone in its toolbar,
+   on the right, where the recurring pages put it. */
+.manage-cat-toolbar {
+    justify-content: flex-end;
+}
+
+.recurring-search-empty[hidden] {
+    display: none;
+}
+
 /* Narrow enough that the two cannot share a line: the legend wraps to the top
    and the search takes the full width under it, rather than both being
    squeezed. */
@@ -16283,6 +16293,12 @@ tr.row-collapsing > td {
    from a remembered state - otherwise the group flashes open and then shuts. */
 tr[data-collapsed] {
     display: none;
+}
+
+/* Except while a search runs: a match in a group someone closed earlier still
+   shows. The search hides what does not match by itself, on the row. */
+.is-searching tr[data-collapsed] {
+    display: table-row;
 }
 
 .manage-cat-table .group-header-row {

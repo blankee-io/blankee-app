@@ -364,6 +364,59 @@ function showEndDateWarning(endDateSelector) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// A NEW CATEGORY'S GROUP, AS THE AI CHOSE IT
+// ═══════════════════════════════════════════════════════════════
+// The routes that create a category (add_income_category,
+// add_expense_category, add-recurring-*) answer with ai_group =
+// {kind, category, group} when Claude filed the new category into a group
+// (_ai_place_new_category in app.py). Every one of their callers is $.ajax,
+// so one hook here says so on every page, with a Show that opens Manage
+// Categories searched for it.
+//
+// Most of those callers reload the page straight after, which would take a
+// toast with it. So the note is kept in sessionStorage and shown by the next
+// page as it loads - or by this one, if it is still standing a moment later.
+(function () {
+    var KEY = '_aiGroupNotes';
+    var FRESH_MS = 30000;
+    function read() {
+        try { return JSON.parse(sessionStorage.getItem(KEY) || '[]') || []; } catch (e) { return []; }
+    }
+    function write(list) {
+        try {
+            if (list.length) { sessionStorage.setItem(KEY, JSON.stringify(list)); }
+            else { sessionStorage.removeItem(KEY); }
+        } catch (e) {}
+    }
+    function show(note) {
+        showToast('AI put "' + note.category + '" in ' + note.group + '.', 'info', 8000, {
+            action: {
+                label: 'Show',
+                onClick: function () {
+                    location.href = '/manage-categories?find=' + encodeURIComponent(note.category);
+                }
+            }
+        });
+    }
+    function showPending() {
+        var notes = read().filter(function (n) { return n && Date.now() - (n.at || 0) < FRESH_MS; });
+        write([]);
+        notes.forEach(show);
+    }
+    if (window.jQuery) {
+        $(document).ajaxSuccess(function (event, xhr, settings, data) {
+            var placed = data && typeof data === 'object' ? data.ai_group : null;
+            if (!placed || !placed.group || !placed.category) { return; }
+            var notes = read();
+            notes.push({ category: placed.category, group: placed.group, at: Date.now() });
+            write(notes);
+            setTimeout(showPending, 1500);
+        });
+        $(showPending);
+    }
+})();
+
+// ═══════════════════════════════════════════════════════════════
 // GENERIC CONFIRM MODAL
 // ═══════════════════════════════════════════════════════════════
 
@@ -4682,6 +4735,19 @@ window.recurringSearch = (function () {
         return index;
     }
 
+    // attach({input, tbody, clear, empty, odd, even}) for a recurring table.
+    // Other lists of categories use it too, and say how theirs differ:
+    //   header        the class of a group's header row (recurring-group-header)
+    //   nameAttr      the attribute holding a row's name (data-category-name)
+    //   nameSelector  where a row's name is, when it has no such attribute
+    //   groupName     where a group header's name is (.recurring-group-name);
+    //                 a search that matches a group's name shows the group
+    //                 with everything in it
+    //   onFilter      function(query) after each pass - Manage Categories
+    //                 turns its drag sorting off while a search narrows it
+    // Rows belong to the header above them; a recurring table also keys them
+    // with data-group-key, and where both carry one it must match. With no
+    // odd/even classes nothing is striped.
     function attach(opts) {
         var input = document.getElementById(opts.input);
         var tbody = document.querySelector(opts.tbody);
@@ -4689,18 +4755,43 @@ window.recurringSearch = (function () {
 
         var clear = opts.clear ? document.getElementById(opts.clear) : null;
         var empty = opts.empty ? document.getElementById(opts.empty) : null;
+        var headerClass = opts.header || 'recurring-group-header';
+        var groupNameSelector = opts.groupName || '.recurring-group-name';
+
+        function groupMatches(header, query) {
+            var el = header.querySelector(groupNameSelector);
+            return !!el && el.textContent.trim().toLowerCase().indexOf(query) !== -1;
+        }
+
+        function nameOf(row) {
+            var name = row.getAttribute(opts.nameAttr || 'data-category-name');
+            if (name === null && opts.nameSelector) {
+                var el = row.querySelector(opts.nameSelector);
+                name = el ? el.textContent : '';
+            }
+            return (name || '').trim().toLowerCase();
+        }
 
         function apply() {
             var query = input.value.trim().toLowerCase();
             var rows = tbody.querySelectorAll('tr');
             var shown = 0;
+            // While searching, the stylesheet stops hiding collapsed rows
+            // (tr[data-collapsed]); this pass decides each row itself.
+            tbody.classList.toggle('is-searching', !!query);
+            // Whether the group the rows below belong to matched by its own
+            // name - then all of them stay, whatever they are called.
+            var groupHit = false;
             for (var i = 0; i < rows.length; i++) {
                 var row = rows[i];
                 // Group headers are placed by the loop below, from whether
                 // anything in the group survived the filter.
-                if (row.classList.contains('recurring-group-header')) { continue; }
-                var name = (row.getAttribute('data-category-name') || '').toLowerCase();
-                var match = !query || name.indexOf(query) !== -1;
+                if (row.classList.contains(headerClass)) {
+                    groupHit = !!query && groupMatches(row, query);
+                    if (groupHit) { shown++; }
+                    continue;
+                }
+                var match = !query || groupHit || nameOf(row).indexOf(query) !== -1;
                 // A collapsed group hides its rows, but only while nothing is
                 // being searched for - a match the user asked to see must not
                 // stay hidden because of a group they closed earlier.
@@ -4713,27 +4804,37 @@ window.recurringSearch = (function () {
             // over a gap - unless it is collapsed and unsearched, which is the
             // one case where showing no members is the point and the header has
             // to stay for the group to be opened again.
-            var headers = tbody.querySelectorAll('.recurring-group-header');
+            var headers = tbody.querySelectorAll('.' + headerClass);
             for (var h = 0; h < headers.length; h++) {
                 var key = headers[h].getAttribute('data-group-key');
                 var visible = 0;
                 var member = headers[h].nextElementSibling;
-                while (member && !member.classList.contains('recurring-group-header')) {
-                    if (member.getAttribute('data-group-key') === key
+                while (member && !member.classList.contains(headerClass)) {
+                    var memberKey = member.getAttribute('data-group-key');
+                    if ((key === null || memberKey === null || memberKey === key)
                             && member.style.display !== 'none') { visible++; }
                     member = member.nextElementSibling;
                 }
                 headers[h].style.display =
-                    (visible || (!query && headers[h].classList.contains('is-collapsed')))
+                    (visible || (query && groupMatches(headers[h], query))
+                        || (!query && headers[h].classList.contains('is-collapsed')))
                         ? '' : 'none';
             }
 
             // Always striped here, searched or not: the stylesheet's
             // :nth-child striping (left as the no-script fallback) counts rows,
             // and it is categories that have to alternate - see stripe().
-            stripe(tbody, opts.odd, opts.even);
+            if (opts.odd && opts.even) { stripe(tbody, opts.odd, opts.even); }
 
-            if (empty) { empty.style.display = (query && shown === 0) ? '' : 'none'; }
+            if (empty) {
+                var none = !!query && shown === 0;
+                empty.hidden = !none;
+                empty.style.display = none ? '' : 'none';
+            }
+            // The clear button shows while there is something to clear, as on
+            // the dashboards (.clear-filter-btn ships hidden).
+            if (clear) { clear.style.display = query ? 'inline-flex' : 'none'; }
+            if (typeof opts.onFilter === 'function') { opts.onFilter(query); }
         }
 
         // So the group toggle can ask the search to decide again after it

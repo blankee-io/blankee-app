@@ -10836,7 +10836,9 @@ def add_income_category():
         # The id the flush gave it, which is the one worth answering with.
         new_category_id = next((int(c['id']) for c in (_get_categories_from_redis('income_categories', current_user.id) or [])
                                 if c.get('name') == category_name), new_category_id)
-    return jsonify({'status': 'success', 'new_category_id': new_category_id, 'category_name': category_name})
+    ai_group = _ai_place_new_category(current_user.id, 'income', category_name)
+    return jsonify({'status': 'success', 'new_category_id': new_category_id, 'category_name': category_name,
+                    'ai_group': ai_group})
 
 @app.route('/add_expense_category', methods=['POST'])
 @login_required
@@ -10910,8 +10912,10 @@ def add_expense_category():
         c_expense_map = {int(c['account_id']): int(c['id'])
                          for c in (_get_categories_from_redis('c_expense_categories', current_user.id) or [])
                          if c.get('name') == category_name and c.get('account_id') is not None} or c_expense_map
+    ai_group = _ai_place_new_category(current_user.id, 'expense', category_name)
     return jsonify({
         'status': 'success', 
+        'ai_group': ai_group,
         'new_category_id': new_category_id, 
         'id': new_category_id,  # For compatibility with existing code
         'category_name': category_name,
@@ -12603,25 +12607,53 @@ def delete_expense_category_group():
         return jsonify({'status': 'error', 'message': 'Failed to delete group'}), 500
 
 
-@app.route('/assign_category_to_group', methods=['POST'])
-@login_required
-def assign_category_to_group():
+def _ai_place_new_category(user_id, cat_type, category_name):
     """
-    Assign a category to a group (or ungroup it by passing group_id=null).
-    Updates display_order to the target group's tier.
-    For expense: also updates matching c_expense categories across all credit accounts.
+    File a category made a moment ago into the group Claude picks for it.
+    The same gate as the bank's categorisation (providers/claude_enrichment:
+    switched on, the key verified, a bank linked); what leaves the server is
+    the category's name and the names of the groups of its kind.
+
+    Returns {'kind', 'category', 'group'} for the page to announce - the
+    shared ajax hook in script.js turns it into a toast - or None: no groups,
+    the gate closed, nothing fit, or the request failed. The category then
+    stays Ungrouped, as every new category did before. Called after the
+    creating route's flush, so the category is found by name with its real id.
     """
-    data = request.json or {}
-    cat_type = data.get('type')  # 'income' or 'expense'
-    category_id = data.get('category_id')
-    new_group_id = data.get('group_id')  # null/None to ungroup
-    user_id = current_user.id
+    try:
+        provider = get_enrichment_provider()
+        if getattr(provider, 'name', '') != 'claude' or not hasattr(provider, 'suggest_group'):
+            return None
+        groups = [g for g in (_get_category_groups_from_redis(f'{cat_type}_category_groups', user_id) or [])
+                  if g.get('id') is not None and (g.get('name') or '').strip()]
+        if not groups:
+            return None
+        category = next((c for c in (_get_categories_from_redis(f'{cat_type}_categories', user_id) or [])
+                         if (c.get('name') or '') == category_name), None)
+        if category is None or category.get('group_id') is not None:
+            return None
+        picked = provider.suggest_group(user_id, category_name, 'incoming' if cat_type == 'income' else 'outgoing',
+                                        [g['name'] for g in groups])
+        if not picked:
+            return None
+        group = next(g for g in groups if g['name'] == picked)
+        status, _payload = _assign_category_to_group(user_id, cat_type, category['id'], int(group['id']))
+        if status != 200:
+            return None
+        log_info(app.logger, 'AI', f'user {user_id}: new {cat_type} category {category["id"]} filed under group {group["id"]}')
+        return {'kind': cat_type, 'category': category_name, 'group': picked}
+    except Exception as e:
+        log_warning(app.logger, 'AI', f'user {user_id}: placing a new {cat_type} category failed: {e}')
+        return None
 
-    if not cat_type or not category_id:
-        return jsonify({'status': 'error', 'message': 'type and category_id are required'}), 400
-    if cat_type not in ('income', 'expense'):
-        return jsonify({'status': 'error', 'message': 'type must be income or expense'}), 400
 
+def _assign_category_to_group(user_id, cat_type, category_id, new_group_id):
+    """
+    (status, payload) - the work behind /assign_category_to_group, so the
+    AI's placement of a new category goes through the same steps a drag
+    does, card copies included. cat_type is 'income' or 'expense';
+    new_group_id None ungroups.
+    """
     try:
         cat_table = f"{cat_type}_categories"
         group_table = f"{cat_type}_category_groups"
@@ -12631,7 +12663,7 @@ def assign_category_to_group():
             groups = _get_category_groups_from_redis(group_table, user_id) or []
             target_group = next((g for g in groups if int(g.get('id', 0)) == int(new_group_id)), None)
             if not target_group:
-                return jsonify({'status': 'error', 'message': 'Group not found'}), 404
+                return 404, {'status': 'error', 'message': 'Group not found'}
             tier = int(float(target_group.get('display_order', 2)))
         else:
             tier = 1  # ungrouped
@@ -12639,7 +12671,7 @@ def assign_category_to_group():
         # Update the category in Redis
         categories = _get_categories_from_redis(cat_table, user_id)
         if not categories:
-            return jsonify({'status': 'error', 'message': 'No categories found'}), 404
+            return 404, {'status': 'error', 'message': 'No categories found'}
 
         new_order = _next_display_order(categories, tier=tier)
         category_name = None
@@ -12661,7 +12693,7 @@ def assign_category_to_group():
                 categories.append(db_cat)
                 target_cat = db_cat
             else:
-                return jsonify({'status': 'error', 'message': 'Category not found'}), 404
+                return 404, {'status': 'error', 'message': 'Category not found'}
 
         target_cat['group_id'] = int(new_group_id) if new_group_id is not None else None
         target_cat['display_order'] = new_order
@@ -12713,10 +12745,33 @@ def assign_category_to_group():
                 _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
                 _redis_client.expire(f"dirty_tables:{user_id}", PERSISTENT_CACHE_TTL)
 
-        return jsonify({'status': 'success', 'new_display_order': new_order})
+        return 200, {'status': 'success', 'new_display_order': new_order}
     except Exception as e:
         log_error(app.logger, 'EXPENSE', f"[assign_category_to_group] Error: {e}")
-        return jsonify({'status': 'error', 'message': 'Failed to assign category to group'}), 500
+        return 500, {'status': 'error', 'message': 'Failed to assign category to group'}
+
+
+@app.route('/assign_category_to_group', methods=['POST'])
+@login_required
+def assign_category_to_group():
+    """
+    Assign a category to a group (or ungroup it by passing group_id=null).
+    Updates display_order to the target group's tier.
+    For expense: also updates matching c_expense categories across all credit accounts.
+    """
+    data = request.json or {}
+    cat_type = data.get('type')  # 'income' or 'expense'
+    category_id = data.get('category_id')
+    new_group_id = data.get('group_id')  # null/None to ungroup
+    user_id = current_user.id
+
+    if not cat_type or not category_id:
+        return jsonify({'status': 'error', 'message': 'type and category_id are required'}), 400
+    if cat_type not in ('income', 'expense'):
+        return jsonify({'status': 'error', 'message': 'type must be income or expense'}), 400
+
+    status, payload = _assign_category_to_group(user_id, cat_type, category_id, new_group_id)
+    return jsonify(payload), status
 
 
 @app.route('/update_income_group_order', methods=['POST'])
@@ -20865,8 +20920,10 @@ def add_recurring_income():
             log_error(app.logger, 'INCOME',
                       f"[add_recurring_income] flush before responding failed: {e}")
 
+        # A category this made, rather than one chosen, is filed into a group.
+        ai_group = None if data.get('category_id') else _ai_place_new_category(current_user.id, 'income', category_name)
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'category_id': category_id,
-                        'message': 'Recurring income added successfully!'})
+                        'message': 'Recurring income added successfully!', 'ai_group': ai_group})
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'An error occurred while adding the recurring income: {str(e)}'}), 500
@@ -22101,8 +22158,10 @@ def add_recurring_expense():
             log_error(app.logger, 'EXPENSE',
                       f"[add_recurring_expense] flush before responding failed: {e}")
 
+        # A category this made, rather than one chosen, is filed into a group.
+        ai_group = None if data.get('category_id') else _ai_place_new_category(current_user.id, 'expense', category_name)
         return jsonify({'status': 'success', 'recurring_id': recurring_id, 'category_id': category_id,
-                        'message': 'Recurring expense added successfully!'})
+                        'message': 'Recurring expense added successfully!', 'ai_group': ai_group})
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'An error occurred while adding the recurring expense: {str(e)}'}), 500
