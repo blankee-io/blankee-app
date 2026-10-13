@@ -15,9 +15,11 @@ Usage:
     with get_db_pool().get_cursor(commit=True) as cursor:
         cursor.execute("DELETE FROM table WHERE id = %s", (id,))
     
-    # Advanced usage (dictionary cursor, multiple operations):
+    # Advanced usage (dictionary cursor, multiple operations). This is
+    # PyMySQL: a dictionary cursor is DictCursor - cursor(dictionary=True) is
+    # the other MySQL driver's spelling and fails here:
     with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("SELECT * FROM users")
         users = cursor.fetchall()
         conn.commit()

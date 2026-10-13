@@ -5200,6 +5200,12 @@ def flush_dirty_tables_for_user(user_id: int):
             'c_a_balances',
             'c_a_balances_d',
             'c_a_balances_m',
+            # Groups before the categories that reference them, as the worker
+            # flushes them. Left out, a forced flush - the one a route runs to
+            # answer with real ids - left a new or deleted group for the worker.
+            'income_category_groups',
+            'expense_category_groups',
+            'c_expense_category_groups',
             'income_categories',  # Category definitions
             'expense_categories',
             'bundles',  # Between the two, as above
@@ -5227,6 +5233,7 @@ def flush_dirty_tables_for_user(user_id: int):
             'linked_connections',
             'linked_accounts',
             'linked_transactions',
+            'category_memory',  # Merchant -> category, as the worker places it
             'linked_connections_deleted',
             'linked_accounts_deleted',
             'linked_transactions_deleted',

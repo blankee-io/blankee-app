@@ -8,6 +8,19 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.52.1 — 2026-10-12
+
+### Fixed
+
+- In Manage Categories, a category made a moment ago could not be dragged
+  into a group: it was refused with an error. A new category held a
+  temporary id until the background save ran, so the page could be holding
+  an id that no longer existed by the time it was dragged. Creating a
+  category now saves it before answering, so the page always has the real
+  id, and the lookup that should have covered the gap works again.
+- A save the app forces before answering now includes category groups and
+  the merchant memory too; before, those waited for the background save.
+
 ## 1.52.0 — 2026-10-11
 
 ### Added

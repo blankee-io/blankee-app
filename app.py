@@ -6311,7 +6311,7 @@ def _sync_expense_category_to_credit_accounts(user_id, category_name, display_or
     if accounts is None:
         # Fallback to MySQL
         with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(dictionary=True)
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("SELECT id FROM credit_accounts WHERE user_id = %s", (user_id,))
             accounts = cursor.fetchall()
             cursor.close()
@@ -10673,8 +10673,9 @@ def delete_ca_category():
         if not target_cat:
             # Fallback to MySQL
             with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(dictionary=True)
-                cursor.execute("SELECT * FROM c_expense_categories WHERE id = %s", (category_id,))
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT c.* FROM c_expense_categories c JOIN credit_accounts a ON a.id = c.account_id "
+                               " WHERE c.id = %s AND a.user_id = %s", (category_id, current_user.id))
                 target_cat = cursor.fetchone()
                 cursor.close()
         
@@ -10821,6 +10822,20 @@ def add_income_category():
             cursor.close()
     
     
+
+    # Written through before answering, so the page that reloads next gets the
+    # REAL id rather than the negative temporary one. Fifteen seconds later
+    # that id is nothing's: dragging the new category into a group then sent
+    # an id that no longer existed - see the note in add_recurring_expense.
+    try:
+        import redis_manager as _rm
+        _rm.flush_dirty_tables_for_user(current_user.id)
+    except Exception as e:
+        log_error(app.logger, 'INCOME', f"[add_income_category] flush before responding failed: {e}")
+    else:
+        # The id the flush gave it, which is the one worth answering with.
+        new_category_id = next((int(c['id']) for c in (_get_categories_from_redis('income_categories', current_user.id) or [])
+                                if c.get('name') == category_name), new_category_id)
     return jsonify({'status': 'success', 'new_category_id': new_category_id, 'category_name': category_name})
 
 @app.route('/add_expense_category', methods=['POST'])
@@ -10877,6 +10892,24 @@ def add_expense_category():
     
     
     # Return both expense_category_id and c_expense mapping for credit account use
+
+    # Written through before answering, so the page that reloads next gets the
+    # REAL id rather than the negative temporary one. Fifteen seconds later
+    # that id is nothing's: dragging the new category into a group then sent
+    # an id that no longer existed - see the note in add_recurring_expense.
+    try:
+        import redis_manager as _rm
+        _rm.flush_dirty_tables_for_user(current_user.id)
+    except Exception as e:
+        log_error(app.logger, 'EXPENSE', f"[add_expense_category] flush before responding failed: {e}")
+    else:
+        # The id the flush gave it, which is the one worth answering with.
+        new_category_id = next((int(c['id']) for c in (_get_categories_from_redis('expense_categories', current_user.id) or [])
+                                if c.get('name') == category_name), new_category_id)
+        # The cards' copies were made with temporary ids too.
+        c_expense_map = {int(c['account_id']): int(c['id'])
+                         for c in (_get_categories_from_redis('c_expense_categories', current_user.id) or [])
+                         if c.get('name') == category_name and c.get('account_id') is not None} or c_expense_map
     return jsonify({
         'status': 'success', 
         'new_category_id': new_category_id, 
@@ -12616,7 +12649,7 @@ def assign_category_to_group():
         # Hydrate the missing category and continue so group assignment works immediately.
         if target_cat is None:
             with get_db_pool().get_connection() as conn:
-                cursor = conn.cursor(dictionary=True)
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
                 cursor.execute(
                     f"SELECT * FROM {cat_table} WHERE id = %s AND user_id = %s LIMIT 1",
                     (category_id, user_id)
