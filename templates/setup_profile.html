@@ -148,6 +148,25 @@
             <p id="category-recommendations-description">We've prepared common budget categories with typical amounts to help you get started. Feel free to adjust, add, or remove any categories to match your needs.</p>
             
             <div class="category-recommendations-scroll-container">
+                {# Bank suggestions - the cards of Recurring > Suggested, from
+                   /api/recurring-suggested/list. Make recurring moves one into
+                   the lists below; see loadBankSuggestions(). Shown only when a
+                   bank is linked and something was found, or is being read. #}
+                <div class="category-section setup-bank-suggestions" id="setup-bank-suggestions" hidden>
+                    <div class="recurring-header">
+                        <span>From Your Bank</span>
+                    </div>
+                    <p class="recurring-suggested-intro">
+                        Charges from your bank that come from the same place, for the same amount, on a steady schedule.
+                        Make one recurring to add it to your categories below.
+                    </p>
+                    <div class="recurring-suggested-reading" id="setup-bank-reading" hidden>
+                        <i class="fa-solid fa-spinner fa-spin"></i>
+                        <p>Reading the last three months from your bank. This can take a minute.</p>
+                    </div>
+                    <div class="recurring-suggested-container setup-bank-cards" id="setup-bank-cards"></div>
+                </div>
+
                 <!-- Income Categories Section -->
                 <div class="category-section">
                     <div class="recurring-header income" style="margin-bottom: 15px;">
@@ -1150,7 +1169,7 @@
                 
                 return `
                     <tr class="${rowClass}-category-row" data-type="${type}" data-index="${index}">
-                        <td class="editable ${rowClass}-category" data-column="category_name">${escapeHtml(name)}</td>
+                        <td class="editable ${rowClass}-category" data-column="category_name">${escapeHtml(name)}${category.card_name ? `<span class="setup-card-tag">${escapeHtml(category.card_name)}</span>` : ''}</td>
                         <td class="editable ${rowClass}-type" data-column="type">
                             ${typeDisplay}
                         </td>
@@ -1720,6 +1739,7 @@
             // it - so the step appeared with nothing in it. Anything that needs
             // to land on this step calls this instead of navigating directly.
             function enterCategoryStep() {
+                loadBankSuggestions();
                 var pending = window.pendingCategoriesToCreate;
                 if (pending && ((pending.income || []).length || (pending.expense || []).length)) {
                     // Edits made earlier in this session win: coming back must
@@ -1754,7 +1774,118 @@
                 
                 recommendedCategories = genericRecommendations;
                 displayCategoryRecommendations(genericRecommendations, true);
+                loadBankSuggestions();
             }
+
+            // ==================== BANK SUGGESTIONS ====================
+            // The cards Recurring > Suggested shows, for a bank linked in this
+            // wizard. The bank's earlier months are read in the background the
+            // first time (bank_history.py); until they are in, the endpoint
+            // says 'reading' and this asks again. Make recurring moves a
+            // suggestion into the lists below as a recurring category, marked
+            // with its suggestion_key (and card_id for a card's charges) so
+            // the end of the wizard can make it and file the merchant under it
+            // - see createPendingCategories().
+            var bankSuggestionsLoading = false;
+            var BANK_SUGGESTIONS_TRIES = 40;
+
+            function acceptedSuggestionKeys() {
+                return (recommendedCategories.income || []).concat(recommendedCategories.expense || [])
+                    .map(function (c) { return c.suggestion_key; })
+                    .filter(Boolean);
+            }
+
+            function refreshBankSection() {
+                var cards = $('#setup-bank-cards .recurring-suggested-card');
+                $('#setup-bank-cards .recurring-suggested-group').each(function () {
+                    if (!$(this).find('.recurring-suggested-card').length) { $(this).remove(); }
+                });
+                var reading = !$('#setup-bank-reading').prop('hidden');
+                $('#setup-bank-suggestions').prop('hidden', !cards.length && !reading);
+            }
+
+            function loadBankSuggestions(tries) {
+                if (bankSuggestionsLoading && !tries) { return; }
+                bankSuggestionsLoading = true;
+                tries = tries || 1;
+                $.getJSON('/api/recurring-suggested/list').done(function (data) {
+                    var reading = !!(data && data.reading) && tries < BANK_SUGGESTIONS_TRIES;
+                    $('#setup-bank-reading').prop('hidden', !reading);
+                    $('#setup-bank-cards').html((data && data.html) || '');
+                    // Already in the lists from an earlier visit to this step.
+                    var taken = acceptedSuggestionKeys();
+                    $('#setup-bank-cards .recurring-suggested-card').each(function () {
+                        if (taken.indexOf(this.getAttribute('data-key')) !== -1) { $(this).remove(); }
+                    });
+                    refreshBankSection();
+                    if (reading) {
+                        setTimeout(function () { loadBankSuggestions(tries + 1); }, 4000);
+                    } else {
+                        bankSuggestionsLoading = false;
+                    }
+                }).fail(function () {
+                    bankSuggestionsLoading = false;
+                    $('#setup-bank-reading').prop('hidden', true);
+                    refreshBankSection();
+                });
+            }
+
+            // A name not already in that list: the merchant's, or with a number.
+            function freeCategoryName(list, name) {
+                var taken = list.map(function (c) { return (c.name || '').trim().toLowerCase(); });
+                var candidate = name, n = 2;
+                while (taken.indexOf(candidate.trim().toLowerCase()) !== -1) { candidate = name + ' ' + n++; }
+                return candidate;
+            }
+
+            $(document).on('click', '#setup-bank-cards .recurring-suggested-make', function () {
+                var $card = $(this).closest('.recurring-suggested-card');
+                var kind = $card.attr('data-kind');
+                var prefill = JSON.parse($card.attr('data-prefill'));
+                var list = kind === 'income' ? recommendedCategories.income : recommendedCategories.expense;
+                var name = freeCategoryName(list, $card.attr('data-merchant'));
+                list.push({
+                    name: name,
+                    is_recurring: true,
+                    amount: parseFloat(prefill.amount) || 0,
+                    wage_bill: prefill.wage_bill,
+                    cadence_interval: prefill.cadence_interval,
+                    cadence_unit: prefill.cadence_unit,
+                    weekdays: (prefill.weekdays || []).join(',') || null,
+                    monthly_days: (prefill.monthly_days || []).join(',') || null,
+                    yearly_day: prefill.yearly_day,
+                    yearly_month: prefill.yearly_month,
+                    start_date: prefill.start_date,
+                    no_end_date: true,
+                    suggestion_key: $card.attr('data-key'),
+                    card_id: kind === 'ca' ? parseInt($card.attr('data-card-id'), 10) : null,
+                    card_name: kind === 'ca' ? $card.attr('data-card-name') : null
+                });
+                displayCategoryRecommendations(recommendedCategories, false);
+                $card.remove();
+                refreshBankSection();
+                showToast(name + ' added to your ' + (kind === 'income' ? 'income' : 'expense') + ' categories.', 'success');
+            });
+
+            $(document).on('click', '#setup-bank-cards .recurring-suggested-dismiss', async function () {
+                var $card = $(this).closest('.recurring-suggested-card');
+                var confirmed = await showConfirmModal({
+                    title: 'Not recurring',
+                    message: $card.attr('data-merchant') + ' for this amount will not be suggested again.',
+                    confirmText: 'Not recurring'
+                });
+                if (!confirmed) { return; }
+                $.ajax({
+                    url: '/api/recurring-suggested/dismiss',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ key: $card.attr('data-key') }),
+                    success: function () { $card.remove(); refreshBankSection(); },
+                    error: function (xhr) {
+                        showToast((xhr.responseJSON && xhr.responseJSON.message) || 'Could not save that.', 'error');
+                    }
+                });
+            });
 
             // Handle skip link - go directly to name page
             $('#skip-category-recommendations').on('click', function(e) {
@@ -2062,34 +2193,35 @@
                     // Prepare the data with today's date for start_date and Dec 31st three years from now for end_date
                     const today = getTodayDateString();
                     const endDate = getThreeYearsEndDateString();
+                    // A card's charges are not an ordinary expense category:
+                    // they go through the card's own routes after the batch.
+                    const cardItems = window.pendingCategoriesToCreate.expense.filter(cat => cat.card_id);
                     const categoriesToCreate = {
                         income: window.pendingCategoriesToCreate.income.map(cat => ({
                             ...cat,
                             start_date: cat.start_date || today,
                             end_date: cat.end_date || endDate
                         })),
-                        expense: window.pendingCategoriesToCreate.expense.map(cat => ({
+                        expense: window.pendingCategoriesToCreate.expense.filter(cat => !cat.card_id).map(cat => ({
                             ...cat,
                             start_date: cat.start_date || today,
                             end_date: cat.end_date || endDate
                         }))
                     };
-                    
+                    const fromBank = window.pendingCategoriesToCreate.income
+                        .concat(window.pendingCategoriesToCreate.expense)
+                        .filter(cat => cat.suggestion_key);
+
+                    // Whatever happens to one, the rest go ahead and setup finishes.
                     $.ajax({
                         url: '/bank/create-recommended-categories',
                         method: 'POST',
                         contentType: 'application/json',
-                        data: JSON.stringify(categoriesToCreate),
-                        success: function(response) {
-                            if (response.status !== 'success') {
-                            }
-                            // Continue with the rest of setup regardless of category creation result
-                            finishSetupAndRedirect();
-                        },
-                        error: function(xhr, status, error) {
-                            // Continue with setup even if category creation fails
-                            finishSetupAndRedirect();
-                        }
+                        data: JSON.stringify(categoriesToCreate)
+                    }).always(function() {
+                        createCardItems(cardItems, endDate)
+                            .then(function() { return rememberBankMerchants(fromBank); })
+                            .always(finishSetupAndRedirect);
                     });
                 } else {
                     // No pending categories, just finish setup
@@ -2097,6 +2229,70 @@
                 }
             }
             
+            // Charges on a card, made recurring from a bank suggestion: the
+            // category is made as any expense category is, which gives every
+            // card its copy; this card's copy - by its real id, fetched after
+            // the flush - is made recurring. The same steps the Make Recurring
+            // dialog takes (static/js/convert_recurring.js).
+            function createCardItems(items, endDate) {
+                var chain = $.Deferred().resolve().promise();
+                items.forEach(function(cat) {
+                    chain = chain.then(function() {
+                        return $.ajax({ url: '/add_expense_category', method: 'POST', data: { name: cat.name } })
+                            .then(function() {
+                                if (!cat.is_recurring) { return null; }
+                                return $.getJSON('/api/recurring-suggested/card-category',
+                                                 { account_id: cat.card_id, name: cat.name })
+                                    .then(function(found) {
+                                        var split = function(v) {
+                                            return v ? String(v).split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+                                        };
+                                        return $.ajax({
+                                            url: '/add-recurring-ca-expense',
+                                            method: 'POST',
+                                            contentType: 'application/json',
+                                            data: JSON.stringify({
+                                                category_id: found.category_id,
+                                                account_id: cat.card_id,
+                                                amount: cat.amount,
+                                                cadence_interval: cat.cadence_interval,
+                                                cadence_unit: cat.cadence_unit,
+                                                weekdays: split(cat.weekdays).map(function(d) { return d.toLowerCase(); }),
+                                                monthly_days: split(cat.monthly_days),
+                                                yearly_day: cat.yearly_day,
+                                                yearly_month: cat.yearly_month,
+                                                start_date: cat.start_date || getTodayDateString(),
+                                                end_date: cat.end_date || endDate,
+                                                no_end_date: cat.no_end_date === false ? 0 : 1,
+                                                wage_bill: cat.wage_bill
+                                            })
+                                        });
+                                    });
+                            })
+                            .then(null, function() { return $.Deferred().resolve().promise(); });
+                    });
+                });
+                return chain;
+            }
+
+            // File each merchant taken from the bank under the category it
+            // became, by its final name, so the bank's next charge from there
+            // lands in it.
+            function rememberBankMerchants(items) {
+                var chain = $.Deferred().resolve().promise();
+                items.forEach(function(cat) {
+                    chain = chain.then(function() {
+                        return $.ajax({
+                            url: '/api/recurring-suggested/remember',
+                            method: 'POST',
+                            contentType: 'application/json',
+                            data: JSON.stringify({ key: cat.suggestion_key, category_name: cat.name })
+                        }).then(null, function() { return $.Deferred().resolve().promise(); });
+                    });
+                });
+                return chain;
+            }
+
             // Finish setup by saving totals and redirecting to dashboard
             function finishSetupAndRedirect() {
                 saveDailyTotalsAndRemainders();

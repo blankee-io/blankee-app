@@ -21658,25 +21658,17 @@ def _short_date(d, today):
     return text if d.year == today.year else f'{text}, {d.year}'
 
 
-@app.route('/recurring-suggested')
-@login_required
-def recurring_suggested():
+def _suggested_view(user_id, currency_type):
+    """
+    What the suggestion cards need, for Recurring > Suggested and for the
+    setup wizard (/api/recurring-suggested/list) alike: {'groups',
+    'found_count', 'reading', 'history_failed', 'category_options'}. Starts
+    the read of the bank's earlier months when it is needed.
+    """
     import bank_history
     import recurring_detect
-    user_id = current_user.id
-    if not _bank_suggestions_available(user_id):
-        abort(404)
     today = _user_today_for(user_id)
-
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
-        cursor.execute("SELECT profile_picture, first_name, last_name, landing_page, currency_type "
-                       "FROM users WHERE id = %s", (user_id,))
-        user_data = cursor.fetchone()
-        cursor.close()
-    user_data = user_data or {}
-    currency_type = user_data.get('currency_type') or 'USD'
-    symbol = '$' if currency_type == 'USD' else '€' if currency_type == 'EUR' else currency_type
+    symbol = '$' if currency_type == 'USD' else '\u20ac' if currency_type == 'EUR' else currency_type
 
     # The months before the bank was linked: read once in the background -
     # again only when an account is added - and the page reloads when it lands.
@@ -21718,13 +21710,57 @@ def recurring_suggested():
         groups.append({'key': 'ca', 'title': name, 'rows': [s for s in found if s['kind'] == 'ca' and s['card_id'] == card_id]})
     groups = [g for g in groups if g['rows']]
 
+    return {'groups': groups, 'found_count': len(found), 'reading': reading,
+            'history_failed': history_failed, 'category_options': _suggested_options(cats)}
+
+
+@app.route('/api/recurring-suggested/list')
+@login_required
+def recurring_suggested_list():
+    """
+    The suggestion cards as HTML, for the setup wizard: {'reading', 'failed',
+    'count', 'html'}. While the bank's earlier months are being read,
+    'reading' is true and the wizard asks again. A GET: nothing is written
+    but the history the read keeps aside.
+    """
+    user_id = current_user.id
+    if not _bank_suggestions_available(user_id):
+        return jsonify({'status': 'success', 'reading': False, 'failed': False, 'count': 0, 'html': ''})
+    with get_db_pool().get_cursor(dictionary=True) as cursor:
+        cursor.execute("SELECT currency_type FROM users WHERE id = %s", (user_id,))
+        row = cursor.fetchone() or {}
+    view = _suggested_view(user_id, row.get('currency_type') or 'USD')
+    return jsonify({'status': 'success', 'reading': bool(view['reading']), 'failed': view['history_failed'],
+                    'count': view['found_count'],
+                    'html': render_template('_suggested_cards.html', groups=view['groups'])})
+
+
+@app.route('/recurring-suggested')
+@login_required
+def recurring_suggested():
+    user_id = current_user.id
+    if not _bank_suggestions_available(user_id):
+        abort(404)
+    today = _user_today_for(user_id)
+
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT profile_picture, first_name, last_name, landing_page, currency_type "
+                       "FROM users WHERE id = %s", (user_id,))
+        user_data = cursor.fetchone()
+        cursor.close()
+    user_data = user_data or {}
+    currency_type = user_data.get('currency_type') or 'USD'
+
+    view = _suggested_view(user_id, currency_type)
+
     return render_template(
         'recurring_suggested.html',
-        groups=groups,
-        found_count=len(found),
-        reading=reading,
-        history_failed=history_failed,
-        category_options=_suggested_options(cats),
+        groups=view['groups'],
+        found_count=view['found_count'],
+        reading=view['reading'],
+        history_failed=view['history_failed'],
+        category_options=view['category_options'],
         profile_picture=user_data.get('profile_picture'),
         first_name=user_data.get('first_name') or '',
         last_name=user_data.get('last_name') or '',
@@ -26763,6 +26799,13 @@ def bank_create_recommended_categories():
                     five_years_from_now=five_years_from_now
                 )
                 created_expense.append(result)
+                # Onto every card too, as every other way of making an expense
+                # category does. In setup the bank - and so its cards - is
+                # linked before these exist, and copying at link time found
+                # nothing to copy. Skips a card that already has the name.
+                _sync_expense_category_to_credit_accounts(
+                    current_user.id, (cat.get('name') or '').strip(),
+                    round(exp_display_order + idx * 0.0001, 4))
             except Exception as e:
                 log_error(app.logger, 'BANK', f"Error creating expense category '{cat.get('name')}': {e}")
                 errors.append(f"Expense '{cat.get('name')}': {str(e)}")

@@ -8,6 +8,28 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.54.0 — 2026-10-12
+
+### Added
+
+- **Bank suggestions in setup.** When you connect a bank while setting up,
+  the categories step now shows what Recurring > Suggested would - the
+  charges that come from the same place, for the same amount, on a steady
+  schedule - above the recommended categories, in the same cards. **Make
+  recurring** adds one to your income or expense categories, filled in and
+  editable like the others (a card's charge is marked with its card);
+  **Not recurring** sets it aside for good. They are created with the rest
+  at the end, and the bank's next charge from each place lands in its
+  category. While the bank's last three months are still being read, the
+  step says so and fills in when they arrive.
+
+### Fixed
+
+- Expense categories created by the setup wizard now reach your credit
+  cards too, as every other way of creating one already did. A bank linked
+  in setup made its cards before the categories existed, so the cards could
+  be left without them.
+
 ## 1.53.0 — 2026-10-12
 
 ### Added

@@ -21197,6 +21197,41 @@ label.loaf-holiday {
     opacity: 0.5;
 }
 
+/* The setup wizard's From Your Bank section: the same cards, in the
+   categories step above the Income and Expense lists. */
+.setup-bank-suggestions[hidden] {
+    display: none;
+}
+
+.recurring-suggested-container.setup-bank-cards {
+    padding: 0;
+    margin: 0 0 8px;
+}
+
+.setup-bank-suggestions .recurring-suggested-intro {
+    margin-bottom: 10px;
+}
+
+/* The wizard centres its text; the cards read left to right, as on their page. */
+.setup-bank-suggestions .recurring-suggested-card {
+    text-align: left;
+}
+
+.recurring-suggested-reading[hidden] {
+    display: none;
+}
+
+/* A category in the wizard's lists that will be a card's recurring charge. */
+.setup-card-tag {
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: var(--secondary-lighter);
+    color: var(--secondary-dark);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
 .recurring-suggested-empty {
     display: flex;
     flex-direction: column;

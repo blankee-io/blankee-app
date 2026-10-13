@@ -61,40 +61,7 @@
                 <p>Nothing to suggest right now. A charge shows up here once it has come from the same place, for the same amount, at least three times on a steady schedule.</p>
             </div>
 
-            {% for group in groups %}
-            <section class="recurring-suggested-group recurring-suggested-group--{{ group.key }}">
-                <h3 class="recurring-suggested-group-title">
-                    {% if group.key == 'ca' %}<i class="fa-light fa-credit-card"></i>{% endif %}{{ group.title }}
-                </h3>
-                {% for s in group.rows %}
-                <div class="recurring-suggested-card"
-                     data-key="{{ s.key }}"
-                     data-kind="{{ s.kind }}"
-                     data-card-id="{{ s.card_id or '' }}"
-                     data-merchant="{{ s.merchant }}"
-                     data-prefill="{{ s.prefill | tojson | forceescape }}">
-                    <div class="recurring-suggested-info">
-                        <div class="recurring-suggested-name">
-                            <span>{{ s.merchant }}</span>
-                            <span class="recurring-suggested-type">{{ 'Wages' if s.kind == 'income' else 'Bill' }}</span>
-                        </div>
-                        <div class="recurring-suggested-sentence">{{ s.sentence }}</div>
-                        <div class="recurring-suggested-recent">
-                            Last:
-                            {% for d, a in s.recent_text %} <span class="recurring-suggested-hit">{{ d }} {{ a }}</span>{% endfor %}
-                        </div>
-                        <div class="recurring-suggested-next">
-                            Next expected {{ s.next_text }}{% if s.lands_in %} &middot; goes to {{ s.lands_in }} now{% endif %}{% if s.extras %}<span class="recurring-suggested-extras"> &middot; {{ s.extras }} other {{ 'charge' if s.extras == 1 else 'charges' }} off this schedule</span>{% endif %}
-                        </div>
-                    </div>
-                    <div class="recurring-suggested-actions">
-                        <button type="button" class="recurring-suggested-make">Make recurring</button>
-                        <button type="button" class="recurring-suggested-dismiss">Not recurring</button>
-                    </div>
-                </div>
-                {% endfor %}
-            </section>
-            {% endfor %}
+            {% include '_suggested_cards.html' %}
         </div>
     </div>
 
