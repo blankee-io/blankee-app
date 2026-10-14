@@ -1,3 +1,4 @@
+{% from '_income_pay_fields.html' import income_pay_fields, income_pay_mode %}
 <!-- Add Recurring Income Modal -->
 <div id="add-income-modal" class="modal">
     <div class="income-form-container">
@@ -11,12 +12,17 @@
             </div>
 
 <div class="form-row">
-                    <label for="wage-bill-select">Type:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Wages and Bills are all-or-nothing: one entry settles the whole forecast. Variable and Allowance deplete gradually, so each entry reduces what is left for the period.</span></span></label>
+                    <div class="income-pay-type-head">
+                        <label for="wage-bill-select">Type:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Wages and Bills are all-or-nothing: one entry settles the whole forecast. Variable and Allowance deplete gradually, so each entry reduces what is left for the period.</span></span></label>
+                        {{ income_pay_mode('modal') }}
+                    </div>
                     <select id="wage-bill-select" name="wage_bill">
                         <option value="1">Wages (fixed income)</option>
                         <option value="0">Variable (irregular income)</option>
                     </select>
             </div>
+
+            {{ income_pay_fields('modal', currency_type) }}
 
             <label for="amount">Recurring Amount<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The amount forecast for each occurrence. Future occurrences appear as forecast entries and count toward your totals until you confirm them.</span></span></label>
             <div class="currency-input-container">
@@ -774,6 +780,12 @@
             if ($('#no-end-date-checkbox').is(':checked')) {
                 formData.end_date = getFiveYearsFromNowEndDateString();
             }
+            // Calculated from pay, when that section is open - before a bank row's
+            // capture as well, so a recurring created from one keeps it.
+            if (incomePay.validate('modal')) {   // outlines the missing field
+                return false;
+            }
+            incomePay.extend('modal', formData);
             if (typeof document.getElementById('add-recurring-income-form').__recurringCapture === 'function') {
                 // A bank row in "Did these come through?" asked for this. Held,
                 // not sent: the row's Confirm is what creates it. See
@@ -1245,4 +1257,12 @@
         });
     });
 
+    // Wages calculated from pay - templates/_income_pay_fields.html. On ready:
+    // this file is included before script.js and income_pay.js load.
+    $(function () {
+        if (window.incomePay) {
+            incomePay.attach({prefix: 'modal', form: '#add-recurring-income-form', wageBill: '#wage-bill-select',
+                              startDate: '#start_date', amount: '#amount'});
+        }
+    });
 </script>

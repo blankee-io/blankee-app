@@ -252,6 +252,7 @@ def init_redis_middleware(app):
             '/admin/update/', '/get-credit-account-status',
             # checks and previews that read only
             '/check_username', '/api/recurring-occurrences', '/verify_current_password',
+            '/api/pay-preview',
             '/ai/test', '/bank/analyze-transactions-for-categories',
             # per-browser bookkeeping a page does as it loads
             '/api/user/timezone', '/api/tutorial/', '/api/notifications/register',

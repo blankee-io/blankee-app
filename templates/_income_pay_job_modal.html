@@ -1,0 +1,11 @@
+{# The job editor (Loaf's shelf form) for a page with a Wages form that can be
+   "calculated from my pay". Saves through the host's /api/jobs, so it works
+   whether or not the Loaf app is switched on; job_modal_context() in app.py
+   supplies what the form needs. Include once per page, after script.js -
+   it brings the editor's script and the pay section's. #}
+{% set _jm = job_modal_context() %}
+{% with weekday_prefixes=_jm.weekday_prefixes, weekday_names=_jm.weekday_names, holidays=_jm.holidays, today=_jm.today, job_api='/api/jobs' %}
+{% include 'loaf/_shelf_modal.html' %}
+{% endwith %}
+<script src="{{ url_for('static', filename='js/loaf_basket_modal.js') }}"></script>
+<script src="{{ url_for('static', filename='js/income_pay.js') }}"></script>

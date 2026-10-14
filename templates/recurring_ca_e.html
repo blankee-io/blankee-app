@@ -1136,7 +1136,7 @@
 
         function openPriceChangeModal(recurringId) {
             editChangeMode = 'change';
-            openEditModal(recurringId);
+            openEditModal(recurringId, true);
 
             const row = $(`tr[data-recurring-id="${recurringId}"]`);
             $('#edit-modal-title').text('Schedule a Price Change');
@@ -1176,7 +1176,11 @@
             $('#edit-wage-bill-select').prop('disabled', true);
         }
 
-        function openEditModal(recurringId) {
+        function openEditModal(recurringId, asChange) {
+            // Edit always opens as an edit. The dialog is usually dismissed by a
+            // press outside it, which never reset the mode - so a change left
+            // armed was scheduled by the next Edit instead of saving it.
+            if (!asChange) { editChangeMode = 'edit'; }
             const modal = document.getElementById("edit-ca-modal");
 
             // openPriceChangeModal calls this first and then overrides, so only

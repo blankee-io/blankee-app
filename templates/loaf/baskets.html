@@ -49,9 +49,9 @@
                "Shelf" is what the table is called. Nobody reads that word
                here, because it says nothing on its own. #}
             <div class="recurring-header baskets">
-                <span>Shelves</span>
+                <span>Jobs</span>
                 <button id="add-shelf-btn" class="add-income-btn" type="button"
-                        title="Add Shelf">
+                        title="Add a job">
                     <i class="fa-solid fa-plus"></i>
                 </button>
             </div>
@@ -66,7 +66,7 @@
                 <thead>
                     <tr>
                         <th class="basket-handle-col"></th>
-                        <th class="basket-name-col">Shelf</th>
+                        <th class="basket-name-col">Job</th>
                         <th class="basket-type-col">Type</th>
                         <th class="basket-start-col"><span class="th-full">Starting<br>Balance</span><span class="th-mobile">Start</span></th>
                         <th class="basket-fill-col">Fills</th>
@@ -97,6 +97,8 @@
                         data-period-hours="{{ shelf.period_hours if shelf.period_hours is not none else '' }}"
                         data-holidays="{{ shelf.holidays or '' }}"
                         data-custom-holidays="{{ shelf.custom_holidays or '' }}"
+                        data-pay-lag-days="{{ shelf.pay_lag_days if shelf.pay_lag_days is not none else '' }}"
+                        data-payday-shift="{{ shelf.payday_shift or 'before' }}"
                         {%- for prefix in weekday_prefixes %}
                         data-{{ prefix }}-start="{{ shelf[prefix ~ '_start'] or '' }}"
                         data-{{ prefix }}-end="{{ shelf[prefix ~ '_end'] or '' }}"
@@ -115,16 +117,16 @@
                                    hours with no job to be earned at is not a
                                    thing Loaf can cost. #}
                                 <button class="add-basket-btn" type="button"
-                                        title="Add a basket to this shelf"
+                                        title="Add a basket to this job"
                                         data-shelf-id="{{ shelf.id }}">
                                     <i class="fa-solid fa-plus"></i>
                                 </button>
                                 <button class="edit-recurring-btn edit-shelf-btn" type="button"
-                                        title="Edit Shelf" data-shelf-id="{{ shelf.id }}">
+                                        title="Edit job" data-shelf-id="{{ shelf.id }}">
                                     <i class="fa-solid fa-pen-to-square"></i>
                                 </button>
                                 <button class="delete-recurring-btn delete-shelf-btn" type="button"
-                                        title="Delete Shelf" data-shelf-id="{{ shelf.id }}"
+                                        title="Delete job" data-shelf-id="{{ shelf.id }}"
                                         data-name="{{ shelf.name }}">
                                     <i class="fa-solid fa-trash-can"></i>
                                 </button>
@@ -204,7 +206,7 @@
                         <td class="basket-handle"></td>
                         <td class="basket-name" colspan="7">
                             <span class="basket-arrow"><i class="fa-solid fa-arrow-turn-down-right"></i></span>
-                            <span class="basket-none">No baskets on this shelf yet
+                            <span class="basket-none">No baskets in this job yet
                                 - use the plus to add one.</span>
                         </td>
                     </tr>
@@ -217,19 +219,19 @@
             </table>
             {% else %}
             <div class="recurring-income-empty-info">
-                <h2>No shelves yet</h2>
+                <h2>No jobs yet</h2>
                 <p>
-                    A <strong>shelf</strong> is a job: the week you work, the days
+                    A <strong>job</strong> is where you work: the week you work, the days
                     the office is shut, and when your pay lands. Everything
                     Loaf needs to know to cost a day off.
                 </p>
                 <p>
                     Inside it go <strong>baskets</strong> - pools of hours like
-                    vacation, sick leave or unpaid time. They share the shelf's
+                    vacation, sick leave or unpaid time. They share the job's
                     week, so two of them can never disagree about which days you
                     work.
                 </p>
-                <p>Add a shelf and Loaf can start forecasting what you will have left.</p>
+                <p>Add a job and Loaf can start forecasting what you will have left.</p>
             </div>
             {% endif %}
         </div>
@@ -251,7 +253,7 @@
     // its own, so the confirmation says so out loud.
     async function removeShelf(shelfId, name) {
         var ok = await showConfirmModal({
-            title: 'Delete this shelf?',
+            title: 'Delete this job?',
             message: 'Deleting "' + name + '" also deletes every basket filed ' +
                      'under it, and every hour booked against those. This ' +
                      'cannot be undone.',
@@ -269,13 +271,13 @@
                 if (response.status === 'success') {
                     location.reload();
                 } else {
-                    showToast(response.message || 'Could not delete that shelf.',
+                    showToast(response.message || 'Could not delete that job.',
                               'error');
                 }
             },
             error: function (xhr) {
                 var body = xhr.responseJSON || {};
-                showToast(body.message || 'Could not delete that shelf.', 'error');
+                showToast(body.message || 'Could not delete that job.', 'error');
             }
         });
     }
@@ -334,7 +336,7 @@
     });
     $(document).on('click', '.delete-shelf-btn', function () {
         removeShelf($(this).attr('data-shelf-id'),
-                    $(this).attr('data-name') || 'this shelf');
+                    $(this).attr('data-name') || 'this job');
     });
 
     // Drag to reorder. jQuery UI sortable plus touch-punch, the pair

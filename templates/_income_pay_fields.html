@@ -1,0 +1,70 @@
+{# "Advanced: calculate from my pay" - the optional part of a Wages recurring
+   income form (2026-10-13). Closed, the form is exactly what it always was:
+   one fixed amount on a schedule. Open, each paycheck is worked out from a
+   job (Loaf's shelf - its working week, holidays and pay dates): hours x rate,
+   or a salary, less unpaid time off, at a take-home percentage.
+
+   One macro per form, told its prefix ('add', 'edit', 'modal') so two forms
+   on a page do not share ids. static/js/income_pay.js drives it -
+   incomePay.attach() per form - and the server side is _pay_from_request in
+   app.py with the maths in pay_forecast.py. Shown only while Type is Wages. #}
+{% macro income_pay_fields(prefix, currency_type) %}
+{% set currency = "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type %}
+<div class="income-pay" id="{{ prefix }}-income-pay" data-prefix="{{ prefix }}" hidden>
+    <div class="income-pay-fields" id="{{ prefix }}-pay-fields" hidden>
+        <div class="income-pay-types" role="radiogroup" aria-label="How you are paid">
+            <label><input type="radio" name="{{ prefix }}_pay_type" value="hourly" checked> Hourly</label>
+            <label><input type="radio" name="{{ prefix }}_pay_type" value="salary"> Salary</label>
+        </div>
+
+        <label for="{{ prefix }}-pay-job">Job<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Where this pay comes from: your working week, the holidays you get, when pay lands and how long after the pay period it arrives. The same job Loaf uses for time off, so unpaid time off booked there comes off these paychecks.</span></span></label>
+        <div class="income-pay-job-row">
+            <select id="{{ prefix }}-pay-job" class="income-pay-job"></select>
+            <button type="button" class="income-pay-job-btn" id="{{ prefix }}-pay-job-edit" title="Edit this job"><i class="fa-solid fa-pen-to-square"></i></button>
+            <button type="button" class="income-pay-job-btn" id="{{ prefix }}-pay-job-new" title="Add a job"><i class="fa-solid fa-plus"></i></button>
+        </div>
+
+        <label for="{{ prefix }}-pay-rate" id="{{ prefix }}-pay-rate-label">Hourly rate, before tax</label>
+        {# Salary only: the figure is yearly or monthly, and the job's pay dates
+           spread it over the paychecks. #}
+        <div class="income-pay-period" id="{{ prefix }}-pay-period" role="radiogroup" aria-label="Salary per" hidden>
+            <label><input type="radio" name="{{ prefix }}_salary_period" value="year" checked> Annual</label>
+            <label><input type="radio" name="{{ prefix }}_salary_period" value="month"> Monthly</label>
+        </div>
+        <div class="currency-input-container">
+            <span class="r-currency-symbol">{{ currency }}</span>
+            <input type="number" class="recurring-amount" id="{{ prefix }}-pay-rate" placeholder="0.00" step="0.01" min="0" inputmode="decimal">
+        </div>
+
+        <label for="{{ prefix }}-pay-pct">Take-home<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The share of your gross pay that reaches your bank after taxes and deductions - on a pay stub, net pay divided by gross pay. Leave empty for 100%.</span></span></label>
+        <div class="income-pay-pct">
+            <input type="number" id="{{ prefix }}-pay-pct" step="any" placeholder="100" inputmode="decimal">
+            <span>%</span>
+        </div>
+
+        <div class="income-pay-flags" id="{{ prefix }}-pay-hourly-flags">
+            <div class="date-checkbox-row">
+                <input type="checkbox" id="{{ prefix }}-pay-overtime">
+                <label for="{{ prefix }}-pay-overtime">Overtime<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Hours over 40 in a workweek pay time and a half - 1.5 times your rate - as US law requires for most hourly work. Paid time off and holidays do not count toward the 40.</span></span></label>
+            </div>
+            <div class="date-checkbox-row">
+                <input type="checkbox" id="{{ prefix }}-pay-paid-holidays">
+                <label for="{{ prefix }}-pay-paid-holidays">Paid holidays<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Your job's holidays are paid as a normal day's hours. Leave it off if a holiday is simply a day without pay.</span></span></label>
+            </div>
+        </div>
+
+        <div class="income-pay-preview" id="{{ prefix }}-pay-preview" aria-live="polite"></div>
+    </div>
+</div>
+{% endmacro %}
+
+{# Simple or Advanced, on the right of the Type label's line - the form's own
+   first question about the amount. Shown with the fields, only while Type is
+   Wages. Advanced keeps the id the script reads (-pay-advanced). #}
+{% macro income_pay_mode(prefix) %}
+<div class="income-pay-mode" id="{{ prefix }}-pay-mode" role="radiogroup" aria-label="How this amount is worked out" hidden>
+    <label><input type="radio" name="{{ prefix }}_pay_mode" value="simple" id="{{ prefix }}-pay-simple" checked> Simple</label>
+    <label><input type="radio" name="{{ prefix }}_pay_mode" value="advanced" id="{{ prefix }}-pay-advanced"> Advanced</label>
+    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text"><strong>Simple</strong>: one fixed amount on the schedule you choose - right when every paycheck is the same. <strong>Advanced</strong>: each paycheck is worked out from your job - the hours you work times your rate, or your yearly or monthly salary - less unpaid time off and at your take-home percentage, with holidays and paydays that land on a weekend counted for you.</span></span>
+</div>
+{% endmacro %}

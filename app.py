@@ -699,6 +699,26 @@ def _copyright_years():
 app.jinja_env.globals['copyright_years'] = _copyright_years
 
 
+def _job_modal_context():
+    """
+    What templates/loaf/_shelf_modal.html needs, for a page outside Loaf that
+    offers the job editor - the Wages forms' "calculate from my pay"
+    (templates/_income_pay_job_modal.html). A callable so no route has to
+    pass it. Today is the user's, as the editor's "next pay date" minimum.
+    """
+    import loaf_data
+    import loaf_holidays
+    try:
+        today = _user_today_for(current_user.id) if current_user.is_authenticated else date.today()
+    except Exception:
+        today = date.today()
+    return {'weekday_prefixes': loaf_data.WEEKDAY_PREFIXES, 'weekday_names': loaf_data.WEEKDAY_NAMES,
+            'holidays': loaf_holidays.HOLIDAYS, 'today': today}
+
+
+app.jinja_env.globals['job_modal_context'] = _job_modal_context
+
+
 _static_versions = {}
 
 
@@ -19818,7 +19838,8 @@ def recurring_income():
                 SELECT ri.id, ri.user_id, ri.category_id, ic.name as category_name, ri.amount, 
                        ri.cadence_interval, ri.cadence_unit, ri.weekdays, ri.monthly_days, 
                        ri.start_date, ri.end_date, ri.yearly_day, ri.yearly_month,
-                       ic.no_end_date, ri.wage_bill
+                       ic.no_end_date, ri.wage_bill, ri.pay_type, ri.shelf_id, ri.pay_rate,
+                       ri.take_home_pct, ri.overtime, ri.paid_holidays, ri.salary_period
                 FROM recurring_income ri
                 JOIN income_categories ic ON ri.category_id = ic.id
                 WHERE ri.user_id = %s
@@ -20039,8 +20060,131 @@ _CHAIN_KINDS = {
 }
 
 
+# ---- Recurring income calculated from pay ----------------------------------
+# An optional, advanced part of a Wages recurring income (2026-10-13): each
+# paycheck worked out from a job - Loaf's shelf - instead of one fixed amount.
+# The math is pay_forecast.py; laying the forecasts is pay_income.py. A row
+# with pay_type NULL is every recurring income there was before, untouched.
+
+PAY_KEYS = ('pay_type', 'shelf_id', 'pay_rate', 'take_home_pct', 'overtime',
+            'paid_holidays', 'salary_period', 'take_home_dismissed')
+
+
+def _pay_carry(row):
+    """The pay fields of a stored row, for a row rebuilt from it - a change, a
+    resumption, a carried-over amount - so it stays calculated from pay."""
+    return {k: row.get(k) for k in PAY_KEYS if k in (row or {})}
+
+
+def _pay_fill(link, user_id):
+    """
+    For a pay row, the fields the job decides rather than the form: the
+    cadence (the job's pay dates), Wages, and `amount` - a typical paycheck,
+    for everything that reads one figure. Returns an error message or None.
+    """
+    import loaf_data
+    import pay_forecast
+    try:
+        shelf_id = int(link.get('shelf_id') or 0)
+    except (TypeError, ValueError):
+        shelf_id = 0
+    shelf = loaf_data.get_shelf(user_id, shelf_id) if shelf_id else None
+    if shelf is None:
+        return 'Choose the job this pay comes from.'
+    if not shelf.get('accrual_anchor_date'):
+        return 'That job needs its next pay date before pay can be worked out from it.'
+    link['cadence_interval'] = int(shelf.get('cadence_interval') or 1)
+    link['cadence_unit'] = shelf.get('cadence_unit') or 'weeks'
+    link['weekdays'] = shelf.get('weekdays') or None
+    link['monthly_days'] = shelf.get('monthly_days') or None
+    link['yearly_day'] = shelf.get('yearly_day') or None
+    link['yearly_month'] = shelf.get('yearly_month') or None
+    link['wage_bill'] = 1
+    net = pay_forecast.typical_net(link, shelf, _user_today_for(user_id))
+    if not net or net <= 0:
+        return 'That job has no paid hours to work a paycheck out from.'
+    link['amount'] = float(net)
+    return None
+
+
+def _pay_from_request(data, user_id, existing=None):
+    """
+    (pay fields, error) from a recurring income form.
+
+    pay fields is None when the form says nothing about pay and the row is a
+    fixed amount - the path every recurring income took before. A form that
+    leaves the pay keys out entirely (an old browser tab, the iOS app) keeps
+    what `existing` holds. pay_type sent empty turns a pay row back into a
+    fixed amount: every pay field cleared, and the amount the form sends kept.
+
+    For a pay row this also fills `data` with what the job decides - amount,
+    cadence and wage_bill - so the route's own checks and storage need no
+    special case.
+    """
+    if 'pay_type' not in data:
+        if existing and existing.get('pay_type'):
+            pay = _pay_carry(existing)
+        else:
+            return None, None
+    elif not data.get('pay_type'):
+        cleared = {k: None for k in PAY_KEYS}
+        cleared['overtime'] = 0
+        cleared['paid_holidays'] = 0
+        return cleared, None
+    else:
+        pay_type = str(data.get('pay_type')).strip().lower()
+        if pay_type not in ('hourly', 'salary'):
+            return None, 'Pay is calculated hourly or as a salary.'
+        try:
+            rate = float(data.get('pay_rate'))
+        except (TypeError, ValueError):
+            rate = 0
+        if rate <= 0:
+            return None, ('Enter the hourly rate.' if pay_type == 'hourly'
+                          else 'Enter the salary.')
+        period = str(data.get('salary_period') or 'year').strip().lower()
+        if pay_type == 'salary' and period not in ('year', 'month'):
+            return None, 'A salary is yearly or monthly.'
+        try:
+            pct = float(data.get('take_home_pct') if data.get('take_home_pct') not in (None, '') else 100)
+        except (TypeError, ValueError):
+            pct = -1
+        if not 0 < pct <= 100:
+            return None, 'Take-home has to be a percentage above 0 and up to 100.'
+        hourly = pay_type == 'hourly'
+        pay = {
+            'pay_type': pay_type,
+            'shelf_id': data.get('shelf_id'),
+            'pay_rate': round(rate, 4),
+            'take_home_pct': round(pct, 8),   # the column's places: add_pay_types.sql
+            'overtime': 1 if hourly and str(data.get('overtime') or '0') not in ('0', 'false', 'False', '') else 0,
+            'paid_holidays': 1 if hourly and str(data.get('paid_holidays') or '0') not in ('0', 'false', 'False', '') else 0,
+            'salary_period': None if hourly else period,
+            'take_home_dismissed': (existing or {}).get('take_home_dismissed'),
+        }
+
+    link = dict(pay)
+    error = _pay_fill(link, user_id)
+    if error:
+        return None, error
+    pay['shelf_id'] = int(link['shelf_id'])
+    data['amount'] = link['amount']
+    data['cadence_interval'] = link['cadence_interval']
+    data['cadence_unit'] = link['cadence_unit']
+    data['weekdays'] = [w for w in str(link['weekdays'] or '').split(',') if w]
+    data['monthly_days'] = [d for d in str(link['monthly_days'] or '').split(',') if d]
+    data['yearly_day'] = link['yearly_day']
+    data['yearly_month'] = link['yearly_month']
+    data['wage_bill'] = 1
+    return pay, None
+
+
 def _chain_generate(kind, link, start_date, end_date, user_id):
     """Lay entries for one link over a date range, whichever kind it is."""
+    if kind == 'income' and link.get('pay_type') in ('hourly', 'salary'):
+        import pay_income
+        pay_income.generate(link, start_date, end_date, user_id)
+        return
     weekdays = [w for w in str(link.get('weekdays') or '').split(',') if w]
     monthly_days = [d for d in str(link.get('monthly_days')
                                   or link.get('monthly_day') or '').split(',') if d]
@@ -20110,6 +20254,8 @@ def _recurring_chain(kind, user_id, category_id):
     rows = _get_recurring_from_redis(spec['recurring'], user_id)
     if rows is None:
         extra = ', account_id' if kind == 'c_expense' else ''
+        if kind == 'income':
+            extra = ', ' + ', '.join(PAY_KEYS)
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute(f"""
@@ -20415,6 +20561,7 @@ def _delete_chain_link(kind, user_id, category_id, recurring_id):
         }
         if kind == 'c_expense':
             carried['account_id'] = previous.get('account_id')
+        carried.update(_pay_carry(previous))
         _update_recurring_in_redis(spec['recurring'], user_id, carried)
         aligned = first_on_cadence(carried)
         if aligned <= _as_date(carried['end_date']):
@@ -20596,7 +20743,7 @@ def _lay_out_family(links, today):
 
 def _schedule_recurring_change(user_id, kind, category_id, effective, amount, cadence_interval,
                                cadence_unit, end_date=None, no_end_date=0, weekdays=None,
-                               monthly_days=None, yearly_day=None, yearly_month=None):
+                               monthly_days=None, yearly_day=None, yearly_month=None, pay=None):
     """Schedule a change to a recurring entry, taking effect on a future date.
 
     Splits the chain: the link covering the effective date is truncated to the
@@ -20698,6 +20845,16 @@ def _schedule_recurring_change(user_id, kind, category_id, effective, amount, ca
         }
         if kind == 'c_expense':
             new_link['account_id'] = target.get('account_id')
+        # A raise on pay calculated from a job: the same job and settings, with
+        # whatever the change sets - a new rate, take-home, overtime - and the
+        # job, not the form, deciding the cadence and the typical paycheck.
+        new_link.update(_pay_carry(target))
+        if pay:
+            new_link.update(pay)
+        if new_link.get('pay_type'):
+            pay_error = _pay_fill(new_link, user_id)
+            if pay_error:
+                return 400, {'status': 'error', 'message': pay_error}
         _update_recurring_in_redis(spec['recurring'], user_id, new_link)
 
         _chain_generate(kind, new_link, effective, new_end, user_id)
@@ -20737,6 +20894,7 @@ def _schedule_recurring_change(user_id, kind, category_id, effective, amount, ca
                 }
                 if kind == 'c_expense':
                     resumed['account_id'] = target.get('account_id')
+                resumed.update(_pay_carry(target))
                 _update_recurring_in_redis(spec['recurring'], user_id, resumed)
                 _chain_generate(kind, resumed, back_on, resumed['end_date'], user_id)
 
@@ -20771,6 +20929,36 @@ def schedule_recurring_change():
 
     category_id = data.get('category_id')
     effective_date = data.get('effective_date')
+
+    # A raise on income calculated from pay sends the new pay, not an amount
+    # and cadence - the job decides those (_schedule_recurring_change).
+    pay = None
+    if kind == 'income' and any(k in data for k in ('pay_rate', 'take_home_pct', 'overtime', 'paid_holidays')):
+        pay = {}
+        if 'pay_rate' in data:
+            try:
+                pay['pay_rate'] = round(float(data.get('pay_rate')), 4)
+            except (TypeError, ValueError):
+                pay['pay_rate'] = 0
+            if pay['pay_rate'] <= 0:
+                return jsonify({'status': 'error', 'message': 'Enter the new rate.'}), 400
+        if 'take_home_pct' in data:
+            try:
+                pay['take_home_pct'] = round(float(data.get('take_home_pct')), 8)
+            except (TypeError, ValueError):
+                pay['take_home_pct'] = -1
+            if not 0 < pay['take_home_pct'] <= 100:
+                return jsonify({'status': 'error',
+                                'message': 'Take-home has to be a percentage above 0 and up to 100.'}), 400
+        if data.get('salary_period') in ('year', 'month'):
+            pay['salary_period'] = data.get('salary_period')
+        for flag in ('overtime', 'paid_holidays'):
+            if flag in data:
+                pay[flag] = 1 if str(data.get(flag) or '0') not in ('0', 'false', 'False', '') else 0
+        data.setdefault('amount', 1)
+        data.setdefault('cadence_interval', 1)
+        data.setdefault('cadence_unit', 'weeks')
+
     amount = data.get('amount')
     cadence_interval = data.get('cadence_interval')
     cadence_unit = data.get('cadence_unit')
@@ -20786,8 +20974,107 @@ def schedule_recurring_change():
         current_user.id, kind, category_id, effective, amount, cadence_interval, cadence_unit,
         end_date=data.get('end_date'), no_end_date=data.get('no_end_date'),
         weekdays=data.get('weekdays'), monthly_days=data.get('monthly_days'),
-        yearly_day=data.get('yearly_day'), yearly_month=data.get('yearly_month'))
+        yearly_day=data.get('yearly_day'), yearly_month=data.get('yearly_month'), pay=pay)
     return jsonify(payload), status
+
+
+# ---- Jobs, for recurring income calculated from pay ----------------------------
+# A job is Loaf's shelf: the working week, the office's holidays, when pay lands
+# and how long after a period closes. These are the host's own routes, not
+# Loaf's blueprint, so they work whether or not the Loaf app is switched on -
+# the income form needs a job either way. Saved through loaf_data.save_shelf,
+# the same as Loaf's own pages.
+
+def _job_json(shelf):
+    """A job row as JSON-safe values."""
+    out = {}
+    for key, value in (shelf or {}).items():
+        if isinstance(value, (datetime, date)):
+            out[key] = value.isoformat()[:10] if not isinstance(value, datetime) else value.isoformat()
+        elif isinstance(value, timedelta):
+            seconds = int(value.total_seconds())
+            out[key] = '%02d:%02d:%02d' % (seconds // 3600, seconds % 3600 // 60, seconds % 60)
+        elif isinstance(value, Decimal):
+            out[key] = float(value)
+        else:
+            out[key] = value
+    return out
+
+
+@app.route('/api/jobs', methods=['GET'])
+@login_required
+def api_jobs():
+    """The user's jobs, for the income form's job picker."""
+    import loaf_data
+    jobs = []
+    for shelf in loaf_data.get_shelves(current_user.id):
+        row = _job_json(shelf)
+        row['describe_week'] = loaf_data.describe_week(shelf)
+        row['has_pay_date'] = bool(shelf.get('accrual_anchor_date'))
+        jobs.append(row)
+    return jsonify({'status': 'success', 'jobs': jobs})
+
+
+@app.route('/api/jobs', methods=['POST'])
+@login_required
+def api_create_job():
+    import loaf_app
+    import loaf_data
+    shelf_id, error = loaf_data.save_shelf(current_user.id, None, loaf_app._flat(request.get_json(silent=True) or {}))
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+    return jsonify({'status': 'success', 'shelf_id': shelf_id})
+
+
+@app.route('/api/jobs/<int:shelf_id>', methods=['POST'])
+@login_required
+def api_update_job(shelf_id):
+    import loaf_app
+    import loaf_data
+    saved, error = loaf_data.save_shelf(current_user.id, shelf_id, loaf_app._flat(request.get_json(silent=True) or {}))
+    if error:
+        return jsonify({'status': 'error', 'message': error}), (404 if error == 'No such job.' else 400)
+    return jsonify({'status': 'success', 'shelf_id': saved})
+
+
+@app.route('/api/pay-preview', methods=['POST'])
+@login_required
+def api_pay_preview():
+    """
+    The next paychecks a recurring income calculated from pay would forecast,
+    for the form to show before saving. Writes nothing - it is in the
+    middleware's skip_paths so it does not move the data version.
+    """
+    import pay_income
+    data = dict(request.get_json(silent=True) or {})
+    count = max(1, min(int(data.get('count') or 6), 26))
+    if not data.get('pay_type'):
+        return jsonify({'status': 'error', 'message': 'Choose hourly or salary.'}), 400
+    pay, error = _pay_from_request(data, current_user.id)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+    today = _user_today_for(current_user.id)
+    first = max(today, _as_date(data.get('start_date')) or today)
+    link = dict(pay, start_date=str(first), end_date=None)
+    rows = []
+    for pay_date, net, detail in pay_income.paychecks(current_user.id, link, first, first + timedelta(days=400)):
+        rows.append({
+            'pay_date': pay_date.isoformat(),
+            'period_start': detail['start'].isoformat(),
+            'period_end': detail['end'].isoformat(),
+            'hours': float(detail['worked']),
+            'overtime': float(detail['overtime']),
+            'holiday': float(detail['holiday']),
+            'pto': float(detail['pto']),
+            'unpaid': float(detail['uto']),
+            'gross': float(detail['gross']),
+            'net': float(net),
+        })
+        if len(rows) >= count:
+            break
+    return jsonify({'status': 'success', 'typical': data.get('amount'), 'paychecks': rows,
+                    'cadence_interval': data.get('cadence_interval'),
+                    'cadence_unit': data.get('cadence_unit')})
 
 
 @app.route('/add-recurring-income', methods=['POST'])
@@ -20798,6 +21085,11 @@ def add_recurring_income():
 
     if not data:
         return jsonify({'status': 'error', 'message': 'No data received'}), 400
+
+    # Calculated from pay: the job fills amount and cadence before they are read.
+    pay, pay_error = _pay_from_request(data, current_user.id)
+    if pay_error:
+        return jsonify({'status': 'error', 'message': pay_error}), 400
 
     # Extract data from the request
     category_name = data.get('category_name')
@@ -20890,6 +21182,8 @@ def add_recurring_income():
             'wage_bill': wage_bill
         }
         
+        if pay:
+            recurring_data.update(pay)
         _update_recurring_in_redis('recurring_income', current_user.id, recurring_data)
         
         # Use a temporary ID for generating entries (will be replaced on flush)
@@ -20897,7 +21191,9 @@ def add_recurring_income():
 
         # Generate income entries based on the cadence
         # Now writes to Redis, so works with both temp (negative) and real (positive) IDs
-        if recurring_id:
+        if recurring_id and recurring_data.get('pay_type'):
+            _chain_generate('income', recurring_data, start_date, end_date, current_user.id)
+        elif recurring_id:
             generate_income_entries(
                 recurring_id, category_id, amount, cadence_interval, cadence_unit, 
                 start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month, current_user.id
@@ -21177,6 +21473,10 @@ def convert_to_recurring_income():
     if not data:
         return jsonify({'status': 'error', 'message': 'No data received'}), 400
 
+    pay, pay_error = _pay_from_request(data, current_user.id)
+    if pay_error:
+        return jsonify({'status': 'error', 'message': pay_error}), 400
+
     category_id = data.get('category_id')
     amount = data.get('amount')
     cadence_interval = data.get('cadence_interval')
@@ -21241,11 +21541,15 @@ def convert_to_recurring_income():
             'wage_bill': wage_bill
         }
 
+        if pay:
+            recurring_data.update(pay)
         _update_recurring_in_redis('recurring_income', current_user.id, recurring_data)
 
         recurring_id = recurring_data['id']
 
-        if recurring_id:
+        if recurring_id and recurring_data.get('pay_type'):
+            _chain_generate('income', recurring_data, start_date, end_date, current_user.id)
+        elif recurring_id:
             generate_income_entries(
                 recurring_id, int(category_id), amount, cadence_interval, cadence_unit,
                 start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month, current_user.id
@@ -21267,6 +21571,24 @@ def update_recurring_income():
 
 def update_recurring_income_inner(data, user_id):
     try:
+        # Calculated from pay: what the form leaves out keeps what is stored,
+        # and the job fills amount and cadence before they are read.
+        existing = None
+        for rec in (_get_recurring_from_redis('recurring_income', user_id) or []):
+            if str(rec.get('id')) == str(data.get('recurring_id')):
+                existing = rec
+                break
+        if existing is None and data.get('recurring_id'):
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT * FROM recurring_income WHERE id = %s AND user_id = %s",
+                               (data.get('recurring_id'), user_id))
+                existing = cursor.fetchone()
+                cursor.close()
+        pay, pay_error = _pay_from_request(data, user_id, existing)
+        if pay_error:
+            return jsonify({'status': 'error', 'message': pay_error}), 400
+
         # Get the request data sent via AJAX
         recurring_id = data.get('recurring_id')
         category_name = data.get('category_name')
@@ -21357,6 +21679,8 @@ def update_recurring_income_inner(data, user_id):
             'wage_bill': wage_bill
         }
         
+        if pay:
+            recurring_data.update(pay)
         _update_recurring_in_redis('recurring_income', user_id, recurring_data)
 
         # Step 3: Delete old income entries for today and the future from Redis
@@ -21367,7 +21691,9 @@ def update_recurring_income_inner(data, user_id):
 
         # Step 4: Recreate the income entries with the updated details (only for today and future)
         # Now writes to Redis, so works with both temp (negative) and real (positive) IDs
-        if recurring_id:
+        if recurring_id and recurring_data.get('pay_type'):
+            _chain_generate('income', recurring_data, start_date, end_date, user_id)
+        elif recurring_id:
             generate_income_entries(recurring_id, category_id, amount, cadence_interval, cadence_unit,
                                     start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month)
 

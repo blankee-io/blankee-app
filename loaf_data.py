@@ -86,6 +86,11 @@ SHELF_COLUMNS = (
     'year_start_month', 'year_start_day',
     'holidays', 'custom_holidays', 'accrual_only_weekdays',
     'uncharged_weekdays',
+    # Payroll facts Loaf itself never reads, kept with the job because they
+    # are the employer's: how long after a period closes the money arrives,
+    # and which way a payday on a weekend or bank holiday moves. Blankee's
+    # income calculated from pay reads them - see pay_forecast.py.
+    'pay_lag_days', 'payday_shift',
 ) + tuple(
     '%s_%s' % (day, part)
     for day in WEEKDAY_PREFIXES
@@ -385,6 +390,38 @@ def create_shelf(user_id, data):
 
 def update_shelf(user_id, shelf_id, data):
     return _update(SHELVES, user_id, shelf_id, data, SHELF_COLUMNS)
+
+
+# A field clean_shelf reads as "not set" when it is not sent, but which a form
+# might simply not show - so an update that leaves it out must keep it rather
+# than wipe it. The reasons, field by field, are at loaf_app.api_update_shelf;
+# Blankee's job API saves through here too.
+SHELF_ABSENT_MEANS_KEEP = ('accrual_only_weekdays', 'uncharged_weekdays',
+                           'period_hours', 'pay_lag_days', 'payday_shift')
+
+
+def save_shelf(user_id, shelf_id, payload):
+    """Create (shelf_id None) or update a job from a flattened form payload.
+
+    (shelf_id, error) - one of them None. The one place a job is saved from a
+    form, so Loaf's pages and Blankee's income form cannot save it differently.
+    """
+    values, error = clean_shelf(payload)
+    if error:
+        return None, error
+    if shelf_id is None:
+        new_id = create_shelf(user_id, values)
+        return (new_id, None) if new_id is not None else (None, 'Could not save that job.')
+    if get_shelf(user_id, shelf_id) is None:
+        return None, 'No such job.'
+    for absent_means_keep in SHELF_ABSENT_MEANS_KEEP:
+        if absent_means_keep not in payload:
+            values.pop(absent_means_keep, None)
+    # Provenance written once by the migration; nothing on a form may move it.
+    values.pop('source_basket_id', None)
+    if not update_shelf(user_id, shelf_id, values):
+        return None, 'Could not save that job.'
+    return int(shelf_id), None
 
 
 def delete_shelf(user_id, shelf_id):
@@ -828,6 +865,16 @@ def clean_shelf(payload):
     values['custom_holidays'] = loaf_holidays.format_custom(
         payload.get('custom_holidays'))
     values['monthly_days'] = _monthly_day_list(payload.get('monthly_days'))
+
+    lag, ok = _opt_number(payload.get('pay_lag_days'), int)
+    if not ok or (lag is not None and not 0 <= lag <= 60):
+        return None, 'The days between a pay period ending and payday have to be 0 to 60.'
+    values['pay_lag_days'] = lag
+
+    shift = str(payload.get('payday_shift') or 'before').strip().lower()
+    if shift not in ('before', 'after', 'none'):
+        return None, 'That payday rule is not one Loaf understands.'
+    values['payday_shift'] = shift
 
     # The working week. A day with no start is a day not worked, which is how
     # the form says "I do not work Sundays" - it clears the two time inputs.

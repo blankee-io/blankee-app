@@ -570,6 +570,8 @@
             el(P + '-' + prefix + '-off').checked = true;
         });
         el(P + '-break').value = '30';
+        el(P + '-pay-lag-days').value = '';
+        el(P + '-payday-shift').value = 'before';
         $('.' + P + '-weekday[value="friday"]').prop('checked', true);
         syncCadence();
         syncCarryover();
@@ -579,13 +581,32 @@
     }
 
     function openEdit(rowId) {
-        syncCountedWeek();
         // Both forms hydrate from the same table. Its rows carry the job's
         // settings as well as the pool's - see the comment on the <tr> in
         // baskets.html - so the only difference is which attribute identifies
         // the row wanted.
         var row = $('tr[' + cfg.rowKey + '="' + rowId + '"]').first();
         if (!row.length) { return; }
+        fill(row, rowId);
+    }
+
+    // A job that has no table row to read - Blankee's income form edits one
+    // from /api/jobs. The same fill as openEdit, fed through an object that
+    // answers row.attr('data-foo-bar') with obj.foo_bar, so the two cannot
+    // read a job differently.
+    function openEditFrom(obj) {
+        obj = obj || {};
+        fill({
+            length: 1,
+            attr: function (name) {
+                var value = obj[String(name).replace(/^data-/, '').replace(/-/g, '_')];
+                return (value === null || value === undefined) ? '' : String(value);
+            }
+        }, obj.id);
+    }
+
+    function fill(row, rowId) {
+        syncCountedWeek();
         var basketId = rowId;
         clearForm();
 
@@ -695,6 +716,11 @@
                 parseInt(row.attr('data-' + prefix + '-break-minutes') || '0', 10) || 0);
         });
         el(P + '-break').value = String(longest);
+
+        // When the money arrives - Blankee's income calculated from pay reads
+        // these; Loaf itself does not.
+        el(P + '-pay-lag-days').value = row.attr('data-pay-lag-days') || '';
+        el(P + '-payday-shift').value = row.attr('data-payday-shift') || 'before';
 
         syncCadence();
         syncCarryover();
@@ -810,13 +836,22 @@
         // user cleared it rather than never having been shown it.
         if (at(P + '-mon-free')) { payload.uncharged_weekdays = uncharged; }
 
+        // Only the job form has them; the basket form must not send them, or
+        // the server would read them as cleared.
+        if (at(P + '-pay-lag-days')) {
+            payload.pay_lag_days = val(P + '-pay-lag-days');
+            payload.payday_shift = val(P + '-payday-shift') || 'before';
+        }
+
         return payload;
     }
 
     form.addEventListener('submit', function (event) {
         event.preventDefault();
         var basketId = el(P + '-id').value;
-        var url = basketId ? cfg.api + '/' + basketId : cfg.api;
+        // A page outside Loaf saves through its own routes (data-api).
+        var api = modal.getAttribute('data-api') || cfg.api;
+        var url = basketId ? api + '/' + basketId : api;
 
         el(P + '-submit').disabled = true;
         $.ajax({
@@ -826,7 +861,15 @@
             data: JSON.stringify(collect()),
             success: function (response) {
                 if (response.status === 'success') {
-                    location.reload();
+                    // A page that keeps going - the income form picking the
+                    // job it just made - says so with onSaved; Loaf reloads.
+                    if (typeof self.onSaved === 'function') {
+                        el(P + '-submit').disabled = false;
+                        close();
+                        self.onSaved(response);
+                    } else {
+                        location.reload();
+                    }
                 } else {
                     el(P + '-submit').disabled = false;
                     showToast(response.message
@@ -1040,9 +1083,12 @@
         if (event.key === 'Escape' && modal.style.display === 'flex') { close(); }
     });
 
-    return {
+    var self = {
         openAdd: openAdd,
         openEdit: openEdit,
+        openEditFrom: openEditFrom,
+        // function(response) - set it to stay on the page after a save.
+        onSaved: null,
         close: close,
         isOpen: function () { return modal.style.display === 'flex'; },
 
@@ -1061,6 +1107,7 @@
             return countedWeekOn();
         }
     };
+    return self;
     }
 
     // One implementation, two forms. The basket form holds a pool of hours;
@@ -1077,9 +1124,10 @@
         sections: ['holds', 'fills']
     });
 
-    // "Shelf" is the table; "Job" is the only word the user ever sees.
+    // "Shelf" is the table; "Job" is the only word the user ever sees -
+    // including the form's own title and button, which read the noun.
     window.loafShelfModal = build('shelf', {
-        noun: 'Shelf',
+        noun: 'Job',
         api: '/loaf/api/shelves',
         rowKey: 'data-shelf-id',
         sections: ['pays', 'week', 'shut']

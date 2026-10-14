@@ -434,14 +434,9 @@ def _shelf_error(payload):
 @loaf.route('/api/shelves', methods=['POST'])
 @login_required
 def api_create_shelf():
-    values, error = loaf_data.clean_shelf(_flat(_payload()))
+    shelf_id, error = loaf_data.save_shelf(current_user.id, None, _flat(_payload()))
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
-
-    shelf_id = loaf_data.create_shelf(current_user.id, values)
-    if shelf_id is None:
-        return jsonify({'status': 'error',
-                        'message': 'Could not save that job.'}), 500
     return jsonify({'status': 'success', 'shelf_id': shelf_id})
 
 
@@ -452,9 +447,6 @@ def api_update_shelf(shelf_id):
         return jsonify({'status': 'error', 'message': 'No such job.'}), 404
 
     payload = _flat(_payload())
-    values, error = loaf_data.clean_shelf(payload)
-    if error:
-        return jsonify({'status': 'error', 'message': error}), 400
 
     # The same rule api_update_basket documents at length, for the fields that
     # moved here with the working week: clean_shelf reads "never sent" as "not
@@ -477,19 +469,13 @@ def api_update_shelf(shelf_id):
     # everybody, so the current form always sends the key - but a browser still
     # holding the previous release's script does not, and during an update
     # window that is exactly a payload that would silently clear it.
-    for absent_means_keep in ('accrual_only_weekdays', 'uncharged_weekdays',
-                              'period_hours'):
-        if absent_means_keep not in payload:
-            values.pop(absent_means_keep, None)
-
-    # source_basket_id is provenance written once by the migration. Nothing on
-    # a form may move it, and clean_shelf never produces it, but popping it is
-    # cheap insurance against a future caller that does.
-    values.pop('source_basket_id', None)
-
-    if not loaf_data.update_shelf(current_user.id, shelf_id, values):
-        return jsonify({'status': 'error',
-                        'message': 'Could not save that job.'}), 500
+    # pay_lag_days and payday_shift too: Blankee's income form sets them, and
+    # Loaf's own form did not send them before this release. The list is
+    # loaf_data.SHELF_ABSENT_MEANS_KEEP, and save_shelf applies it - the one
+    # place a job is saved from a form, Blankee's job API included.
+    saved, error = loaf_data.save_shelf(current_user.id, shelf_id, payload)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
     return jsonify({'status': 'success'})
 
 
@@ -576,7 +562,7 @@ def api_create_basket():
             return jsonify({'status': 'error',
                             'message': 'Say which job this basket is for.'}), 400
     elif loaf_data.get_shelf(current_user.id, values['shelf_id']) is None:
-        return jsonify({'status': 'error', 'message': 'No such shelf.'}), 404
+        return jsonify({'status': 'error', 'message': 'No such job.'}), 404
 
     # Named after the shelf it just landed on, when nobody named it. The clash
     # check follows rather than precedes, because two unnamed PTO baskets on

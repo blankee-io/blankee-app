@@ -93,7 +93,7 @@
                    shelf. The plus for a basket is on the chips below, beside
                    the pools it would join. #}
                 <button id="loaf-add-shelf" class="add-income-btn" type="button"
-                        title="Add Shelf" aria-label="Add Shelf">
+                        title="Add a job" aria-label="Add a job">
                     <i class="fa-solid fa-plus"></i>
                 </button>
             </span>
@@ -607,8 +607,8 @@
         add.type = 'button';
         add.id = 'loaf-add-pool';
         add.className = 'loaf-pool loaf-pool-add';
-        add.title = 'Add a basket to this shelf';
-        add.setAttribute('aria-label', 'Add a basket to this shelf');
+        add.title = 'Add a basket to this job';
+        add.setAttribute('aria-label', 'Add a basket to this job');
         add.innerHTML = '<i class="fa-solid fa-plus"></i>';
         host.appendChild(add);
     }
@@ -1301,7 +1301,7 @@
     // switcher or the chips.
     $('#loaf-add-shelf').on('click', function () {
         if (!window.loafShelfModal) {
-            showToast('The shelf form is not on this page.', 'error');
+            showToast('The job form is not on this page.', 'error');
             return;
         }
         loafShelfModal.openAdd();

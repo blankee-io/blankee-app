@@ -280,6 +280,11 @@ def _observe(user_id, table, category_id, on, amount, entry_id, transaction_id):
     if recurring_table is None or on is None or category_id is None:
         return None
     link = link_for(user_id, recurring_table, category_id, on)
+    # Pay calculated from a job is meant to differ from one check to the next -
+    # hours, holidays, time off - so a different amount is not a habit to
+    # propose. Its take-home % is learned another way (pay_income).
+    if link is not None and link.get('pay_type'):
+        return None
     if link is None or not _flag(link.get('wage_bill')):
         return None
     now = _miss(link, on, amount)

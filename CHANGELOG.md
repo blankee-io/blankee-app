@@ -8,6 +8,44 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.55.0 — 2026-10-13
+
+### Added
+
+- **Wages calculated from your pay** - optional: a Wages recurring income
+  (on the Recurring Income page and the dashboards' add form) is now
+  **Simple** or **Advanced**, right under its type. Simple is what it always
+  was, one fixed amount. Advanced works each paycheck out from your job:
+  - **Hourly**: the hours you actually work in each pay period times your
+    rate, with overtime past 40 hours a week at 1.5x and paid holidays as
+    options; **Salary**: your annual or monthly salary, spread over the
+    job's paychecks (26 every other week, 24 twice a month) and docked for
+    unpaid time off.
+  - Then your **take-home percentage**, so the forecast is what reaches the
+    bank - to as many decimals as your pay stub gives (up to 8).
+  - The job is Loaf's - your working week, the holidays you get and the
+    time off you book there - edited right from the form. It now also knows
+    how many days after a pay period closes the money arrives, and that a
+    payday on a weekend or bank holiday moves to the business day before
+    (or after).
+  - Each paycheck is forecast at its own amount - a Thanksgiving week pays
+    less, a Christmas payday lands on the 24th - and the form previews the
+    next six before you save. The table shows the rate with the typical
+    paycheck under it. A raise on such an income changes the rate from a
+    date, keeping the job.
+
+### Changed
+
+- Loaf calls a job a **job** everywhere now - its Manage page, its month
+  view and the job form - instead of "shelf".
+
+### Fixed
+
+- On the recurring pages, closing a raise or price-change dialog by
+  clicking outside it left the next Edit acting as a raise or price change -
+  saving it scheduled a change instead of editing. Edit now always opens as
+  an edit.
+
 ## 1.54.0 — 2026-10-12
 
 ### Added

@@ -328,39 +328,54 @@ function getEntryTypeIcon(type) {
 }
 
 /**
- * Show an inline warning right above the end-date options inside a .date-row,
- * with an orange highlight border around the options area.
- * @param {string} endDateSelector  jQuery selector for the end-date <input>
+ * Show an inline warning right above a part of a form that still needs
+ * filling in, with an orange highlight border around it - the end-date
+ * options, or any field's box (an input's container, a row of controls).
+ * The box must be able to hold the floating message: an element, not an
+ * <input> itself.
+ * @param {string|Element|jQuery} box  the area to outline
+ * @param {string} message             what is missing
  */
-function showEndDateWarning(endDateSelector) {
-    var $endDate = $(endDateSelector);
-    var $dateRow = $endDate.closest('.date-row');
-    if (!$dateRow.length) return;
+function showFieldWarning(box, message) {
+    var $box = $(box).first();
+    if (!$box.length) return;
 
     // Remove any existing warning first
-    $dateRow.find('.end-date-inline-toast').remove();
-    $dateRow.removeClass('end-date-warning-highlight');
+    clearTimeout($box.data('fieldWarningTimer'));
+    $box.children('.end-date-inline-toast').remove();
 
     // Add highlight
-    $dateRow.addClass('end-date-warning-highlight');
+    $box.addClass('end-date-warning-highlight');
 
     // Create floating toast (absolute positioned, no layout shift)
     var $toast = $('<div class="end-date-inline-toast">' +
-        '<i class="fa-solid fa-triangle-exclamation"></i>' +
-        '<span>Please select an end date option.</span>' +
-        '</div>');
+        '<i class="fa-solid fa-triangle-exclamation"></i><span></span></div>');
+    $toast.find('span').text(message);
 
-    $dateRow.append($toast);
+    $box.append($toast);
 
     // Scroll into view
     $toast[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-    // Auto remove after 4 seconds
-    setTimeout(function() {
-        $dateRow.removeClass('end-date-warning-highlight');
+    // Auto remove after 4 seconds, or as soon as the field is changed - an
+    // outline left on a field already fixed reads as a second problem.
+    function clear() {
+        clearTimeout($box.data('fieldWarningTimer'));
+        $box.off('.fieldWarning');
+        $box.removeClass('end-date-warning-highlight');
         $toast.addClass('end-date-inline-toast-removing');
         $toast.on('animationend', function() { $toast.remove(); });
-    }, 4000);
+    }
+    $box.off('.fieldWarning').on('input.fieldWarning change.fieldWarning', clear);
+    $box.data('fieldWarningTimer', setTimeout(clear, 4000));
+}
+
+/**
+ * The end-date options inside a .date-row - showFieldWarning on that row.
+ * @param {string} endDateSelector  jQuery selector for the end-date <input>
+ */
+function showEndDateWarning(endDateSelector) {
+    showFieldWarning($(endDateSelector).closest('.date-row'), 'Please select an end date option.');
 }
 
 // ═══════════════════════════════════════════════════════════════

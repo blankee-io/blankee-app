@@ -1,3 +1,4 @@
+{% from '_income_pay_fields.html' import income_pay_fields, income_pay_mode %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -97,7 +98,7 @@
                             </td>
                         </tr>
                         {% endif %}
-                        <tr class="{% if record.is_raise %}recurring-raise-row{% elif loop.nextitem and loop.nextitem.is_raise %}recurring-has-raises{% endif %}{% if record.chain_state %} chain-{{ record.chain_state }}{% endif %}" data-group-key="{{ record.group_key }}" data-recurring-id="{{ record.id }}" data-category-id="{{ record.category_id }}" data-category-name="{{ record.category_name }}" data-start-date="{{ record.start_date }}" data-amount="{{ record.amount }}" data-cadence-interval="{{ record.cadence_interval }}" data-cadence-unit="{{ record.cadence_unit }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}1{% else %}0{% endif %}" data-wage-bill="{{ record.wage_bill }}">
+                        <tr class="{% if record.is_raise %}recurring-raise-row{% elif loop.nextitem and loop.nextitem.is_raise %}recurring-has-raises{% endif %}{% if record.chain_state %} chain-{{ record.chain_state }}{% endif %}" data-group-key="{{ record.group_key }}" data-recurring-id="{{ record.id }}" data-category-id="{{ record.category_id }}" data-category-name="{{ record.category_name }}" data-start-date="{{ record.start_date }}" data-amount="{{ record.amount }}" data-cadence-interval="{{ record.cadence_interval }}" data-cadence-unit="{{ record.cadence_unit }}" data-weekdays="{{ record.weekdays }}" data-monthly-days="{{ record.monthly_days }}" data-yearly-day="{{ record.yearly_day }}" data-yearly-month="{{ record.yearly_month }}" data-end-date="{{ record.end_date }}" data-no-end-date="{% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}1{% else %}0{% endif %}" data-wage-bill="{{ record.wage_bill }}" data-pay-type="{{ record.pay_type or '' }}" data-shelf-id="{{ record.shelf_id or '' }}" data-pay-rate="{{ record.pay_rate if record.pay_rate is not none else '' }}" data-take-home-pct="{{ record.take_home_pct if record.take_home_pct is not none else '' }}" data-overtime="{{ 1 if record.overtime and record.overtime|int else 0 }}" data-paid-holidays="{{ 1 if record.paid_holidays and record.paid_holidays|int else 0 }}" data-salary-period="{{ record.salary_period or '' }}">
                             {# A raise is the same income later on, so it does not repeat the name -
                                it says the date it takes over. Not editable either: renaming
                                the category on a raise row would rename the whole chain and
@@ -115,7 +116,10 @@
                             {% else %}
                             <td class="income-type" data-column="type">{{ 'Wages' if record.wage_bill == 1 else 'Variable' }}</td>
                             {% endif %}
-                            <td class="editable income-amount" data-column="amount">{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}{{ "%.2f"|format(record.amount) }}</td>
+                            {% set cur = "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type %}
+                            {# A pay row's amount is its typical paycheck, as every other row's is
+                               its fixed one - the rate behind it is in the edit form. #}
+                            <td class="editable income-amount" data-column="amount">{{ cur }}{{ "%.2f"|format(record.amount|float) }}</td>
                             <td class="editable income-cadence" data-column="cadence" title="{{ record.cadence_description }}"><span class="cadence-top">{{ record.cadence_interval }} {% if record.cadence_unit == 'years' %}<i class="fa-solid fa-calendars"></i>{% elif record.cadence_unit == 'months' %}<i class="fa-solid fa-calendar-days"></i>{% elif record.cadence_unit == 'weeks' %}<i class="fa-solid fa-calendar-week"></i>{% else %}<i class="fa-solid fa-calendar-day"></i>{% endif %}</span>{% if record.cadence_unit == 'years' and record.yearly_month and record.yearly_day %}<span class="cadence-detail">{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][record.yearly_month | int] }} {{ record.yearly_day | ordinal }}</span>{% elif record.cadence_unit == 'months' and record.monthly_days %}<span class="cadence-detail">{{ record.monthly_days | ordinal }}</span>{% elif record.cadence_unit == 'weeks' and record.weekdays %}<span class="cadence-detail">{{ record.weekdays | replace('monday','Mo') | replace('tuesday','Tu') | replace('wednesday','We') | replace('thursday','Th') | replace('friday','Fr') | replace('saturday','Sa') | replace('sunday','Su') }}</span>{% endif %}</td>
                             <td class="editable income-start-date" data-column="start_date">{{ record.start_date[5:7] }}-{{ record.start_date[8:] }}-{{ record.start_date[2:4] }}<span class="mobile-end-date">→ {% if record.no_end_date == 1 or record.display_end_date == 'No end date' %}No End{% else %}{{ record.end_date[5:7] }}-{{ record.end_date[8:] }}-{{ record.end_date[2:4] }}{% endif %}</span></td>
                             <td class="editable income-end-date" data-column="end_date">
@@ -190,12 +194,17 @@
                 </div>
 
                 <div class="form-row">
-                    <label for="wage-bill-select">Type:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Wages and Bills are all-or-nothing: one entry settles the whole forecast. Variable and Allowance deplete gradually, so each entry reduces what is left for the period.</span></span></label>
+                    <div class="income-pay-type-head">
+                        <label for="wage-bill-select">Type:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Wages and Bills are all-or-nothing: one entry settles the whole forecast. Variable and Allowance deplete gradually, so each entry reduces what is left for the period.</span></span></label>
+                        {{ income_pay_mode('add') }}
+                    </div>
                     <select id="wage-bill-select" name="wage_bill">
                         <option value="1">Wages (fixed income)</option>
                         <option value="0">Variable (irregular income)</option>
                     </select>
                 </div>
+
+                {{ income_pay_fields('add', currency_type) }}
             
                 <label for="amount">Recurring Amount<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The amount forecast for each occurrence. Future occurrences appear as forecast entries and count toward your totals until you confirm them.</span></span></label>
                 <div class="currency-input-container">
@@ -310,12 +319,17 @@
                 <input type="text" id="edit-category-name" name="category_name" required maxlength="20">
 
                 <div class="form-row">
-                    <label for="edit-wage-bill-select">Type:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Wages and Bills are all-or-nothing: one entry settles the whole forecast. Variable and Allowance deplete gradually, so each entry reduces what is left for the period.</span></span></label>
+                    <div class="income-pay-type-head">
+                        <label for="edit-wage-bill-select">Type:<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">Wages and Bills are all-or-nothing: one entry settles the whole forecast. Variable and Allowance deplete gradually, so each entry reduces what is left for the period.</span></span></label>
+                        {{ income_pay_mode('edit') }}
+                    </div>
                     <select id="edit-wage-bill-select" name="wage_bill">
                         <option value="1">Wages (fixed income)</option>
                         <option value="0">Variable (irregular income)</option>
                     </select>
                 </div>
+
+                {{ income_pay_fields('edit', currency_type) }}
             
                 <label for="edit-amount">Recurring Amount<span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i><span class="info-tip-text">The amount forecast for each occurrence. Future occurrences appear as forecast entries and count toward your totals until you confirm them.</span></span></label>
                 <div class="currency-input-container">
@@ -419,6 +433,7 @@
 
     <!-- Link to the external JavaScript file -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    {% include '_income_pay_job_modal.html' %}
 
     <script>
         document.getElementById('loading-screen').style.display = 'none';
@@ -636,6 +651,7 @@
             // Clear the end_date input
             document.getElementById('end_date').value = '';
             updateAddEndDateState();
+            incomePay.reset('add');
         }
 
         // Close modals when clicking outside (desktop and mobile)
@@ -967,6 +983,12 @@
                 formData.end_date = getFiveYearsFromNowEndDateString();
             }
 
+            // Calculated from pay, when that section is open.
+            if (incomePay.validate('add')) {   // outlines the missing field
+                return false;
+            }
+            incomePay.extend('add', formData);
+
             // Make the AJAX request to the backend
             document.getElementById('loading-screen').style.display = 'flex';
             $.ajax({
@@ -1176,7 +1198,7 @@
 
         function openRaiseModal(recurringId) {
             editIncomeMode = 'raise';
-            openEditModal(recurringId);
+            openEditModal(recurringId, true);
 
             const row = $(`tr[data-recurring-id="${recurringId}"]`);
             $('#edit-modal-title').text('Schedule a Raise');
@@ -1226,7 +1248,11 @@
             $('#edit-wage-bill-select').prop('disabled', true);
         }
 
-        function openEditModal(recurringId) {
+        function openEditModal(recurringId, asChange) {
+            // Edit always opens as an edit. The dialog is usually dismissed by a
+            // press outside it, which never reset the mode - so a raise left
+            // armed was scheduled by the next Edit instead of saving it.
+            if (!asChange) { editIncomeMode = 'edit'; }
             const modal = document.getElementById("edit-income-modal");
 
             // openRaiseModal calls this first and then overrides, so only reset the
@@ -1331,6 +1357,8 @@
             // Set the wage_bill checkbox based on the row data
             const wageBill = row.attr('data-wage-bill');
             $('#edit-wage-bill-select').val(wageBill !== undefined ? wageBill : '1');
+            // Calculated from pay: the section opens filled in (a raise keeps the job).
+            incomePay.load('edit', row, {raise: editIncomeMode === 'raise'});
 
             // Open the modal
             modal.style.display = 'flex';
@@ -1463,6 +1491,10 @@
                     showToast('Pick the date the raise takes effect.', 'warning');
                     return;
                 }
+                if (incomePay.validate('edit')) {   // outlines the missing field
+                    return;
+                }
+                incomePay.extend('edit', raiseData, {raise: true});
                 document.getElementById('loading-screen').style.display = 'flex';
                 $.ajax({
                     url: '/schedule-recurring-change',
@@ -1486,6 +1518,11 @@
                 return;
             }
 
+            if (incomePay.validate('edit')) {   // outlines the missing field
+                return;
+            }
+            incomePay.extend('edit', formData);
+
             document.getElementById('loading-screen').style.display = 'flex';   
             $.ajax({
                 url: '/update-recurring-income',
@@ -1507,6 +1544,11 @@
         });
 
 
+        // Wages calculated from pay - templates/_income_pay_fields.html.
+        incomePay.attach({prefix: 'add', form: '#add-recurring-income-form', wageBill: '#wage-bill-select',
+                          startDate: '#start_date', amount: '#amount'});
+        incomePay.attach({prefix: 'edit', form: '#edit-recurring-income-form', wageBill: '#edit-wage-bill-select',
+                          startDate: '#edit-start-date', amount: '#edit-amount'});
     </script>
     <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
     <script>

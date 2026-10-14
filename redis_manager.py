@@ -867,6 +867,30 @@ def _flush_redis_to_mysql():
         log_exception(logger, 'FLUSH', f"✗ Error in Redis to MySQL flush: {e}")
 
 
+def _recurring_income_pay_values(row):
+    """
+    The pay columns of a recurring_income row, in the flush's column order.
+    All None/0 on a fixed-amount row, which is every row but the ones
+    calculated from pay - see pay_forecast.py and add_pay_types.sql.
+    """
+    def num(value):
+        try:
+            return float(value) if value not in (None, '') else None
+        except (TypeError, ValueError):
+            return None
+
+    pay_type = row.get('pay_type') if row.get('pay_type') in ('hourly', 'salary') else None
+    try:
+        shelf_id = int(row.get('shelf_id')) if row.get('shelf_id') not in (None, '') else None
+    except (TypeError, ValueError):
+        shelf_id = None
+    return (pay_type, shelf_id, num(row.get('pay_rate')), num(row.get('take_home_pct')),
+            1 if int(row.get('overtime') or 0) else 0,
+            1 if int(row.get('paid_holidays') or 0) else 0,
+            row.get('salary_period') if row.get('salary_period') in ('year', 'month') else None,
+            num(row.get('take_home_dismissed')))
+
+
 def _flush_table_to_mysql(table: str, user_id: int):
     """
     Flush a specific table's Redis data back to MySQL.
@@ -1831,7 +1855,8 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             row.get('yearly_month'),
                             row.get('start_date'),
                             row.get('end_date'),
-                            int(row.get('wage_bill', 0))
+                            int(row.get('wage_bill', 0)),
+                            *_recurring_income_pay_values(row)
                         ))
                     else:
                         batch_data.append((
@@ -1847,14 +1872,17 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             row.get('yearly_month'),
                             row.get('start_date'),
                             row.get('end_date'),
-                            int(row.get('wage_bill', 0))
+                            int(row.get('wage_bill', 0)),
+                            *_recurring_income_pay_values(row)
                         ))
                 
                 if batch_data:
                     cursor.executemany("""
                         INSERT INTO recurring_income (id, user_id, category_id, amount, cadence_interval, cadence_unit, 
-                                                     weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date, wage_bill)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                                     weekdays, monthly_days, yearly_day, yearly_month, start_date, end_date, wage_bill,
+                                                     pay_type, shelf_id, pay_rate, take_home_pct, overtime, paid_holidays,
+                                                     salary_period, take_home_dismissed)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                             category_id = VALUES(category_id),
                             amount = VALUES(amount),
@@ -1866,7 +1894,15 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             yearly_month = VALUES(yearly_month),
                             start_date = VALUES(start_date),
                             end_date = VALUES(end_date),
-                            wage_bill = VALUES(wage_bill)
+                            wage_bill = VALUES(wage_bill),
+                            pay_type = VALUES(pay_type),
+                            shelf_id = VALUES(shelf_id),
+                            pay_rate = VALUES(pay_rate),
+                            take_home_pct = VALUES(take_home_pct),
+                            overtime = VALUES(overtime),
+                            paid_holidays = VALUES(paid_holidays),
+                            salary_period = VALUES(salary_period),
+                            take_home_dismissed = VALUES(take_home_dismissed)
                     """, batch_data)
                 
                 conn.commit()

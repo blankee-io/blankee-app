@@ -16911,8 +16911,8 @@ tr[data-collapsed] {
     to   { opacity: 0; transform: translateY(-20px); }
 }
 
-/* ── Inline End-Date Warning ── */
-.date-row.end-date-warning-highlight {
+/* ── Inline End-Date Warning ── (and any field's: showFieldWarning) */
+.end-date-warning-highlight {
     position: relative;
     outline: 2px solid var(--accent);
     outline-offset: 4px;
@@ -21390,4 +21390,190 @@ label.loaf-holiday {
     .recurring-suggested-actions button {
         flex: 1;
     }
+}
+
+/* /////////////////////////////  Wages calculated from pay /////////////////////////// */
+/* templates/_income_pay_fields.html, driven by static/js/income_pay.js. */
+
+.income-pay {
+    margin: 4px 0 14px;
+}
+
+.income-pay[hidden],
+.income-pay-mode[hidden],
+.income-pay-fields[hidden],
+.income-pay-flags[hidden] {
+    display: none;
+}
+
+/* What the job decides, while the section is open. !important because the
+   cadence sections are shown by setting their style directly. */
+.income-pay-replaced {
+    display: none !important;
+}
+
+/* The Type label, with Simple / Advanced on the right of its line. */
+.income-pay-type-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* Simple / Advanced: a pair of radios on the right, with one info tip. */
+.income-pay-mode {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 14px;
+    font-size: 13px;
+}
+
+.income-form-container .income-pay-mode label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-weight: normal;
+    cursor: pointer;
+}
+
+.income-form-container .income-pay-mode input[type="radio"] {
+    width: auto;
+    margin: 0;
+}
+
+/* No panel of its own: the fields read as the form's own, as Simple's do. */
+.income-pay-fields {
+    margin-top: 10px;
+}
+
+.income-pay-types {
+    display: flex;
+    gap: 18px;
+    margin-bottom: 8px;
+}
+
+.income-pay-period {
+    display: flex;
+    gap: 16px;
+    margin: 2px 0 6px;
+    font-size: 13px;
+}
+
+.income-pay-period[hidden] {
+    display: none;
+}
+
+.income-form-container .income-pay-period label,
+.income-form-container .income-pay-types label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-weight: normal;
+    cursor: pointer;
+}
+
+.income-form-container .income-pay-period input,
+.income-form-container .income-pay-types input {
+    width: auto;
+    margin: 0;
+}
+
+/* A missing pay field's warning sits under its outline, and wraps: the
+   boxes it hangs from are narrow. */
+.income-pay .end-date-inline-toast {
+    top: calc(100% + 8px);
+    left: 0;
+    width: max-content;
+    max-width: 260px;
+    white-space: normal;
+}
+
+/* The buttons stand as tall as the select beside it: the row takes the
+   select's margins, so the three share one top and bottom. */
+.income-pay-job-row {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    margin: 5px 0 10px;
+}
+
+.income-form-container .income-pay-job-row select {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+}
+
+.income-pay-job-btn {
+    flex-shrink: 0;
+    width: 40px;
+    padding: 0;
+    border: 1px solid var(--primary-hover);
+    border-radius: 6px;
+    background: var(--white);
+    color: var(--primary);
+    cursor: pointer;
+}
+
+.income-pay-job-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.income-pay-pct {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 180px;
+}
+
+.income-pay-flags {
+    margin-top: 6px;
+}
+
+.income-pay-preview {
+    margin-top: 12px;
+}
+
+.income-pay-note {
+    margin: 0;
+    color: var(--secondary-dark);
+    font-size: 13px;
+}
+
+.income-pay-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.income-pay-table th {
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--primary-hover);
+    color: var(--primary);
+    text-align: left;
+}
+
+.income-pay-table td {
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--secondary-lighter);
+    color: var(--text-dark);
+    vertical-align: top;
+}
+
+.income-pay-table .income-pay-net {
+    font-weight: bold;
+}
+
+.income-pay-sub {
+    display: block;
+    color: var(--secondary-dark);
+    font-size: 11px;
+}
+
+.loaf-pay-lag {
+    max-width: 120px;
 }

@@ -12,18 +12,21 @@
 
    The word "shelf" means nothing to anybody on its own, so every label the
    user reads says job. #}
+    {# data-api: where saving goes. Loaf's own routes unless the page says
+       otherwise - Blankee's income form saves through /api/jobs. #}
     <div id="shelf-modal" class="modal"
+         data-api="{{ job_api | default('', true) }}"
          data-weekday-prefixes='{{ weekday_prefixes | list | tojson }}'
          data-weekday-names='{{ weekday_names | list | tojson }}'>
         <div class="income-form-container">
-            <h2 id="shelf-modal-title">Add a Shelf</h2>
+            <h2 id="shelf-modal-title">Add a Job</h2>
             <form id="shelf-form" autocomplete="off">
                 <input type="hidden" id="shelf-id" value="">
 
                 <label for="shelf-name">Name
                     <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
                         <span class="info-tip-text">Your employer, or whatever you call the
-                            place you work. Every basket on this shelf shares its working
+                            place you work. Every basket in this job shares its working
                             week, its holidays and when its year starts.</span>
                     </span>
                 </label>
@@ -93,6 +96,25 @@
                         {% endfor %}
                     </select>
                 </div>
+
+                {# Payroll: when the money actually arrives. Loaf's leave maths
+                   does not use these; Blankee's wages calculated from pay do -
+                   see pay_forecast.py. #}
+                <label for="shelf-pay-lag-days">Paid this many days after the pay period ends
+                    <span class="info-tip" tabindex="0"><i class="fa-solid fa-circle-info"></i>
+                        <span class="info-tip-text">Most payroll pays for a period that has already
+                            closed - a period ending on Saturday paid the Friday after is 6 days.
+                            Leave empty if pay covers the period up to the pay date.</span>
+                    </span>
+                </label>
+                <input type="number" id="shelf-pay-lag-days" class="loaf-pay-lag" min="0" max="60" placeholder="0">
+
+                <label for="shelf-payday-shift">When payday falls on a weekend or bank holiday</label>
+                <select id="shelf-payday-shift">
+                    <option value="before">Paid the business day before</option>
+                    <option value="after">Paid the business day after</option>
+                    <option value="none">Paid that day anyway</option>
+                </select>
                 </div>
 
                 <button type="button" class="loaf-section-toggle"
@@ -330,7 +352,7 @@
                 </div>
                 </div>
 
-                <button type="submit" id="shelf-submit">Add Shelf</button>
+                <button type="submit" id="shelf-submit">Add Job</button>
             </form>
         </div>
     </div>
