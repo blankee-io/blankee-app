@@ -16010,6 +16010,25 @@ def dashboard_summary():
         _row['paid_this_month'], _row['due_this_month'] = month_status(_row, _today)
     bucket_rows = sort_rows(_budget_rows + _card_rows)
 
+    # "as of": the day the bank has spoken for - the same last sync the
+    # entry routes lock up to (bank_import.locked_day). Paid or not on a
+    # linked account is known up to then; past it, the bank has not said yet.
+    # Shown only with an account linked, which is when the lock exists at all.
+    bills_as_of = None
+    try:
+        from bank_redis import get_user_linked_account_flags
+        _flags = get_user_linked_account_flags(current_user.id) or {}
+        _synced = _bank_last_sync_date() if (_flags.get('has_checking') or _flags.get('linked_credit_ids')) else None
+        if _synced:
+            _d = date.fromisoformat(str(_synced)[:10])
+            bills_as_of = {
+                'date': _d.isoformat(),
+                'label': _d.strftime('%b ') + str(_d.day) + (_d.strftime(', %Y') if _d.year != _today.year else ''),
+                'full': _d.strftime('%B ') + str(_d.day) + _d.strftime(', %Y'),
+            }
+    except Exception as e:
+        log_warning(app.logger, 'BANK', f"dashboard_summary as-of date for user {current_user.id}: {e}")
+
     return render_template(
         'dashboard_summary.html',
         profile_picture=profile_picture,
@@ -16028,6 +16047,7 @@ def dashboard_summary():
         # Entries and other data
         expense_entries=expense_entries,
         bucket_rows=bucket_rows,
+        bills_as_of=bills_as_of,
         page_layout=page_layout,
         credit_accounts=credit_accounts,
         dormant_credit_ids=_dormant_credit_ids(current_user.id),

@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.57.0 — 2026-10-14
+
+### Added
+
+- **Upcoming Bills says "as of" the last bank sync** when an account is
+  linked: the day the bank has filled in up to, the same day entries are
+  locked up to. Bills paid on a linked account after it show once the bank
+  posts them.
+
 ## 1.56.0 — 2026-10-14
 
 ### Added

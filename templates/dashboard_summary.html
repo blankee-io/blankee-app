@@ -164,6 +164,10 @@
                         <div class="summary-section-header">
                             <i class="fa-solid fa-receipt"></i>
                             <span>Upcoming Bills</span>
+                            {# The last bank sync - the day edits are locked up to. #}
+                            {% if bills_as_of %}
+                            <span class="bills-as-of" title="From your bank up to its last sync, {{ bills_as_of.full }}. Days after that are still yours to fill in.">as of {{ bills_as_of.label }}</span>
+                            {% endif %}
                             {# Which bills the list shows, by kind: the budget's or a card's,
                                bills or buckets, paid or unpaid this month. #}
                             <button type="button" class="bills-filter-btn" id="bills-filter-btn" title="Filter the bills" aria-haspopup="true" aria-expanded="false">

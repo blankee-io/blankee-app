@@ -20716,6 +20716,14 @@ label.loaf-holiday {
     background: var(--primary-lighter);
 }
 
+/* Upcoming Bills: the date of the last bank sync, beside the title. */
+.bills-as-of {
+    font-size: 12px;
+    font-weight: normal;
+    opacity: 0.9;
+    white-space: nowrap;
+}
+
 /* Upcoming Bills: the filter, on the right of the header - by kind of bill. */
 .bills-filter-btn {
     position: relative;
