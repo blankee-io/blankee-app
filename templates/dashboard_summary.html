@@ -70,9 +70,16 @@
 
     <!-- Main content -->
     <div class="main-container" id="main-container">
-        <div class="summary-page-layout">
+        {# Arrange: move the right column's sections, hide any of them. Saved
+           per person - summary_layout.py, applySectionLayout() below. #}
+        <div class="summary-toolbar">
+            <button type="button" class="summary-arrange-btn" id="summary-arrange-btn" aria-pressed="false">
+                <i class="fa-solid fa-grip-vertical"></i><span>Arrange</span>
+            </button>
+        </div>
+        <div class="summary-page-layout" id="summary-page-layout">
             <!-- Left Column - Buffer Summary Card -->
-            <div class="summary-left-column">
+            <div class="summary-left-column" data-widget="buffer">
                 <div class="buffer-card">
                     <div class="buffer-card-header">Short-term Buffer</div>
 
@@ -118,7 +125,7 @@
             <div class="summary-right-column">
                 <div class="summary-container">
                     <!-- Balance Trend Graph Section -->
-                    <div class="summary-section" id="balance-graph-section">
+                    <div class="summary-section" id="balance-graph-section" data-widget="balance">
                         <div class="summary-section-header">
                             <i class="fa-solid fa-chart-line"></i>
                             <span>Balance Trend</span>
@@ -131,13 +138,11 @@
                         </div>
                     </div>
 
-                    <!-- Credit Account Balance Graphs (one per account) -->
-                    <div id="ca-graphs-container">
-                        <!-- Populated by JavaScript -->
-                    </div>
+                    <!-- Credit Account Balance Graphs (one per account) - each a
+                         section of its own, put in here by renderCaGraphs. -->
 
                     <!-- Savings Trend Graph Section -->
-                    <div class="summary-section" id="savings-graph-section">
+                    <div class="summary-section" id="savings-graph-section" data-widget="savings">
                         <div class="summary-section-header savings-graph-header">
                             <i class="fa-solid fa-piggy-bank"></i>
                             <span>Savings Trend</span>
@@ -155,10 +160,17 @@
                          places to answer one question - what is due next. Kept
                          below the graphs because the graphs are the overview
                          and this is the detail behind them. -->
-                    <div class="summary-section" id="expense-buckets-section">
+                    <div class="summary-section" id="expense-buckets-section" data-widget="bills">
                         <div class="summary-section-header">
                             <i class="fa-solid fa-receipt"></i>
                             <span>Upcoming Bills</span>
+                            {# Which bills the list shows, by kind: the budget's or a card's,
+                               bills or buckets, paid or unpaid this month. #}
+                            <button type="button" class="bills-filter-btn" id="bills-filter-btn" title="Filter the bills" aria-haspopup="true" aria-expanded="false">
+                                <i class="fa-solid fa-filter"></i>
+                                <span class="hidden-count-bubble" id="bills-filter-count"></span>
+                            </button>
+                            <div class="type-selector-popover bills-filter-popover" id="bills-filter-popover" hidden></div>
                         </div>
                         <div class="summary-list" id="expense-buckets-list">
                             <!-- Populated by JavaScript -->
@@ -468,6 +480,9 @@
     </div>
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    {# Sortable, for Arrange - as the dashboards load it. #}
+    <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery.ui.touch-punch.min.js') }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
     <script src="{{ url_for('static', filename='js/tutorial.js') }}"></script>
@@ -522,6 +537,7 @@
             renderExpenseBuckets();
             renderCaGraphs();
             renderSavingsGraph();
+            applySectionLayout();
 
             // Nothing in this page's own refresh lowers the spinner script.js
             // raised - the other dashboards get it for free from their totals
@@ -571,6 +587,8 @@
         const expenseEntries = {{ expense_entries | tojson | safe }};
         // Upcoming Bills, both sides of every row, worked out on the server - see summary_buckets.py.
         const bucketRows = {{ bucket_rows | tojson | safe }};
+        // This person's arrangement of the page - summary_layout.py.
+        const pageLayout = {{ page_layout | tojson | safe }};
         const creditAccounts = {{ credit_accounts | tojson | safe }};
         // Cards with nothing on them today get no graph.
         const dormantCreditIds = {{ dormant_credit_ids | tojson | safe }};
@@ -1205,6 +1223,19 @@
             row.className = 'summary-row ' +
                 (item.account_name ? 'summary-row-credit' : 'summary-row-budget');
 
+            // The pin: on the left of every row, so pinning is one tap from
+            // the list itself. Pinned rows lead the list (renderExpenseBuckets).
+            const pinned = billPinned(item.key);
+            const pin = document.createElement('button');
+            pin.type = 'button';
+            pin.className = 'bill-pin-btn' + (pinned ? ' is-pinned' : '');
+            pin.dataset.key = item.key;
+            pin.title = pinned ? 'Unpin' : 'Pin to the top';
+            pin.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+            pin.innerHTML = '<i class="fa-solid fa-thumbtack"></i>';
+            row.appendChild(pin);
+            if (pinned) { row.classList.add('summary-row-pinned'); }
+
             const categoryName = document.createElement('div');
             categoryName.className = 'summary-category-name';
             if (item.account_name) {
@@ -1246,15 +1277,241 @@
         // bill's record is deleted the moment it is paid - so the very thing
         // the left side exists to show came out as a dash. The server reads
         // both sides from where their truth lives (summary_buckets.py).
+        //
+        // Then this person's choices (pageLayout.bills): the pinned rows first,
+        // soonest first among themselves, and only the rows the filter keeps.
         function renderExpenseBuckets() {
             const container = document.getElementById('expense-buckets-list');
             container.innerHTML = '';
+            updateBillsFilterCount();
             if (!bucketRows.length) {
                 container.innerHTML = '<div class="summary-empty">No recurring expense categories</div>';
                 return;
             }
-            bucketRows.forEach(function (item) {
-                container.appendChild(createBucketRow(item));
+            const shown = bucketRows.filter(billMatches);
+            if (!shown.length) {
+                container.innerHTML = '<div class="summary-empty">No bills match the filter. '
+                    + '<button type="button" class="summary-empty-link" id="bills-show-all">Clear filter</button></div>';
+                return;
+            }
+            shown.filter(item => billPinned(item.key))
+                .concat(shown.filter(item => !billPinned(item.key)))
+                .forEach(function (item) {
+                    container.appendChild(createBucketRow(item));
+                });
+        }
+
+        // ===== THE PAGE AS THIS PERSON ARRANGED IT =====
+        // pageLayout is users.summary_layout (summary_layout.py): the right
+        // column's order, the sections hidden, and the bills pinned or
+        // filtered out. Every change posts the whole thing back.
+        let layoutSaveTimer = null;
+        function saveSummaryLayout() {
+            clearTimeout(layoutSaveTimer);
+            // A burst of changes - a few bills unticked in a row - is one save.
+            layoutSaveTimer = setTimeout(function () {
+                $.ajax({
+                    url: '/api/summary-layout',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(pageLayout),
+                    error: function () { showToast('Could not save how the page is arranged. Try again.', 'error'); }
+                });
+            }, 300);
+        }
+
+        function toggleIn(list, key, on) {
+            const at = list.indexOf(key);
+            if (on && at < 0) { list.push(key); }
+            if (!on && at >= 0) { list.splice(at, 1); }
+        }
+
+        function billPinned(key) { return pageLayout.bills.pinned.includes(key); }
+
+        // The filter, by kind of bill rather than by name. paid_this_month and
+        // due_this_month come from the server (summary_buckets.month_status),
+        // measured against the person's own today; buckets are neither, so
+        // Paid or Unpaid shows bills only.
+        const BILL_FILTERS = [
+            {name: 'source', label: 'Paid from', choices: [['all', 'All'], ['budget', 'Budget'], ['card', 'Credit cards']]},
+            {name: 'kind', label: 'Kind', choices: [['all', 'All'], ['bill', 'Bills'], ['bucket', 'Buckets']]},
+            {name: 'status', label: 'This month', choices: [['all', 'All'], ['unpaid', 'Unpaid'], ['paid', 'Paid']]}
+        ];
+
+        function billMatches(item) {
+            const f = pageLayout.bills.filter;
+            const card = item.key.indexOf('c:') === 0;
+            if (f.source === 'budget' && card) { return false; }
+            if (f.source === 'card' && !card) { return false; }
+            if (f.kind === 'bill' && !item.is_bill) { return false; }
+            if (f.kind === 'bucket' && item.is_bill) { return false; }
+            if (f.status === 'unpaid' && !item.due_this_month) { return false; }
+            if (f.status === 'paid' && !item.paid_this_month) { return false; }
+            return true;
+        }
+
+        // The filter button's bubble: how many filters are in use.
+        function updateBillsFilterCount() {
+            const f = pageLayout.bills.filter;
+            const n = BILL_FILTERS.filter(g => f[g.name] !== 'all').length;
+            const bubble = document.getElementById('bills-filter-count');
+            if (bubble) { bubble.textContent = n ? String(n) : ''; }
+            $('#bills-filter-btn').toggleClass('is-filtering', n > 0);
+        }
+
+        function drawBillsFilter() {
+            const pop = $('#bills-filter-popover').empty();
+            const head = $('<div class="bills-filter-head">').append($('<span>').text('Show'));
+            head.append($('<button type="button" class="summary-empty-link bills-filter-all">').text('Clear filter'));
+            pop.append(head);
+            BILL_FILTERS.forEach(function (group) {
+                const box = $('<div class="bills-filter-group" role="radiogroup">').attr('aria-label', group.label);
+                box.append($('<div class="bills-filter-label">').text(group.label));
+                const chips = $('<div class="bills-filter-chips">');
+                group.choices.forEach(function (choice) {
+                    const chip = $('<label class="bills-filter-chip">');
+                    chip.append($('<input type="radio">').attr('name', 'bills-filter-' + group.name).val(choice[0])
+                        .prop('checked', pageLayout.bills.filter[group.name] === choice[0]));
+                    chip.append($('<span>').text(choice[1]));
+                    chips.append(chip);
+                });
+                pop.append(box.append(chips));
+            });
+        }
+
+        function setBillsFilterOpen(open) {
+            if (open) { drawBillsFilter(); }
+            $('#bills-filter-popover').prop('hidden', !open);
+            $('#bills-filter-btn').attr('aria-expanded', open ? 'true' : 'false');
+        }
+
+        $(document).on('click', '#bills-filter-btn', function (e) {
+            e.stopPropagation();
+            setBillsFilterOpen($('#bills-filter-popover').prop('hidden'));
+        });
+        $(document).on('click', '#bills-filter-popover', function (e) { e.stopPropagation(); });
+        $(document).on('click', function () { setBillsFilterOpen(false); });
+        $(document).on('keydown', function (e) { if (e.key === 'Escape') { setBillsFilterOpen(false); } });
+        $(document).on('change', '#bills-filter-popover input[type="radio"]', function () {
+            pageLayout.bills.filter[this.name.replace('bills-filter-', '')] = this.value;
+            renderExpenseBuckets();
+            saveSummaryLayout();
+        });
+        $(document).on('click', '.bills-filter-all, #bills-show-all', function () {
+            BILL_FILTERS.forEach(g => { pageLayout.bills.filter[g.name] = 'all'; });
+            $('#bills-filter-popover input[value="all"]').prop('checked', true);
+            renderExpenseBuckets();
+            saveSummaryLayout();
+        });
+        $(document).on('click', '.bill-pin-btn', function () {
+            const key = this.getAttribute('data-key');
+            toggleIn(pageLayout.bills.pinned, key, !billPinned(key));
+            renderExpenseBuckets();
+            saveSummaryLayout();
+        });
+
+        // The right column's sections in this person's order. The page's own
+        // order is the default - Balance, each card, Savings, Bills - and a
+        // section the saved order does not name (a card opened since) goes
+        // in after whatever came before it by default, rather than last.
+        function summaryWidgets() {
+            const map = {};
+            document.querySelectorAll('.summary-container > [data-widget]').forEach(el => { map[el.dataset.widget] = el; });
+            return map;
+        }
+
+        function defaultWidgetOrder(map) {
+            const cards = Object.keys(map).filter(k => k.indexOf('ca:') === 0)
+                .sort((a, b) => creditAccounts.findIndex(c => 'ca:' + c.id === a) - creditAccounts.findIndex(c => 'ca:' + c.id === b));
+            return ['balance'].concat(cards, ['savings', 'bills']).filter(k => map[k]);
+        }
+
+        // The arranging controls, added once to every section's header: a
+        // grip to drag by, and the eye. The buffer card cannot move - it is
+        // its own column - so it gets the eye only.
+        function addWidgetControls(el) {
+            if (el.querySelector('.widget-eye')) { return; }
+            const header = el.querySelector('.summary-section-header, .buffer-card-header');
+            if (!header) { return; }
+            if (el.dataset.widget !== 'buffer') {
+                $('<span class="widget-grip" title="Drag to move"><i class="fa-solid fa-grip-vertical"></i></span>').prependTo(header);
+            }
+            $('<button type="button" class="widget-eye"><i class="fa-solid fa-eye"></i></button>').appendTo(header);
+        }
+
+        function applySectionLayout() {
+            const container = document.querySelector('.summary-container');
+            const map = summaryWidgets();
+            const defaults = defaultWidgetOrder(map);
+            const order = pageLayout.order.filter(k => map[k]);
+            defaults.forEach(function (key, i) {
+                if (order.includes(key)) { return; }
+                let at = 0;
+                for (let j = i - 1; j >= 0; j--) {
+                    const p = order.indexOf(defaults[j]);
+                    if (p >= 0) { at = p + 1; break; }
+                }
+                order.splice(at, 0, key);
+            });
+            order.forEach(key => container.appendChild(map[key]));
+            document.querySelectorAll('[data-widget]').forEach(function (el) {
+                const hidden = pageLayout.hidden.includes(el.dataset.widget);
+                addWidgetControls(el);
+                el.classList.toggle('summary-widget-hidden', hidden);
+                $(el).find('.widget-eye').attr('title', hidden ? 'Show this section' : 'Hide this section')
+                    .attr('aria-pressed', hidden ? 'true' : 'false')
+                    .find('i').attr('class', hidden ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye');
+            });
+        }
+
+        // A chart drawn while its section was hidden was drawn at no width -
+        // drawn again once it can be seen.
+        function redrawSummaryCharts() {
+            renderBalanceChart('month');
+            renderCaGraphs();
+            renderSavingsGraph();
+            applySectionLayout();
+        }
+
+        function initSummaryArranging() {
+            const layoutEl = document.getElementById('summary-page-layout');
+            const container = $('.summary-container');
+            let arranging = false;
+
+            function setArranging(on) {
+                arranging = on;
+                layoutEl.classList.toggle('summary-arranging', on);
+                $('#summary-arrange-btn').attr('aria-pressed', on ? 'true' : 'false')
+                    .toggleClass('is-arranging', on)
+                    .html(on ? '<i class="fa-solid fa-check"></i><span>Done</span>'
+                             : '<i class="fa-solid fa-grip-vertical"></i><span>Arrange</span>');
+                if (on) {
+                    container.sortable({
+                        items: '> [data-widget]',
+                        handle: '.widget-grip',
+                        axis: 'y',
+                        tolerance: 'pointer',
+                        placeholder: 'summary-widget-placeholder',
+                        forcePlaceholderSize: true,
+                        update: function () {
+                            pageLayout.order = container.children('[data-widget]').map(function () { return this.dataset.widget; }).get();
+                            saveSummaryLayout();
+                        }
+                    });
+                } else if (container.sortable('instance')) {
+                    container.sortable('destroy');
+                }
+                // Hidden sections show while arranging: their charts need drawing.
+                if (pageLayout.hidden.length) { redrawSummaryCharts(); }
+            }
+
+            $('#summary-arrange-btn').on('click', function () { setArranging(!arranging); });
+            $(document).on('click', '.widget-eye', function (e) {
+                e.stopPropagation();
+                const key = $(this).closest('[data-widget]').attr('data-widget');
+                toggleIn(pageLayout.hidden, key, !pageLayout.hidden.includes(key));
+                applySectionLayout();
+                saveSummaryLayout();
             });
         }
 
@@ -2279,8 +2536,11 @@
 
         // ===== Render credit account graphs =====
         function renderCaGraphs() {
-            const container = document.getElementById('ca-graphs-container');
-            container.innerHTML = '';
+            // Straight into the column, so each card's graph can be moved and
+            // hidden on its own; by default they sit above Savings Trend.
+            const container = document.querySelector('.summary-container');
+            container.querySelectorAll(':scope > [data-widget^="ca:"]').forEach(el => el.remove());
+            const before = document.getElementById('savings-graph-section');
             
             if (!creditAccounts || creditAccounts.length === 0 || !caBalancesD || caBalancesD.length === 0) return;
             
@@ -2301,6 +2561,7 @@
                 const section = document.createElement('div');
                 section.className = 'summary-section';
                 section.id = sectionId;
+                section.dataset.widget = 'ca:' + account.id;
                 
                 let graphHtml = '';
                 if (accountBalances.length > 0) {
@@ -2320,7 +2581,7 @@
                     </div>
                     ${graphHtml}
                 `;
-                container.appendChild(section);
+                container.insertBefore(section, before);
                 
                 // Render graph if data exists
                 if (accountBalances.length > 0) {
@@ -2378,6 +2639,8 @@
             renderExpenseBuckets();
             renderCaGraphs();
             renderSavingsGraph();
+            applySectionLayout();
+            initSummaryArranging();
 
             // Page tutorial
             startTutorial('tutorial_dashboard_summary', [
@@ -2388,7 +2651,7 @@
                 { selector: '#test-raise-open-btn', text: 'Test a Raise takes one of your recurring incomes - a raise, a cut, a new payday - and shows the forecast with that change in place of what is there now.' },
                 { selector: '#balance-graph-section', text: 'The balance trend chart shows how your balance changes over time.' },
                 { selector: '#trend-indicator', text: 'The arrow shows whether your balance is trending up or down. If you see a red <span class=\"tutorial-negative-badge\">!</span> badge on the header, it means your balance goes negative at some point in the future.' },
-                { selector: '#ca-graphs-container', text: 'A trend for each credit account, the same way as your checking balance.' },
+                { selector: '[data-widget^="ca:"]', text: 'A trend for each credit account, the same way as your checking balance.' },
                 { selector: '#savings-graph-section', text: 'Your savings trend over time.' },
                 { selector: '#expense-buckets-section', text: 'Everything due, wherever it is paid from \u2014 your budget and every card in one list, soonest first. Rows tinted orange come out of your budget; grey ones come off a card and carry its name.' }
             ], { onComplete: function() { window.scrollTo({ top: 0, behavior: 'smooth' }); } });

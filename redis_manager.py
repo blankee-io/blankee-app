@@ -3027,7 +3027,11 @@ def _flush_table_to_mysql(table: str, user_id: int):
                             -- before then has no key for it. Left out of this list
                             -- altogether, the switch lived only in Redis and went
                             -- off again on the next rehydration.
-                            ai_categorization = COALESCE(%s, ai_categorization)
+                            ai_categorization = COALESCE(%s, ai_categorization),
+                            -- COALESCE again: a blob cached before 1.56.0 has no
+                            -- summary_layout key, and must not wipe the column.
+                            -- Resetting the layout stores '{}', never NULL.
+                            summary_layout = COALESCE(%s, summary_layout)
                         WHERE id = %s
                     """, (
                         float(_coerce(user_data.get('balance_threshold'), 0)),
@@ -3053,6 +3057,7 @@ def _flush_table_to_mysql(table: str, user_id: int):
                         user_data.get('completed_tutorials'),
                         (int(_coerce(user_data['ai_categorization'], 0))
                          if 'ai_categorization' in user_data else None),
+                        user_data.get('summary_layout'),
                         user_id
                     ))
                     

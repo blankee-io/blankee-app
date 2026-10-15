@@ -8,6 +8,24 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.56.0 — 2026-10-14
+
+### Added
+
+- **Arrange the Summary page.** An **Arrange** button above the page lets
+  you drag its sections - Balance Trend, each card's graph, Savings Trend
+  and Upcoming Bills - into the order you want, and hide any of them (the
+  Short-term Buffer card too) with the eye on its header. Hidden sections
+  come back while arranging, dimmed, so they can be shown again.
+- **Pin bills to the top of Upcoming Bills** with the pin on the left of
+  each row.
+- **Filter Upcoming Bills** from the filter on the section's header: by where
+  it is paid from (your budget or a credit card), by kind (bills, or buckets
+  you spend down), and by this month (unpaid - due this month or overdue -
+  or already paid). The button counts the filters in use.
+- All of it is saved to your account, so the page looks the same in every
+  browser you use.
+
 ## 1.55.0 — 2026-10-13
 
 ### Added

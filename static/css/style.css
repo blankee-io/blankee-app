@@ -14229,12 +14229,6 @@ transform: scale(1.2);
     gap: 24px;
 }
 
-#ca-graphs-container {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-}
-
 .summary-section {
     background: var(--text-light);
     border-radius: 12px;
@@ -20624,6 +20618,268 @@ label.loaf-holiday {
     .loaf-period-header {
         padding: 0 6px;
         box-sizing: border-box;
+    }
+}
+
+/* ===== THE SUMMARY, AS EACH PERSON ARRANGES IT (1.56.0) =====
+   dashboard_summary.html with summary_layout.py: Arrange moves the right
+   column's sections and hides any section, the pin on each Upcoming Bills
+   row puts it at the top, and the filter leaves bills out. Scoped to
+   [data-widget] and the ids the page owns, so Loaf's summary - which shares
+   the layout classes - is untouched. */
+.summary-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    max-width: 875px;
+    margin: 20px auto -14px;
+}
+
+.summary-arrange-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border: 1px solid var(--primary);
+    border-radius: 16px;
+    background: var(--text-light);
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.summary-arrange-btn.is-arranging {
+    background: var(--primary);
+    color: var(--text-light);
+}
+
+/* The arranging controls exist on every section and show only while
+   arranging. */
+.widget-grip,
+.widget-eye {
+    display: none;
+}
+
+.summary-arranging .widget-grip {
+    display: inline-flex;
+    align-items: center;
+    cursor: grab;
+    touch-action: none;
+}
+
+.summary-arranging .widget-eye {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin-right: 8px;
+    border: none;
+    background: none;
+    color: var(--text-light);
+    cursor: pointer;
+}
+
+/* The buffer card's title is centred text: its eye sits in the corner. */
+[data-widget="buffer"] .buffer-card {
+    position: relative;
+}
+
+.summary-arranging [data-widget="buffer"] .widget-eye {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    margin: 0;
+    color: var(--secondary-dark);
+    font-size: 16px;
+}
+
+.summary-arranging .summary-container > [data-widget] {
+    outline: 2px dashed var(--primary-hover);
+    outline-offset: 3px;
+    border-radius: 12px;
+}
+
+/* Hidden: gone from the page, and dimmed while arranging so it can be
+   brought back. */
+.summary-page-layout:not(.summary-arranging) .summary-widget-hidden {
+    display: none;
+}
+
+.summary-arranging .summary-widget-hidden {
+    opacity: 0.45;
+}
+
+.summary-widget-placeholder {
+    visibility: visible !important;
+    border: 2px dashed var(--primary-hover);
+    border-radius: 12px;
+    background: var(--primary-lighter);
+}
+
+/* Upcoming Bills: the filter, on the right of the header - by kind of bill. */
+.bills-filter-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    margin-right: 6px;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+}
+
+.bills-filter-popover {
+    left: auto;
+    right: 0;
+    min-width: 240px;
+    max-width: 300px;
+    padding: 0;
+    color: var(--text-dark);
+    font-size: 13px;
+    font-weight: normal;
+}
+
+.bills-filter-popover[hidden] {
+    display: none;
+}
+
+.bills-filter-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--secondary-lighter);
+    color: var(--secondary-dark);
+    font-size: 12px;
+}
+
+/* One group per question - paid from, kind, this month - each a row of
+   chips, one chosen. */
+.bills-filter-group {
+    padding: 8px 14px 10px;
+}
+
+.bills-filter-group + .bills-filter-group {
+    border-top: 1px solid var(--secondary-lighter);
+}
+
+.bills-filter-label {
+    margin-bottom: 6px;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.bills-filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.bills-filter-chip {
+    position: relative;
+    cursor: pointer;
+}
+
+.bills-filter-chip input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.bills-filter-chip span {
+    display: inline-block;
+    padding: 4px 10px;
+    border: 1px solid var(--secondary-hover);
+    border-radius: 14px;
+    color: var(--text-dark);
+    font-size: 12px;
+}
+
+.bills-filter-chip input:checked + span {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: var(--text-light);
+}
+
+.bills-filter-chip input:focus-visible + span {
+    outline: 2px solid var(--primary-hover);
+    outline-offset: 2px;
+}
+
+/* A button that reads as a link: Show all. */
+.summary-empty-link {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--primary);
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+/* The pin, on the left of every row: faint and tilted until pinned. */
+.bill-pin-btn {
+    flex: 0 0 22px;
+    height: 22px;
+    margin-right: -8px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--secondary-hover);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.bill-pin-btn i {
+    transform: rotate(45deg);
+    transition: transform 0.15s ease;
+}
+
+.bill-pin-btn:hover {
+    color: var(--primary);
+}
+
+.bill-pin-btn.is-pinned {
+    color: var(--primary);
+}
+
+.bill-pin-btn.is-pinned i {
+    transform: none;
+}
+
+@media (max-width: 900px) {
+    .summary-toolbar {
+        padding: 0 15px;
+        margin: 16px auto -10px;
+    }
+}
+
+/* Stacked rows on a phone: the pin keeps the name's line rather than taking
+   one of its own. */
+@media (max-width: 600px) {
+    .summary-toolbar {
+        padding: 0 10px;
+        margin: 12px auto -6px;
+    }
+
+    #expense-buckets-list .summary-row {
+        position: relative;
+    }
+
+    .bill-pin-btn {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        margin: 0;
+    }
+
+    #expense-buckets-list .summary-category-name {
+        padding-left: 24px;
     }
 }
 

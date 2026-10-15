@@ -305,6 +305,28 @@ def upcoming_rows(categories, entries, records, wage_bill, today, account_names=
     return rows
 
 
+def month_status(row, today):
+    """
+    (paid, due) for a bill this calendar month - what the Summary page's Paid
+    and Unpaid filters mean. Paid: the last occurrence, paid, fell this month.
+    Due: the next open one falls this month or is already overdue. A bill can
+    be both (paid on the 1st, due again on the 29th) or neither (paid last
+    month, next due next month). Buckets are spent down rather than paid, so
+    they are neither.
+    """
+    if not row.get('is_bill'):
+        return False, False
+    first = today.replace(day=1)
+    following = (first.replace(year=first.year + 1, month=1) if first.month == 12
+                 else first.replace(month=first.month + 1))
+    last, upcoming = row.get('last'), row.get('upcoming')
+    last_on = _as_date(last.get('date')) if last else None
+    next_on = _as_date(upcoming.get('date')) if upcoming else None
+    paid = bool(last and last.get('paid') and last_on and first <= last_on < following)
+    due = bool(upcoming and not upcoming.get('paid') and next_on and next_on < following)
+    return paid, due
+
+
 def sort_rows(rows):
     """Soonest coming up first; nothing coming up last. Stable, so ties keep their order."""
     return sorted(rows, key=lambda r: (r['upcoming'] is None, (r['upcoming'] or {}).get('date') or ''))

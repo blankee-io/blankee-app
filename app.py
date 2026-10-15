@@ -15677,6 +15677,23 @@ def get_dashboard_y_data():
 ############################### DASHBOARD SUMMARY ##########################################
 ############################################################################################
 
+@app.route('/api/summary-layout', methods=['POST'])
+@login_required
+def save_summary_layout():
+    """
+    The Summary page as this person arranged it - the whole layout, posted on
+    every change (a section moved or hidden, a bill pinned or filtered out).
+    Cleaned to known keys and kept with the other user settings; see
+    summary_layout.py. Bumped by the middleware like any other write, so the
+    page open in another browser picks the arrangement up.
+    """
+    import summary_layout as _summary_layout
+    layout = _summary_layout.clean(request.get_json(silent=True) or {})
+    _update_user_setting_in_redis(current_user.id, 'summary_layout',
+                                  json.dumps(layout, separators=(',', ':')))
+    return jsonify({'status': 'success', 'layout': layout})
+
+
 @app.route('/dashboard_summary')
 @login_required
 def dashboard_summary():
@@ -15697,12 +15714,16 @@ def dashboard_summary():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                SELECT profile_picture, first_name, last_name, currency_type, landing_page, member_since
+                SELECT profile_picture, first_name, last_name, currency_type, landing_page, member_since,
+                       summary_layout
                 FROM users WHERE id = %s
             """, (current_user.id,))
             user_data = cursor.fetchone()
             cursor.close()
     
+    # How this person has arranged the page - summary_layout.py.
+    import summary_layout as _summary_layout
+    page_layout = _summary_layout.parse(user_data.get('summary_layout') if user_data else None)
     profile_picture = user_data.get('profile_picture') if user_data else None
     first_name = user_data.get('first_name', '') if user_data else ''
     last_name = user_data.get('last_name', '') if user_data else ''
@@ -15961,7 +15982,7 @@ def dashboard_summary():
     # The Upcoming Bills rows, both sides each, worked out here rather than in
     # the page: a paid bill's record is gone by the time the page asks, and
     # only the entries still say it was paid. See summary_buckets.
-    from summary_buckets import upcoming_rows, sort_rows
+    from summary_buckets import upcoming_rows, sort_rows, month_status
     _today = _user_today_for(current_user.id)
     _wage_bill = {int(r['category_id']): int(r.get('wage_bill') or 0)
                   for r in (recurring_expense_records or []) if r.get('category_id') is not None}
@@ -15975,11 +15996,19 @@ def dashboard_summary():
     for r in (recurring_c_expense_records or []):
         if r.get('category_id') is not None:
             _c_templates.setdefault(int(r['category_id']), []).append(r)
-    bucket_rows = sort_rows(
-        upcoming_rows(expense_categories, expense_entries, expense_bucket_records, _wage_bill, _today,
-                      templates=_templates)
-        + upcoming_rows(c_expense_categories, c_expense_entries, c_expense_bucket_records, _c_wage_bill, _today,
-                        account_names=_card_names, templates=_c_templates))
+    _budget_rows = upcoming_rows(expense_categories, expense_entries, expense_bucket_records, _wage_bill, _today,
+                                 templates=_templates)
+    _card_rows = upcoming_rows(c_expense_categories, c_expense_entries, c_expense_bucket_records, _c_wage_bill, _today,
+                               account_names=_card_names, templates=_c_templates)
+    # The key a pin or a filter names the row by - the two tables' ids overlap.
+    for _row in _budget_rows:
+        _row['key'] = _summary_layout.bill_key('e', _row['category_id'])
+    for _row in _card_rows:
+        _row['key'] = _summary_layout.bill_key('c', _row['category_id'])
+    # What the Paid / Unpaid filters read, worked out against the person's own today.
+    for _row in _budget_rows + _card_rows:
+        _row['paid_this_month'], _row['due_this_month'] = month_status(_row, _today)
+    bucket_rows = sort_rows(_budget_rows + _card_rows)
 
     return render_template(
         'dashboard_summary.html',
@@ -15999,6 +16028,7 @@ def dashboard_summary():
         # Entries and other data
         expense_entries=expense_entries,
         bucket_rows=bucket_rows,
+        page_layout=page_layout,
         credit_accounts=credit_accounts,
         dormant_credit_ids=_dormant_credit_ids(current_user.id),
         c_expense_entries=c_expense_entries,

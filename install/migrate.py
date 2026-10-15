@@ -102,6 +102,7 @@ EXPECTED_COLUMNS = (
     ('recurring_income', 'take_home_dismissed'),
     ('loaf_shelves', 'pay_lag_days'),
     ('loaf_shelves', 'payday_shift'),
+    ('users', 'summary_layout'),
     ('credit_accounts', 'statement_day'),
     ('credit_accounts', 'payment_due_day'),
     # The interesting parts of the Loaf schema rather than proof the table

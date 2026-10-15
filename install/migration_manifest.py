@@ -59,6 +59,7 @@ MIGRATIONS = [
     'add_recurring_drift.sql',
     'add_bill_reminders.sql',
     'add_pay_types.sql',
+    'add_summary_layout.sql',
 ]
 
 # install/sql/ holds only what a fresh install applies. The rollback scripts and
