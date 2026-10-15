@@ -8,6 +8,23 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.58.0 — 2026-10-14
+
+### Added
+
+- **Upcoming Bills on the iPhone home screen.** A new endpoint,
+  `/api/widget/upcoming-bills`, serves the Summary page's list - every bill
+  and bucket with its last and next occurrence, your pinned bills first,
+  and the "as of" date - to the iOS app's new Upcoming Bills widget, which
+  has the page's filter as buttons of its own. Needs the iOS app's next
+  build.
+
+### Changed
+
+- The Summary page's Upcoming Bills rows are built in one shared place
+  (`_summary_bill_sources` / `_summary_bill_rows` in app.py), so the page and
+  the widget cannot drift apart.
+
 ## 1.57.0 — 2026-10-14
 
 ### Added

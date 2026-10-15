@@ -15694,6 +15694,215 @@ def save_summary_layout():
     return jsonify({'status': 'success', 'layout': layout})
 
 
+def _summary_bill_sources(user_id):
+    """
+    What the Summary page's Upcoming Bills are built from: the recurring
+    expense and card expense categories, their entries and bucket records, the
+    cards, and the recurring templates - Redis first, MySQL when a key is cold.
+    Shared by the page and the iOS widget (/api/widget/upcoming-bills), so the
+    two read the same rows.
+    """
+    # Get ALL expense categories (for footer)
+    all_expense_categories = _get_categories_from_redis('expense_categories', user_id)
+    if all_expense_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, name, is_recurring, hidden, is_bundle
+                FROM expense_categories
+                WHERE user_id = %s
+                ORDER BY display_order DESC
+            """, (user_id,))
+            all_expense_categories = list(cursor.fetchall())
+            cursor.close()
+    
+    # Filter to only recurring ones for summary display
+    expense_categories = [c for c in all_expense_categories if c.get('is_recurring') == 1]
+    
+    # Get expense entries
+    expense_entries = _get_entries_from_redis('expense_entries', user_id)
+    if expense_entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.is_bucket, ee.original_amount
+                FROM expense_entries ee
+                JOIN expense_categories ec ON ee.category_id = ec.id
+                WHERE ec.user_id = %s
+            """, (user_id,))
+            expense_entries = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get expense bucket records
+    expense_bucket_records = _get_entries_from_redis('recurring_expense_buckets', user_id) or []
+    
+    # Get credit accounts
+    credit_accounts = _get_credit_accounts_from_redis(user_id)
+    if credit_accounts is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, name FROM credit_accounts WHERE user_id = %s
+            """, (user_id,))
+            credit_accounts = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get ALL c_expense categories (for footer)
+    all_c_expense_categories = _get_categories_from_redis('c_expense_categories', user_id)
+    if all_c_expense_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT cec.id, cec.account_id, cec.name, cec.is_recurring, cec.hidden, cec.is_bundle, ca.name as account_name
+                FROM c_expense_categories cec
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+                ORDER BY cec.display_order DESC
+            """, (user_id,))
+            all_c_expense_categories = list(cursor.fetchall())
+            cursor.close()
+    else:
+        account_names = {a['id']: a['name'] for a in credit_accounts}
+        for cat in all_c_expense_categories:
+            cat['account_name'] = account_names.get(cat.get('account_id'), '')
+    
+    # Filter to only recurring ones for summary display
+    c_expense_categories = [c for c in all_c_expense_categories if c.get('is_recurring') == 1]
+    
+    # Get c_expense entries
+    c_expense_entries = _get_entries_from_redis('c_expense_entries', user_id)
+    if c_expense_entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.is_bucket, cee.original_amount
+                FROM c_expense_entries cee
+                JOIN c_expense_categories cec ON cee.category_id = cec.id
+                JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+            """, (user_id,))
+            c_expense_entries = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get c_expense bucket records
+    c_expense_bucket_records = _get_entries_from_redis('recurring_c_expense_buckets', user_id) or []
+    
+    # Get recurring expense records (for wage_bill lookup)
+    recurring_expense_records = _get_entries_from_redis('recurring_expense', user_id)
+    if recurring_expense_records is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, category_id, wage_bill, amount, cadence_interval, cadence_unit,
+                       start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
+                FROM recurring_expense
+                WHERE user_id = %s
+            """, (user_id,))
+            recurring_expense_records = list(cursor.fetchall())
+            cursor.close()
+    
+    # Get recurring c_expense records (for wage_bill lookup)
+    recurring_c_expense_records = _get_entries_from_redis('recurring_c_expense', user_id)
+    if recurring_c_expense_records is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, category_id, wage_bill, amount, cadence_interval, cadence_unit,
+                       start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
+                FROM recurring_c_expense
+                WHERE user_id = %s
+            """, (user_id,))
+            recurring_c_expense_records = list(cursor.fetchall())
+            cursor.close()
+    
+    return {
+        'all_expense_categories': all_expense_categories,
+        'expense_categories': expense_categories,
+        'expense_entries': expense_entries,
+        'expense_bucket_records': expense_bucket_records,
+        'credit_accounts': credit_accounts,
+        'all_c_expense_categories': all_c_expense_categories,
+        'c_expense_categories': c_expense_categories,
+        'c_expense_entries': c_expense_entries,
+        'c_expense_bucket_records': c_expense_bucket_records,
+        'recurring_expense_records': recurring_expense_records,
+        'recurring_c_expense_records': recurring_c_expense_records,
+    }
+
+
+def _summary_bill_rows(user_id, src):
+    """
+    (rows, as_of) for Upcoming Bills: every recurring bill and bucket, the
+    budget's and each card's, soonest first, each with its key, both sides and
+    its status this month; and the last bank sync the list is "as of" (None
+    with nothing linked). See summary_buckets and summary_layout.
+    """
+    import bank_import
+    import summary_layout as _summary_layout
+    all_expense_categories = src['all_expense_categories']
+    expense_categories = src['expense_categories']
+    expense_entries = src['expense_entries']
+    expense_bucket_records = src['expense_bucket_records']
+    credit_accounts = src['credit_accounts']
+    all_c_expense_categories = src['all_c_expense_categories']
+    c_expense_categories = src['c_expense_categories']
+    c_expense_entries = src['c_expense_entries']
+    c_expense_bucket_records = src['c_expense_bucket_records']
+    recurring_expense_records = src['recurring_expense_records']
+    recurring_c_expense_records = src['recurring_c_expense_records']
+    # The Upcoming Bills rows, both sides each, worked out here rather than in
+    # the page: a paid bill's record is gone by the time the page asks, and
+    # only the entries still say it was paid. See summary_buckets.
+    from summary_buckets import upcoming_rows, sort_rows, month_status
+    _today = _user_today_for(user_id)
+    _wage_bill = {int(r['category_id']): int(r.get('wage_bill') or 0)
+                  for r in (recurring_expense_records or []) if r.get('category_id') is not None}
+    _c_wage_bill = {int(r['category_id']): int(r.get('wage_bill') or 0)
+                    for r in (recurring_c_expense_records or []) if r.get('category_id') is not None}
+    _card_names = {int(a['id']): a.get('name') or '' for a in (credit_accounts or []) if a.get('id') is not None}
+    _templates, _c_templates = {}, {}
+    for r in (recurring_expense_records or []):
+        if r.get('category_id') is not None:
+            _templates.setdefault(int(r['category_id']), []).append(r)
+    for r in (recurring_c_expense_records or []):
+        if r.get('category_id') is not None:
+            _c_templates.setdefault(int(r['category_id']), []).append(r)
+    _budget_rows = upcoming_rows(expense_categories, expense_entries, expense_bucket_records, _wage_bill, _today,
+                                 templates=_templates)
+    _card_rows = upcoming_rows(c_expense_categories, c_expense_entries, c_expense_bucket_records, _c_wage_bill, _today,
+                               account_names=_card_names, templates=_c_templates)
+    # The key a pin or a filter names the row by - the two tables' ids overlap.
+    for _row in _budget_rows:
+        _row['key'] = _summary_layout.bill_key('e', _row['category_id'])
+    for _row in _card_rows:
+        _row['key'] = _summary_layout.bill_key('c', _row['category_id'])
+    # What the Paid / Unpaid filters read, worked out against the person's own today.
+    for _row in _budget_rows + _card_rows:
+        _row['paid_this_month'], _row['due_this_month'] = month_status(_row, _today)
+    bucket_rows = sort_rows(_budget_rows + _card_rows)
+
+    # "as of": the day the bank has spoken for - the same last sync the
+    # entry routes lock up to (bank_import.locked_day). Paid or not on a
+    # linked account is known up to then; past it, the bank has not said yet.
+    # Shown only with an account linked, which is when the lock exists at all.
+    bills_as_of = None
+    try:
+        from bank_redis import get_user_linked_account_flags
+        _flags = get_user_linked_account_flags(user_id) or {}
+        _synced = bank_import.last_sync_date(user_id) if (_flags.get('has_checking') or _flags.get('linked_credit_ids')) else None
+        if _synced:
+            _d = date.fromisoformat(str(_synced)[:10])
+            bills_as_of = {
+                'date': _d.isoformat(),
+                'label': _d.strftime('%b ') + str(_d.day) + (_d.strftime(', %Y') if _d.year != _today.year else ''),
+                'full': _d.strftime('%B ') + str(_d.day) + _d.strftime(', %Y'),
+            }
+    except Exception as e:
+        log_warning(app.logger, 'BANK', f"dashboard_summary as-of date for user {user_id}: {e}")
+
+    return bucket_rows, bills_as_of
+
+
 @app.route('/dashboard_summary')
 @login_required
 def dashboard_summary():
@@ -15731,119 +15940,20 @@ def dashboard_summary():
     landing_page = user_data.get('landing_page', 'dashboard_3m') if user_data else 'dashboard_3m'
     member_since = user_data.get('member_since') if user_data else None
     
-    # Get ALL expense categories (for footer)
-    all_expense_categories = _get_categories_from_redis('expense_categories', current_user.id)
-    if all_expense_categories is None:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT id, name, is_recurring, hidden, is_bundle
-                FROM expense_categories
-                WHERE user_id = %s
-                ORDER BY display_order DESC
-            """, (current_user.id,))
-            all_expense_categories = list(cursor.fetchall())
-            cursor.close()
-    
-    # Filter to only recurring ones for summary display
-    expense_categories = [c for c in all_expense_categories if c.get('is_recurring') == 1]
-    
-    # Get expense entries
-    expense_entries = _get_entries_from_redis('expense_entries', current_user.id)
-    if expense_entries is None:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT ee.id, ee.category_id, ee.date, ee.amount, ee.is_bucket, ee.original_amount
-                FROM expense_entries ee
-                JOIN expense_categories ec ON ee.category_id = ec.id
-                WHERE ec.user_id = %s
-            """, (current_user.id,))
-            expense_entries = list(cursor.fetchall())
-            cursor.close()
-    
-    # Get expense bucket records
-    expense_bucket_records = _get_entries_from_redis('recurring_expense_buckets', current_user.id) or []
-    
-    # Get credit accounts
-    credit_accounts = _get_credit_accounts_from_redis(current_user.id)
-    if credit_accounts is None:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT id, name FROM credit_accounts WHERE user_id = %s
-            """, (current_user.id,))
-            credit_accounts = list(cursor.fetchall())
-            cursor.close()
-    
-    # Get ALL c_expense categories (for footer)
-    all_c_expense_categories = _get_categories_from_redis('c_expense_categories', current_user.id)
-    if all_c_expense_categories is None:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT cec.id, cec.account_id, cec.name, cec.is_recurring, cec.hidden, cec.is_bundle, ca.name as account_name
-                FROM c_expense_categories cec
-                JOIN credit_accounts ca ON cec.account_id = ca.id
-                WHERE ca.user_id = %s
-                ORDER BY cec.display_order DESC
-            """, (current_user.id,))
-            all_c_expense_categories = list(cursor.fetchall())
-            cursor.close()
-    else:
-        account_names = {a['id']: a['name'] for a in credit_accounts}
-        for cat in all_c_expense_categories:
-            cat['account_name'] = account_names.get(cat.get('account_id'), '')
-    
-    # Filter to only recurring ones for summary display
-    c_expense_categories = [c for c in all_c_expense_categories if c.get('is_recurring') == 1]
-    
-    # Get c_expense entries
-    c_expense_entries = _get_entries_from_redis('c_expense_entries', current_user.id)
-    if c_expense_entries is None:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT cee.id, cee.category_id, cee.date, cee.amount, cee.is_bucket, cee.original_amount
-                FROM c_expense_entries cee
-                JOIN c_expense_categories cec ON cee.category_id = cec.id
-                JOIN credit_accounts ca ON cec.account_id = ca.id
-                WHERE ca.user_id = %s
-            """, (current_user.id,))
-            c_expense_entries = list(cursor.fetchall())
-            cursor.close()
-    
-    # Get c_expense bucket records
-    c_expense_bucket_records = _get_entries_from_redis('recurring_c_expense_buckets', current_user.id) or []
-    
-    # Get recurring expense records (for wage_bill lookup)
-    recurring_expense_records = _get_entries_from_redis('recurring_expense', current_user.id)
-    if recurring_expense_records is None:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT id, category_id, wage_bill, amount, cadence_interval, cadence_unit,
-                       start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
-                FROM recurring_expense
-                WHERE user_id = %s
-            """, (current_user.id,))
-            recurring_expense_records = list(cursor.fetchall())
-            cursor.close()
-    
-    # Get recurring c_expense records (for wage_bill lookup)
-    recurring_c_expense_records = _get_entries_from_redis('recurring_c_expense', current_user.id)
-    if recurring_c_expense_records is None:
-        with get_db_pool().get_connection() as conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT id, category_id, wage_bill, amount, cadence_interval, cadence_unit,
-                       start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
-                FROM recurring_c_expense
-                WHERE user_id = %s
-            """, (current_user.id,))
-            recurring_c_expense_records = list(cursor.fetchall())
-            cursor.close()
-    
+    # Upcoming Bills' sources and rows - shared with the iOS widget.
+    _src = _summary_bill_sources(current_user.id)
+    all_expense_categories = _src['all_expense_categories']
+    expense_categories = _src['expense_categories']
+    expense_entries = _src['expense_entries']
+    expense_bucket_records = _src['expense_bucket_records']
+    credit_accounts = _src['credit_accounts']
+    all_c_expense_categories = _src['all_c_expense_categories']
+    c_expense_categories = _src['c_expense_categories']
+    c_expense_entries = _src['c_expense_entries']
+    c_expense_bucket_records = _src['c_expense_bucket_records']
+    recurring_expense_records = _src['recurring_expense_records']
+    recurring_c_expense_records = _src['recurring_c_expense_records']
+
     # Get recurring income records. Unlike the two above this needs the whole
     # template, not just wage_bill: Test a Raise prefills its form from it, so
     # the cadence and the dates have to come along too.
@@ -15979,55 +16089,7 @@ def dashboard_summary():
             savings_entries = list(cursor.fetchall())
             cursor.close()
 
-    # The Upcoming Bills rows, both sides each, worked out here rather than in
-    # the page: a paid bill's record is gone by the time the page asks, and
-    # only the entries still say it was paid. See summary_buckets.
-    from summary_buckets import upcoming_rows, sort_rows, month_status
-    _today = _user_today_for(current_user.id)
-    _wage_bill = {int(r['category_id']): int(r.get('wage_bill') or 0)
-                  for r in (recurring_expense_records or []) if r.get('category_id') is not None}
-    _c_wage_bill = {int(r['category_id']): int(r.get('wage_bill') or 0)
-                    for r in (recurring_c_expense_records or []) if r.get('category_id') is not None}
-    _card_names = {int(a['id']): a.get('name') or '' for a in (credit_accounts or []) if a.get('id') is not None}
-    _templates, _c_templates = {}, {}
-    for r in (recurring_expense_records or []):
-        if r.get('category_id') is not None:
-            _templates.setdefault(int(r['category_id']), []).append(r)
-    for r in (recurring_c_expense_records or []):
-        if r.get('category_id') is not None:
-            _c_templates.setdefault(int(r['category_id']), []).append(r)
-    _budget_rows = upcoming_rows(expense_categories, expense_entries, expense_bucket_records, _wage_bill, _today,
-                                 templates=_templates)
-    _card_rows = upcoming_rows(c_expense_categories, c_expense_entries, c_expense_bucket_records, _c_wage_bill, _today,
-                               account_names=_card_names, templates=_c_templates)
-    # The key a pin or a filter names the row by - the two tables' ids overlap.
-    for _row in _budget_rows:
-        _row['key'] = _summary_layout.bill_key('e', _row['category_id'])
-    for _row in _card_rows:
-        _row['key'] = _summary_layout.bill_key('c', _row['category_id'])
-    # What the Paid / Unpaid filters read, worked out against the person's own today.
-    for _row in _budget_rows + _card_rows:
-        _row['paid_this_month'], _row['due_this_month'] = month_status(_row, _today)
-    bucket_rows = sort_rows(_budget_rows + _card_rows)
-
-    # "as of": the day the bank has spoken for - the same last sync the
-    # entry routes lock up to (bank_import.locked_day). Paid or not on a
-    # linked account is known up to then; past it, the bank has not said yet.
-    # Shown only with an account linked, which is when the lock exists at all.
-    bills_as_of = None
-    try:
-        from bank_redis import get_user_linked_account_flags
-        _flags = get_user_linked_account_flags(current_user.id) or {}
-        _synced = _bank_last_sync_date() if (_flags.get('has_checking') or _flags.get('linked_credit_ids')) else None
-        if _synced:
-            _d = date.fromisoformat(str(_synced)[:10])
-            bills_as_of = {
-                'date': _d.isoformat(),
-                'label': _d.strftime('%b ') + str(_d.day) + (_d.strftime(', %Y') if _d.year != _today.year else ''),
-                'full': _d.strftime('%B ') + str(_d.day) + _d.strftime(', %Y'),
-            }
-    except Exception as e:
-        log_warning(app.logger, 'BANK', f"dashboard_summary as-of date for user {current_user.id}: {e}")
+    bucket_rows, bills_as_of = _summary_bill_rows(current_user.id, _src)
 
     return render_template(
         'dashboard_summary.html',
@@ -16965,6 +17027,71 @@ def widget_trends():
     return jsonify({
         'currency_symbol': currency_symbol,
         'series': series,
+        'data_version': _get_data_version(user_id),
+        'dashboard_path': '/dashboard_summary',
+    })
+
+
+@app.route('/api/widget/upcoming-bills', methods=['GET'])
+@login_required
+def widget_upcoming_bills():
+    """JSON API for the iOS Upcoming Bills widget: the Summary page's list.
+
+    The same rows the page draws (_summary_bill_rows) - every recurring bill
+    and bucket, the budget's and each card's, each with its last and next
+    occurrence and whether it is paid or due this month - in the page's order:
+    the person's pinned bills first, then soonest first. The widget filters
+    them itself with its own buttons, so every row is sent; `as_of` is the
+    last bank sync, as the page's header shows it.
+    """
+    import summary_layout as _summary_layout
+    user_id = current_user.id
+
+    user_data = None
+    if app.config.get('REDIS_OK'):
+        try:
+            cached = _redis_client.get(f"users:v1:{user_id}")
+            if cached:
+                user_data = json.loads(cached)
+        except Exception:
+            pass
+    if not user_data:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("SELECT currency_type, summary_layout FROM users WHERE id = %s", (user_id,))
+            user_data = cursor.fetchone() or {}
+            cursor.close()
+    currency_symbol = {
+        'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CAD': 'C$',
+        'AUD': 'A$', 'CHF': 'Fr', 'CNY': '¥', 'INR': '₹', 'MXN': 'Mex$'
+    }.get((user_data.get('currency_type') or 'USD'), '$')
+    pinned = _summary_layout.parse(user_data.get('summary_layout'))['bills']['pinned']
+
+    rows, as_of = _summary_bill_rows(user_id, _summary_bill_sources(user_id))
+    for row in rows:
+        row['pinned'] = row['key'] in pinned
+    rows = [r for r in rows if r['pinned']] + [r for r in rows if not r['pinned']]
+
+    def side(s):
+        if not s:
+            return None
+        return {'date': s.get('date'), 'original_amount': float(s.get('original_amount') or 0),
+                'current_amount': float(s.get('current_amount') or 0), 'paid': bool(s.get('paid'))}
+
+    return jsonify({
+        'currency_symbol': currency_symbol,
+        'as_of': as_of,
+        'rows': [{
+            'key': r['key'],
+            'name': r.get('name') or '',
+            'account_name': r.get('account_name'),
+            'is_bill': bool(r.get('is_bill')),
+            'pinned': r['pinned'],
+            'last': side(r.get('last')),
+            'upcoming': side(r.get('upcoming')),
+            'paid_this_month': bool(r.get('paid_this_month')),
+            'due_this_month': bool(r.get('due_this_month')),
+        } for r in rows],
         'data_version': _get_data_version(user_id),
         'dashboard_path': '/dashboard_summary',
     })
