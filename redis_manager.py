@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, date
 from decimal import Decimal
 from typing import Dict, List, Optional, Any, Set
 from collections import defaultdict
+from contextlib import contextmanager
 from db_connections import get_db_pool
 from log_config import JsonFormatter, get_logger, log_info, log_error, log_warning, log_exception
 import pymysql.cursors
@@ -233,6 +234,39 @@ def track_user_activity(user_id: int):
                 daemon=True,
                 name=f"RefreshTTL-{user_id}"
             ).start()
+
+
+# Users some background work is using the cache for right now - the daily
+# bank pull above all - counted, since two jobs can overlap. The dehydration
+# worker leaves them alone. Activity is only ever stamped by requests, so a
+# pull that started four minutes after the person's last page had one minute
+# left: on BA-01 (2026-10-17) the user was dehydrated during SimpleFIN's fetch,
+# and everything after it ran against an empty cache - the imports found no
+# forecasts to consume, and a request rehydrating from MySQL then wiped the
+# links the import had not flushed yet.
+_held_users: Dict[int, int] = {}
+
+
+@contextmanager
+def held(user_id: int):
+    """
+    Keep a user hydrated for the length of a block of background work. Does
+    not hydrate - the caller still does that, inside the block. The five
+    minutes of inactivity start again when the block ends.
+    """
+    with _user_activity_lock:
+        _held_users[user_id] = _held_users.get(user_id, 0) + 1
+        _user_last_activity[user_id] = time.time()
+    try:
+        yield
+    finally:
+        with _user_activity_lock:
+            left = _held_users.get(user_id, 0) - 1
+            if left > 0:
+                _held_users[user_id] = left
+            else:
+                _held_users.pop(user_id, None)
+            _user_last_activity[user_id] = time.time()
 
 
 def is_user_hydrated(user_id: int) -> bool:
@@ -700,6 +734,24 @@ def _dehydrate_user_data(user_id: int):
         log_exception(logger, 'DEHYDRATION', f"✗ Error dehydrating user {user_id}: {e}")
 
 
+def _users_to_dehydrate(current_time: float) -> List[int]:
+    """
+    The hydrated users idle past INACTIVITY_TIMEOUT at current_time, their
+    activity tracking dropped. A user held by background work (held()) is
+    never one of them, however long since their last request.
+    """
+    found = []
+    with _user_activity_lock:
+        for user_id, last_activity in list(_user_last_activity.items()):
+            if user_id in _held_users:
+                continue
+            if current_time - last_activity > INACTIVITY_TIMEOUT:
+                if user_id in _hydrated_users:
+                    found.append(user_id)
+                del _user_last_activity[user_id]
+    return found
+
+
 def _dehydration_worker():
     """
     Background worker that checks for inactive users and dehydrates them.
@@ -709,18 +761,8 @@ def _dehydration_worker():
     
     while not _shutdown_event.is_set():
         try:
-            current_time = time.time()
-            users_to_dehydrate = []
-            
-            # Find inactive users
-            with _user_activity_lock:
-                for user_id, last_activity in list(_user_last_activity.items()):
-                    if current_time - last_activity > INACTIVITY_TIMEOUT:
-                        if user_id in _hydrated_users:
-                            users_to_dehydrate.append(user_id)
-                        # Clean up tracking
-                        del _user_last_activity[user_id]
-            
+            users_to_dehydrate = _users_to_dehydrate(time.time())
+
             # Dehydrate inactive users
             for user_id in users_to_dehydrate:
                 log_info(logger, 'REDIS', f"User {user_id} inactive for {INACTIVITY_TIMEOUT}s, dehydrating")

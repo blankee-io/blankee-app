@@ -1653,6 +1653,17 @@ def clear_notification_if_none(user_id: int) -> bool:
 
 def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
     """
+    _pull, with the user held hydrated from start to finish
+    (redis_manager.held): the fetch alone can take a minute, and every step
+    after it reads and writes the cache.
+    """
+    import redis_manager
+    with redis_manager.held(user_id):
+        return _pull(user_id, source)
+
+
+def _pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
+    """
     One pull for one user: fetch, normalize, reconcile with what is stored,
     store; then the posted rows into the budget, unmatched forecasts moved
     on, the totals recomputed, the notification refreshed. Returns what
@@ -1711,6 +1722,11 @@ def pull(user_id: int, source: str = 'manual') -> Dict[str, Any]:
             log_warning(logger, TAG, f'user {user_id}: pull refused: {e.code}')
             result.update(error=e.code, message=e.message)
             return result
+
+        # The fetch is the slow part. Held, the user cannot have been
+        # dehydrated during it - but a cache that went away anyway (another
+        # process, a restart) is reloaded here rather than written into empty.
+        _ensure_hydrated(user_id)
 
         result['balances'] = fetched.get('accounts') or []
         result['errors'] = fetched.get('errors') or []

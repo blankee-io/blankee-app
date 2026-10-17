@@ -8,6 +8,18 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.58.1 — 2026-10-17
+
+### Fixed
+
+- **A bank pull no longer loses its place when you are away.** The daily
+  pull runs while you are not using the app, and the fetch from the bank
+  can take a minute; if your five minutes of inactivity ran out during it,
+  your cached data was cleared under the pull. The transactions then went
+  in without using up the forecasts they matched - so both counted - and
+  without the links the "Did these come through?" prompt shows them by.
+  The pull now keeps your data loaded from start to finish.
+
 ## 1.58.0 — 2026-10-14
 
 ### Added
