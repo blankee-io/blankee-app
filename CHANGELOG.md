@@ -8,6 +8,29 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.59.0 — 2026-10-17
+
+### Fixed
+
+- **A card payment on its way no longer throws the card's balance off.** A
+  payment to a linked card reaches Blankee the day it leaves checking, but
+  the card company posts it a day or three later - and in between the
+  morning's balance check saw the card owing more at the bank than in the
+  app, and wrote the payment off as a correction, then wrote it back once
+  the card posted it. A payment that has left checking in the last week and
+  has not yet shown up on the card is now counted as on its way, so the card
+  balances without either correction.
+- **A card's interest charge no longer shows twice.** If two projected
+  charges ever landed on the same statement date, the second was never
+  noticed again, and stood beside the real one every month. The next
+  recalculation now removes the extra one.
+
+### Changed
+
+- Payments and refunds arriving on a linked card are now kept with the
+  bank's transactions (still never added to your budget), so Blankee can
+  tell when the card has posted a payment.
+
 ## 1.58.1 — 2026-10-17
 
 ### Fixed

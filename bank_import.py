@@ -79,6 +79,14 @@ TAG = 'BANK_IMPORT'
 # has been seen and costs nothing, since the rows already stored are simply
 # updated.
 OVERLAP_DAYS = 7
+# How long a card payment can take to post on the card after it leaves
+# checking, and still be counted as on its way (in_transit_payments). No more
+# than OVERLAP_DAYS: every pull fetches that far back, so a payment that has
+# posted on the card in that time is always among the stored rows.
+IN_TRANSIT_DAYS = 7
+# The card's own record of a payment can carry an earlier date than the
+# checking side's - some issuers date it when it was sent.
+IN_TRANSIT_EARLY_DAYS = 3
 
 # A posted transaction with a new id replaces a stored pending one when the
 # account and the amount match and the pending row's date is within this
@@ -235,7 +243,6 @@ def normalize(fetched: List[Dict[str, Any]], accounts: Dict[str, Dict[str, Any]]
     on. The bank's posted epoch decides when it is known; the date alone when
     it is not.
     """
-    from bank_redis import linked_account_kind
     out = []
     for t in fetched:
         aid = str(t.get('account_ref') or '')
@@ -248,13 +255,13 @@ def normalize(fetched: List[Dict[str, Any]], accounts: Dict[str, Dict[str, Any]]
         if amount is None:
             continue
         transaction_type = t.get('transaction_type') or ('expense' if float(amount) < 0 else 'income')
-        # Money arriving on a card - a payment, a refund - is not imported.
-        # The payment reaches the card from the other side: the checking
-        # account's feed brings it in as an expense in the card's payment
-        # category, and that mirrors onto the card as it does when typed.
-        # Importing it here too would count the same payment twice.
-        if linked_account_kind(accounts[aid]) == 'credit' and transaction_type != 'expense':
-            continue
+        # Money arriving on a card - a payment, a refund - is stored but never
+        # imported (create_entries passes it by). The payment reaches the card
+        # from the other side: the checking account's feed brings it in as an
+        # expense in the card's payment category, and that mirrors onto the
+        # card as it does when typed; importing it here too would count it
+        # twice. It is kept so the card's balance can be measured fairly
+        # while a payment is still on its way (in_transit_payments).
         floor = floors.get(aid)
         if floor:
             epoch, link_day = floor
@@ -915,11 +922,15 @@ def create_entries(user_id: int) -> Dict[str, Any]:
     # writing. Asking per row would be a request per transaction.
     todo: List[Tuple[Dict[str, Any], Dict[str, Any], Optional[int], Optional[Dict[str, Any]]]] = []
     taken: set = {str(r.get('imported_to_entry_id')) for r in stored if r.get('imported_to_entry_id')}
+    from bank_redis import linked_account_kind
     for row in stored:
         if _flag(row.get('pending')) or row.get('imported_to_entry_id'):
             continue
         acc = accounts.get(str(row.get('account_id')))
         if not acc:
+            continue
+        # Money arriving on a card stays out of the budget - see normalize.
+        if linked_account_kind(acc) == 'credit' and row.get('transaction_type') != 'expense':
             continue
         plan = route(user_id, row, acc)
         if not plan:
@@ -1420,6 +1431,82 @@ def record_balances(user_id: int, balances: List[Dict[str, Any]]) -> int:
     return written
 
 
+def in_transit_payments(user_id: int, card_links: Dict[int, str], as_of: str) -> Dict[int, float]:
+    """
+    {credit_account_id: amount} of payments that have left checking for a
+    card but that the card's own feed has not posted by as_of.
+
+    A payment to a card reaches the app the day it leaves checking - an
+    expense in the card's payment category, mirrored onto the card - while
+    the card company posts it a day or three later. In between the bank
+    still has the card owing what it owed, and measured against that the
+    app looks wrong by exactly the payment: on BA-01 a 240.00 payment left
+    on 10-14, the next morning wrote -240 onto the card as a correction and
+    the morning after +240 back. The card's figure is fairer with the
+    payment counted as on its way.
+
+    A payment is the budget's real (not forecast) spending in a card's
+    payment category on a day in the IN_TRANSIT_DAYS up to as_of. The card
+    has posted it when a payment of the same amount (to the cent) has
+    arrived on the card's linked account on or before as_of, no more than
+    IN_TRANSIT_EARLY_DAYS before it left checking. Each posted payment
+    answers for one sent one, earliest first.
+
+    card_links: {credit_account_id: linked account_id}.
+    """
+    import redis_manager
+    from bank_redis import get_linked_transactions
+    if not card_links:
+        return {}
+    first = (_parse(as_of) - timedelta(days=IN_TRANSIT_DAYS - 1)).isoformat()
+    mirror_of: Dict[int, int] = {}
+    for c in redis_manager.get_table_cache('expense_categories', user_id) or []:
+        if _flag(c.get('is_credit_account')) and c.get('credit_account_id') and c.get('id') is not None:
+            card = int(c['credit_account_id'])
+            if card in card_links:
+                mirror_of[int(c['id'])] = card
+    if not mirror_of:
+        return {}
+
+    # Sent: per card, each payment as its own entry - two sent on one day are
+    # two postings on the card, not one.
+    sent: Dict[int, List[Tuple[str, float]]] = {}
+    for e in redis_manager.get_table_cache('expense_entries', user_id) or []:
+        card = mirror_of.get(int(e.get('category_id') or 0))
+        d = _iso(e.get('date'))
+        if card is None or not d or not (first <= d <= as_of) or _flag(e.get('is_bucket')):
+            continue
+        sent.setdefault(card, []).append((d, round(float(e.get('amount') or 0), 2)))
+
+    # Posted: money arriving on each card's account, by as_of.
+    posted: Dict[str, List[Tuple[str, int]]] = {}
+    for t in get_linked_transactions(user_id) or []:
+        if _flag(t.get('pending')) or t.get('transaction_type') == 'expense':
+            continue
+        d = _iso(t.get('date'))
+        if d and d <= as_of:
+            posted.setdefault(str(t.get('account_id') or ''), []).append((d, _cents(t.get('amount')) or 0))
+
+    out: Dict[int, float] = {}
+    for card, payments in sent.items():
+        arrived = sorted(posted.get(card_links[card], []))
+        used = [False] * len(arrived)
+        waiting = 0.0
+        for d, amount in sorted(payments):
+            if amount <= 0:
+                continue
+            earliest = (_parse(d) - timedelta(days=IN_TRANSIT_EARLY_DAYS)).isoformat()
+            hit = next((i for i, (pd, cents) in enumerate(arrived)
+                        if not used[i] and pd >= earliest and cents == _cents(amount)), None)
+            if hit is None:
+                waiting += amount
+            else:
+                used[hit] = True
+        if waiting:
+            out[card] = round(waiting, 2)
+    return out
+
+
 def feed_as_of(user_id: int, balances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     The bank's balances turned into what the app should show, grouped by the
@@ -1437,8 +1524,12 @@ def feed_as_of(user_id: int, balances: List[Dict[str, Any]]) -> List[Dict[str, A
     is not a reason not to balance; it is a reason to balance against the day
     it belongs to.
 
+    A card's figure has the payments still on their way to it taken off
+    (in_transit_payments), since the app already holds them.
+
     Returns [{'as_of', 'checking', 'savings', 'cards': {credit_account_id:
-    owed}}], one per distinct day, earliest first.
+    owed}, 'card_links', 'in_transit': {credit_account_id: amount}}], one
+    per distinct day, earliest first.
     """
     from bank_redis import (_get_all_linked_accounts_raw, linked_account_kind,
                             get_credit_account_for_linked_account, get_linked_transactions)
@@ -1475,7 +1566,8 @@ def feed_as_of(user_id: int, balances: List[Dict[str, Any]]) -> List[Dict[str, A
         if not day:
             continue
         as_of = float(b['current_balance']) - moved.get(aid, 0.0)
-        group = groups.setdefault(day, {'as_of': day, 'checking': None, 'savings': None, 'cards': {}})
+        group = groups.setdefault(day, {'as_of': day, 'checking': None, 'savings': None, 'cards': {},
+                                        'card_links': {}, 'in_transit': {}})
         kind = linked_account_kind(active[aid])
         if kind == 'checking':
             group['checking'] = as_of
@@ -1486,6 +1578,16 @@ def feed_as_of(user_id: int, balances: List[Dict[str, Any]]) -> List[Dict[str, A
             if card and card.get('id') is not None:
                 # A card's balance from the bank is what is owed, negative.
                 group['cards'][int(card['id'])] = abs(as_of)
+                group['card_links'][int(card['id'])] = aid
+
+    # A payment on its way: the app has it already, the card's figure not yet.
+    for day, group in groups.items():
+        waiting = in_transit_payments(user_id, group['card_links'], day)
+        for card, amount in waiting.items():
+            group['cards'][card] = round(group['cards'][card] - amount, 2)
+        group['in_transit'] = waiting
+        if waiting:
+            log_info(logger, TAG, f'user {user_id}: as of {day}, card payment(s) on their way: {waiting}')
     return [groups[d] for d in sorted(groups)]
 
 

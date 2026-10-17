@@ -8662,6 +8662,13 @@ def _reconcile_interest_entries(user_id, account_id, category_id, projected,
     # as no-longer-projected. The visible result was an interest charge that
     # never moved however many times it was deferred.
     deferred = {}
+    # A second projected charge on a statement date the first already holds.
+    # One statement is one charge; keyed by date, the extra was invisible here
+    # - restated never, removed never - and stood beside the real one for good.
+    # On BA-01 (2026-10-15) a card gained a second charge on 26 statements,
+    # every month showing interest twice. The first one found stays (it is the
+    # one whose bucket record the prompt answers); the rest go.
+    duplicates = []
     for entry in entries:
         if int(entry.get('category_id') or 0) != int(category_id):
             continue
@@ -8674,10 +8681,20 @@ def _reconcile_interest_entries(user_id, account_id, category_id, projected,
                 origin = datetime.strptime(origin[:10], '%Y-%m-%d').date()
             if origin:
                 deferred[origin] = entry
+            elif when in projected_buckets:
+                duplicates.append((when, entry))
             else:
                 projected_buckets[when] = entry
         else:
             confirmed.add(when)
+
+    for when, extra in duplicates:
+        _delete_entry_in_redis('c_expense_entries', user_id, category_id,
+                               when, when, specific_entry_id=extra.get('id'))
+    if duplicates:
+        log_info(app.logger, 'CA_INTEREST',
+                 f"Account {account_id}: removed {len(duplicates)} duplicate projected "
+                 f"interest charge(s)")
 
     for when, amount in sorted(projected.items()):
         if when in confirmed:
