@@ -1227,6 +1227,176 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// A NOTIFICATION AS IT ARRIVES
+// ═══════════════════════════════════════════════════════════════
+// A notification that comes in while someone is looking at the app opens the
+// bell's dropdown, with the new one on top - on every device that has the app
+// open, not only the one whose action raised it. Only one that arrived while
+// the app was open: what was already there when the person signed in never
+// opens it. Only for someone looking: not while the tab is hidden or the
+// window is behind another, and held until they come back to it (focus asks
+// again). Not over a dialog either - it waits for that one to close.
+//
+// The baseline is the tab's, not the page's. Each tab remembers the newest
+// notification it has accounted for (sessionStorage, which a reload keeps),
+// starting from the newest there was when it was first drawn (nav.html,
+// data-notification-after). It has to outlive the page: on another device
+// the change that carries a notification also marks the page for a reload,
+// and the first touch there - often before the window even has focus -
+// reloads it. A baseline taken afresh from that new page already counted the
+// notification, and it never opened anywhere but the device that raised it.
+// A page without the nav bar - signed out, the login and MFA pages - clears
+// it, so signing in starts from what is there at that moment.
+//
+// The projected shortfall is one standing notification restated in place
+// (app.py, _set_shortfall_notification), so its id never grows. It is
+// followed by its own key instead - its id and the moment it was last
+// restated (nav.html data-shortfall, and shortfall_key from the endpoint) -
+// kept per tab the same way: whenever it goes below zero or changes, the list
+// opens; when it goes away, nothing does.
+//
+// The poller below is what notices: whatever writes a notification moves the
+// data version, and the poller asks here before it marks the page for a
+// reload - and the reload waits while the check is in flight or the dropdown
+// it opened is still open, so moving the mouse to it does not reload the page
+// out from under it.
+window.blankeeNotificationArrivals = (function () {
+    var KEY = 'blankee.notifications.after';
+    var SHORTFALL_KEY = 'blankee.notifications.shortfall';
+    var after = null;    // the newest notification id this tab has accounted for
+    var shortfall = null; // the standing shortfall's key as this tab last showed it
+    var busy = false;    // a check in flight, or the dropdown it opened still open
+    var again = false;   // asked to check while busy
+
+    function remember() {
+        try {
+            sessionStorage.setItem(KEY, String(after));
+            sessionStorage.setItem(SHORTFALL_KEY, shortfall || '');
+        } catch (e) {}
+    }
+
+    function baseline() {
+        if (after !== null) { return true; }
+        var bar = document.querySelector('.nav-bar[data-notification-after]');
+        var v = bar ? bar.getAttribute('data-notification-after') : null;
+        if (v === null || v === '') { return false; }
+        var newest = Number(v) || 0;
+        var kept = null;
+        try { kept = sessionStorage.getItem(KEY); } catch (e) {}
+        // The tab's own baseline when it has one. One past the newest there
+        // is cannot be this account's - another person's, in the same tab
+        // without a sign-in page between - so the page's own is taken then.
+        after = (kept !== null && kept !== '' && Number(kept) <= newest) ? Number(kept) : newest;
+        var keptShortfall = null;
+        try { keptShortfall = sessionStorage.getItem(SHORTFALL_KEY); } catch (e) {}
+        shortfall = (kept !== null && keptShortfall !== null) ? keptShortfall
+                  : (bar.getAttribute('data-shortfall') || '');
+        remember();
+        return true;
+    }
+
+    function looking() {
+        return !document.hidden && (typeof document.hasFocus !== 'function' || document.hasFocus());
+    }
+
+    function dialogOpen() {
+        if (typeof _openConfirmModals !== 'undefined' && _openConfirmModals.length) { return true; }
+        var open = false;
+        document.querySelectorAll('.modal').forEach(function (m) {
+            if (!open && m.offsetParent !== null && getComputedStyle(m).display !== 'none') { open = true; }
+        });
+        return open;
+    }
+
+    function openDropdown() {
+        var dd = window.blankeeNotificationsDropdown;
+        if (!dd) { return Promise.resolve(); }
+        var bell = document.getElementById('navNotifications');
+        if (bell && !bell.querySelector('.notification-badge')) {
+            var badge = document.createElement('span');
+            badge.className = 'notification-badge';
+            bell.appendChild(badge);
+        }
+        dd.open();
+        // Held until it is closed - by a click elsewhere, as ever.
+        return new Promise(function (resolve) {
+            (function watch() {
+                if (!dd.isOpen()) { resolve(); return; }
+                setTimeout(watch, 500);
+            })();
+        });
+    }
+
+    function check() {
+        if (!baseline()) { return; }
+        if (busy) { again = true; return; }
+        if (!looking()) { return; }   // focus asks again
+        busy = true;
+        again = false;
+        fetch('/api/notifications/recent', { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.success) { return null; }
+                var fresh = (d.items || [])
+                    .filter(function (n) { return !n.is_read && Number(n.id) > after; });
+                // The shortfall: news when it appears or is restated, not
+                // when it goes away.
+                var now = d.shortfall_key || '';
+                var shortfallNews = !!now && now !== shortfall;
+                shortfall = now;
+                // Accounted for now, whatever happens next: never opened for twice.
+                fresh.forEach(function (n) { after = Math.max(after, Number(n.id)); });
+                remember();
+                if (!fresh.length && !shortfallNews) { return null; }
+                return new Promise(function (resolve) {
+                    // Not over a dialog, and not to someone who has looked
+                    // away in the meantime.
+                    (function wait() {
+                        if (!dialogOpen() && looking()) { resolve(openDropdown()); return; }
+                        setTimeout(wait, 1500);
+                    })();
+                });
+            })
+            .catch(function () { /* the next change will ask again */ })
+            .then(function () {
+                busy = false;
+                if (again) { check(); }
+            });
+    }
+
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) { check(); } });
+
+    // On load: a page without the nav bar starts the next sign-in afresh; a
+    // page behind its tab's baseline - reloaded for the change that carried
+    // a notification - asks at once.
+    function begin() {
+        if (!document.querySelector('.nav-bar[data-notification-after]')) {
+            try {
+                sessionStorage.removeItem(KEY);
+                sessionStorage.removeItem(SHORTFALL_KEY);
+            } catch (e) {}
+            return;
+        }
+        var bar = document.querySelector('.nav-bar');
+        var newest = Number(bar.getAttribute('data-notification-after')) || 0;
+        var standing = bar.getAttribute('data-shortfall') || '';
+        if (baseline() && (after < newest || (standing && standing !== shortfall))) { check(); }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', begin);
+    } else {
+        begin();
+    }
+
+    return {
+        check: check,
+        // The poller holds its reload while this is true.
+        holding: function () { return busy; }
+    };
+})();
+
+// ═══════════════════════════════════════════════════════════════
 // EVERY OPEN PAGE FOLLOWS THE DATA
 // ═══════════════════════════════════════════════════════════════
 // The server keeps one number per person: the moment their data last
@@ -1294,8 +1464,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function newer(v) { return Number(v) > Number(known || 0); }
 
+    function arrivals() {
+        if (window.blankeeNotificationArrivals) { window.blankeeNotificationArrivals.check(); }
+    }
+
     function adopt(v) {
         if (v == null || !newer(v)) { return; }
+        // The page's own write can raise a notification too.
+        arrivals();
         known = String(v);
         // This page has caught up on its own - its write finished after the
         // poll saw the change - so there is nothing to reload for.
@@ -1343,6 +1519,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // in the middle of typing something.
     function touched() {
         if (!stale || window._disableDataVersionReload) { return; }
+        // Not while a new notification is being fetched or its dropdown is
+        // open - moving the mouse to it would reload the page under it.
+        if (window.blankeeNotificationArrivals && window.blankeeNotificationArrivals.holding()) { return; }
         if (typing()) { offerRefresh(); } else { reload(); }
     }
     ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach(function(name) {
@@ -1350,6 +1529,9 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     function changed(v) {
+        // Asked first, so a notification behind the change is shown before
+        // the page is marked for a reload.
+        arrivals();
         if (window._disableDataVersionReload) { known = String(v); return; }
         // A page that is only waiting for work done elsewhere - Suggested
         // recurring while the bank's history is read - sets

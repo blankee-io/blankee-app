@@ -8,6 +8,37 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.60.0 — 2026-10-18
+
+### Added
+
+- **A notification that arrives while you are using Blankee opens the
+  notifications list** under the bell, with the new one on top - on every
+  device you have the app open on, not only the one where it was raised.
+  Only for notifications that come in while the app is open: nothing that
+  was already waiting when you signed in opens it, a tab in the background
+  or a window behind another waits until you come back to it, and it never
+  opens over a dialog you are using.
+
+### Changed
+
+- **The projected overdraft is one notification that keeps itself up to
+  date.** It used to be a new notification each time the first day below
+  zero moved, without the amount, and it stayed after the shortfall had
+  gone. Now there is one, titled **Projected Overdraft** and pinned to the
+  top of the notifications page and the bell's list: "Based on your data,
+  your balance may go below $0 on October 20, 2026. Balance: -$75.20." It
+  changes as your entries change and disappears when there is no shortfall.
+  Whenever it appears or changes, the bell's list opens on every device you
+  have Blankee open on. It is emailed and pushed when it first appears or
+  its day moves, not each time the balance does. It has no delete button,
+  and Clear Read leaves it - it goes when the shortfall does.
+
+### Fixed
+
+- The Day view's floating "Today" flag no longer sits on top of the blur
+  behind an open notifications or profile menu.
+
 ## 1.59.1 — 2026-10-18
 
 ### Fixed

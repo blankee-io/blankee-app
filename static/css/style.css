@@ -18,6 +18,7 @@
     --accent:             #E45F1C;
     --accent-mid:         #EA7F4A;
     --accent-hover:       #EF9F77;
+    --accent-light:       #FADCCD;
     --accent-lighter:     #FDEEEE;
 
     --warning:            #d89802;
@@ -1239,6 +1240,31 @@ body {
 
 .notif-dd-item.is-unread .notif-dd-dot {
     background-color: var(--danger);
+}
+
+/* The standing projected shortfall, pinned to the top of the list: an accent
+   rule down its edge, so it reads as a state rather than one more piece of
+   news. Same on the notifications page (.notification-pinned). */
+.notif-dd-item.is-pinned {
+    border-left: 3px solid var(--accent);
+    background-color: var(--accent-lighter);
+}
+
+.notif-dd-item.is-pinned:hover {
+    background-color: var(--accent-light);
+}
+
+/* Three lines, not two: cut at two, the balance - the point of it - went. */
+.notif-dd-item.is-pinned .notif-dd-text {
+    -webkit-line-clamp: 3;
+}
+
+/* Its title, where the others show their date: it is a state, not news. */
+.notif-dd-title {
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
 }
 
 .notif-dd-body {
@@ -7174,6 +7200,13 @@ td:has(.bucket-progress-container) {
     margin-bottom: 10px;
 }
 
+/* While a nav panel is open its backdrop (.profile-backdrop, 99) blurs the
+   page under the nav bar, and the banner at 150 rode over the blur. It goes
+   under with the rest of the page for as long as the backdrop is up. */
+body:has(.profile-backdrop.open) .today-floating-banner {
+    z-index: 98;
+}
+
 .today-floating-banner:hover {
     background: var(--accent);
     box-shadow: 0 3px 10px var(--accent-hover);
@@ -8984,6 +9017,27 @@ transform: scale(1.2);
     padding: 15px 20px;
     transition: background-color 0.2s;
     overflow: visible;
+}
+
+.notification-item.notification-pinned {
+    border-left: 4px solid var(--accent);
+    background-color: var(--accent-lighter);
+}
+
+/* Its tab in the same colours, saying what it is rather than a date - the
+   date it was last restated tells nobody anything. On hover both deepen to
+   the next orange, not the teal a linked card turns to, which read as a
+   different thing laid over an orange one. Under #notifications-body, as the
+   rules they replace are. */
+#notifications-body .notification-item.notification-pinned::before {
+    background-color: var(--accent-lighter);
+    color: var(--accent);
+    content: "Projected Overdraft";
+}
+
+#notifications-body .notification-item.notification-pinned:hover,
+#notifications-body .notification-item.notification-pinned:hover::before {
+    background-color: var(--accent-light);
 }
 
 /* A card that opens something reads as one. */

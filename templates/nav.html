@@ -2,8 +2,11 @@
 {# data-version is the page's baseline for the change poller in script.js:
    the data version at the moment this page was rendered. Anything newer is
    a change made elsewhere. On the nav root rather than a <meta>, because
-   this partial is included at body level. #}
-<div class="nav-bar" data-version="{{ data_version }}">
+   this partial is included at body level.
+   data-notification-after and data-shortfall are the arrival watcher's
+   baselines, the same way: the newest notification when the page was drawn,
+   and the standing shortfall as it stood then ('' for none). #}
+<div class="nav-bar" data-version="{{ data_version }}" data-notification-after="{{ latest_notification_id }}" data-shortfall="{{ shortfall_key }}">
     <div class="nav-bar-container">
         <div class="nav-left-content">
             <!-- Opens the Blankee menu. Left of the logo, so the control that
@@ -318,7 +321,7 @@
             };
             var bellRow = function (item) {
                 var row = document.createElement('a');
-                row.className = 'notif-dd-item' + (item.is_read ? '' : ' is-unread');
+                row.className = 'notif-dd-item' + (item.is_read ? '' : ' is-unread') + (item.pinned ? ' is-pinned' : '');
                 row.href = item.link || bell.getAttribute('href');
                 var dot = document.createElement('span');
                 dot.className = 'notif-dd-dot';
@@ -330,8 +333,18 @@
                 var when = document.createElement('span');
                 when.className = 'notif-dd-date';
                 when.textContent = item.date;
-                body.appendChild(text);
-                body.appendChild(when);
+                // The standing projected overdraft carries its title where
+                // the others carry a date.
+                if (item.pinned) {
+                    var title = document.createElement('span');
+                    title.className = 'notif-dd-title';
+                    title.textContent = 'Projected Overdraft';
+                    body.appendChild(title);
+                    body.appendChild(text);
+                } else {
+                    body.appendChild(text);
+                    body.appendChild(when);
+                }
                 row.appendChild(dot);
                 row.appendChild(body);
                 row.addEventListener('click', function (event) {
@@ -376,6 +389,19 @@
             bellPanel.addEventListener('click', function (event) {
                 event.stopPropagation();
             });
+
+            // For a notification arriving while the page is open (script.js,
+            // "A NOTIFICATION AS IT ARRIVES"): the list opened as a click on
+            // the bell opens it, freshly loaded, so the new one is on top.
+            window.blankeeNotificationsDropdown = {
+                open: function () {
+                    if (window.blankeeSideMenu) { window.blankeeSideMenu.close(); }
+                    closeNavPanels(notificationsPanel);
+                    loadBell();
+                    notificationsPanel.set(true);
+                },
+                isOpen: function () { return notificationsPanel.isOpen(); }
+            };
         }
 
         // Close any panel when clicking outside it, or on Escape.

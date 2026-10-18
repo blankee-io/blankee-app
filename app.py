@@ -957,8 +957,32 @@ def inject_unread_notifications():
     if current_user.is_authenticated:
         data_version = _get_data_version(current_user.id)
 
+    # The newest notification there was when this page was drawn - the
+    # arrival popup's baseline (script.js, "A NOTIFICATION AS IT ARRIVES").
+    # Anything newer came in while the page was open; anything up to it was
+    # already there, signing in included, and never pops up. From MySQL: the
+    # notifications cache can lag a write, and a baseline that lagged would
+    # pop up something old.
+    latest_notification_id = 0
+    shortfall_key = ''
+    if current_user.is_authenticated:
+        try:
+            with get_db_pool().get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("SELECT MAX(id) AS newest FROM notifications WHERE user_id = %s", (current_user.id,))
+                row = cursor.fetchone() or {}
+                latest_notification_id = int(row.get('newest') or 0)
+                cursor.execute("SELECT id, date, message FROM notifications WHERE user_id = %s AND type = %s ORDER BY id LIMIT 1",
+                               (current_user.id, SHORTFALL_NOTIFICATION_TYPE))
+                shortfall_key = _shortfall_key(cursor.fetchone())
+                cursor.close()
+        except Exception as e:
+            log_error(app.logger, 'NOTIFICATION', f"Latest notification id: {e}")
+
     return dict(
         unread_notifications_count=unread_count,
+        latest_notification_id=latest_notification_id,
+        shortfall_key=shortfall_key,
         nav_first_name=first_name,
         nav_last_name=last_name,
         has_bank_accounts=has_bank_accounts,
@@ -17457,8 +17481,10 @@ def notifications():
                             n['date'] = datetime.fromisoformat(n['date'].replace('Z', '+00:00'))
                         except (ValueError, TypeError):
                             n['date'] = datetime.now()
-                # Sort by date descending
+                # Sort by date descending - the standing shortfall first,
+                # whatever its date (_set_shortfall_notification).
                 notifications = sorted(notifications, key=lambda x: x.get('date', datetime.min), reverse=True)[:100]
+                notifications.sort(key=lambda x: x.get('type') != SHORTFALL_NOTIFICATION_TYPE)
         except Exception as e:
             pass
     
@@ -17467,12 +17493,12 @@ def notifications():
         with get_db_pool().get_connection() as conn:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                SELECT id, date, message, is_read
+                SELECT id, date, message, is_read, type
                 FROM notifications
                 WHERE user_id = %s
-                ORDER BY date DESC
+                ORDER BY (type <=> %s) DESC, date DESC
                 LIMIT 100
-            """, (current_user.id,))
+            """, (current_user.id, SHORTFALL_NOTIFICATION_TYPE))
             notifications = cursor.fetchall()
             cursor.close()
 
@@ -17499,18 +17525,21 @@ def api_recent_notifications():
     """
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
+        # The projected shortfall first, whatever its date - it stands, it is
+        # not news that scrolls away (_set_shortfall_notification).
         cursor.execute("""
-            SELECT id, date, message, is_read
+            SELECT id, date, message, is_read, type
               FROM notifications
              WHERE user_id = %s
-             ORDER BY date DESC, id DESC
+             ORDER BY (type <=> %s) DESC, date DESC, id DESC
              LIMIT 5
-        """, (current_user.id,))
+        """, (current_user.id, SHORTFALL_NOTIFICATION_TYPE))
         rows = cursor.fetchall() or []
         cursor.execute("SELECT COUNT(*) AS n FROM notifications WHERE user_id = %s AND is_read = 0",
                        (current_user.id,))
         unread = (cursor.fetchone() or {}).get('n', 0)
         cursor.close()
+    shortfall = next((r for r in rows if r.get('type') == SHORTFALL_NOTIFICATION_TYPE), None)
 
     items = []
     for row in rows:
@@ -17522,8 +17551,27 @@ def api_recent_notifications():
             'link': link,
             'is_read': bool(row.get('is_read')),
             'date': when.strftime('%b %-d, %-I:%M %p') if hasattr(when, 'strftime') else str(when or ''),
+            'pinned': row.get('type') == SHORTFALL_NOTIFICATION_TYPE,
         })
-    return jsonify({'success': True, 'items': items, 'unread': int(unread or 0)})
+    # What the arrival watcher compares: the standing shortfall's id and the
+    # moment it was last restated, '' when there is none.
+    return jsonify({'success': True, 'items': items, 'unread': int(unread or 0),
+                    'shortfall_key': _shortfall_key(shortfall)})
+
+
+def _shortfall_key(row):
+    """
+    '<id>:<restated at>:<checksum of the message>' for the standing shortfall
+    row, '' for none. The checksum because the date is to the second, and
+    the recalculations can restate it twice inside one.
+    """
+    if not row:
+        return ''
+    import zlib
+    when = row.get('date')
+    stamp = when.strftime('%Y-%m-%dT%H:%M:%S') if hasattr(when, 'strftime') else str(when or '')
+    crc = zlib.crc32(str(row.get('message') or '').encode('utf-8'))
+    return f"{row.get('id')}:{stamp}:{crc:08x}"
 
 
 def _admin_user_rows():
@@ -19220,11 +19268,14 @@ def delete_notification():
     
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor()
-        # Verify notification belongs to current user before deleting
+        # Verify notification belongs to current user before deleting. The
+        # standing shortfall is not the person's to delete - it goes when the
+        # shortfall does (_set_shortfall_notification) - so it is left alone
+        # however the request was made; the page offers no delete for it.
         cursor.execute("""
             DELETE FROM notifications
-            WHERE id = %s AND user_id = %s
-        """, (notification_id, current_user.id))
+            WHERE id = %s AND user_id = %s AND NOT (type <=> %s)
+        """, (notification_id, current_user.id, SHORTFALL_NOTIFICATION_TYPE))
         conn.commit()
         cursor.close()
     
@@ -19273,13 +19324,13 @@ def delete_reconnect_notifications():
 @app.route('/clear-read-notifications', methods=['POST'])
 @login_required
 def clear_read_notifications():
-    """Delete all read notifications for the current user"""
+    """Delete all read notifications for the current user - but the standing shortfall, which stays."""
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             DELETE FROM notifications
-            WHERE user_id = %s AND is_read = 1
-        """, (current_user.id,))
+            WHERE user_id = %s AND is_read = 1 AND NOT (type <=> %s)
+        """, (current_user.id, SHORTFALL_NOTIFICATION_TYPE))
         deleted_count = cursor.rowcount
         conn.commit()
         cursor.close()
@@ -24478,6 +24529,17 @@ def add_notification(user_id, message, notification_date=None, kind=None, notifi
         conn.commit()
         cursor.close()
     
+    _deliver_notification(user_id, user, message, notification_date, notification_id, unread_count, kind)
+    return notification_id
+
+
+def _deliver_notification(user_id, user, message, notification_date, notification_id, unread_count, kind=None):
+    """
+    The email and the push for a notification already written, and the cache
+    forgotten so the page shows it. add_notification's second half, apart so
+    a notification restated in place (the standing shortfall) can be sent
+    the same way.
+    """
     # Send email notification if enabled. The opt-in check and the recipient
     # decision live in the helper, shared with bucket_utils, so the two callers
     # cannot drift apart.
@@ -24503,8 +24565,6 @@ def add_notification(user_id, message, notification_date=None, kind=None, notifi
             _redis_client.delete(f"notifications:v1:{user_id}")
         except Exception:
             pass
-    
-    return notification_id
 
 
 def _create_pending_transactions_notification(user_id, new_count=None):
@@ -24570,57 +24630,107 @@ def check_negative_remainders(user_id):
             break  # Stop at the first negative remainder
     
     if not first_negative_date:
-        pass
-        return
-    
-    formatted_date = first_negative_date.strftime('%B %d, %Y')
-
-    # The same warning again is not news. This runs on every recalculation -
-    # each entry saved, each bundle toggled - and used to delete the standing
-    # notification and raise a fresh one every time, which meant an email and
-    # a push for every keystroke that touched the forecast: three in ten
-    # seconds, for one fact. If the notification already names this date, it
-    # stands, unread or not, and nothing is sent. Only a *different* first
-    # shortfall replaces it.
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT COUNT(*) FROM notifications
-            WHERE user_id = %s
-            AND message LIKE %s
-        """, (user_id, f'%remainder shows below $0 on {formatted_date}.%'))
-        (already_raised,) = cursor.fetchone() or (0,)
-        cursor.close()
-    if already_raised:
+        _set_shortfall_notification(user_id, None, None)
         return
 
-    # Delete any previous negative remainder notifications for this user
-    with get_db_pool().get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            DELETE FROM notifications
-            WHERE user_id = %s
-            AND message LIKE %s
-        """, (user_id, '%remainder shows below $0%'))
-        deleted_count = cursor.rowcount
-        conn.commit()
-        cursor.close()
-        if deleted_count > 0:
-            log_info(app.logger, 'NOTIFICATION', f"Deleted {deleted_count} old negative remainder notification(s) for user {user_id}")
-            # Invalidate Redis cache after deleting old notifications
-            if app.config.get('REDIS_OK'):
-                try:
-                    _redis_client.delete(f"notifications:v1:{user_id}")
-                except Exception:
-                    pass
-    
-    # Create new notification
-    message = f'Based on your current entries, your remainder shows below $0 on {formatted_date}. <a href="/dashboard_d?date={first_negative_date.strftime("%Y-%m-%d")}">Click here to view</a>.'
+    _set_shortfall_notification(user_id, first_negative_date, -first_negative_remainder)
+
+
+SHORTFALL_NOTIFICATION_TYPE = 'shortfall'
+
+
+def _set_shortfall_notification(user_id, first_date, short_by):
+    """
+    The projected shortfall: one notification that stands for as long as the
+    forecast goes below zero, restated in place as the day and the amount
+    move, and gone when it no longer does (2026-10-18). notifications.type
+    'shortfall' finds it; the notifications page and the bell's list put it
+    first. It used to be a fresh notification each time the first negative
+    day moved - one after another in the list, the old ones' days already
+    wrong - with no amount, and one that stayed after the shortfall had gone.
+
+    Restated, it is unread again and dated now, which is what makes every
+    open page notice it and open the bell's list (script.js, "A NOTIFICATION
+    AS IT ARRIVES", which compares this row's id and date). Emailed and
+    pushed only when it first appears or its day moves: the amount moves with
+    nearly every entry, and an email per keystroke was the bug this replaced.
+    """
+    message = None
+    if first_date is not None:
+        # Titled "Projected Overdraft" where it is shown (the notifications
+        # page's tab, the bell's list), so the message does not repeat it.
+        message = (f'Based on your data, your balance may go below $0 on '
+                   f'{first_date.strftime("%B %d, %Y")}. Balance: -${short_by:,.2f}. '
+                   f'<a href="/dashboard_d?date={first_date.strftime("%Y-%m-%d")}">Click here to view</a>.')
+    send = False
+    changed = False
+    notification_id = None
+    now = datetime.now()
     try:
-        notification_id = add_notification(user_id, message, kind='low_balance')
-        log_info(app.logger, 'NOTIFICATION', f"Created negative remainder notification for user {user_id}: {formatted_date}")
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            # Before the standing one existed: a fresh row per change, found by
+            # its wording. They go, the first time this runs.
+            cursor.execute("""
+                DELETE FROM notifications
+                 WHERE user_id = %s AND type IS NULL AND message LIKE %s
+            """, (user_id, '%remainder shows below $0%'))
+            changed = cursor.rowcount > 0
+            cursor.execute("""
+                SELECT id, message FROM notifications
+                 WHERE user_id = %s AND type = %s ORDER BY id
+            """, (user_id, SHORTFALL_NOTIFICATION_TYPE))
+            rows = cursor.fetchall() or []
+            standing = rows[0] if rows else None
+            extra = [r['id'] for r in rows[1:]]
+            if extra:
+                cursor.execute(f"DELETE FROM notifications WHERE id IN ({','.join(['%s'] * len(extra))})", extra)
+                changed = True
+            if message is None:
+                if standing:
+                    cursor.execute("DELETE FROM notifications WHERE id = %s", (standing['id'],))
+                    changed = True
+            elif standing is None:
+                cursor.execute("""
+                    INSERT INTO notifications (user_id, date, message, is_read, type)
+                    VALUES (%s, %s, %s, 0, %s)
+                """, (user_id, now, message, SHORTFALL_NOTIFICATION_TYPE))
+                notification_id = cursor.lastrowid
+                changed = send = True
+            elif standing['message'] != message:
+                cursor.execute("""
+                    UPDATE notifications SET message = %s, date = %s, is_read = 0 WHERE id = %s
+                """, (message, now, standing['id']))
+                notification_id = standing['id']
+                changed = True
+                # A new day is news; a new amount on the same day is not.
+                send = first_date.strftime('%B %d, %Y') not in (standing['message'] or '')
+            user = unread = None
+            if send:
+                cursor.execute("""
+                    SELECT email, email_notifications, first_name, email_notify_disabled
+                      FROM users WHERE id = %s
+                """, (user_id,))
+                user = cursor.fetchone()
+                cursor.execute("SELECT COUNT(*) AS total FROM notifications WHERE user_id = %s AND is_read = 0",
+                               (user_id,))
+                unread = (cursor.fetchone() or {}).get('total', 0)
+            conn.commit()
+            cursor.close()
     except Exception as e:
-        log_error(app.logger, 'NOTIFICATION', f"Error creating notification: {e}")
+        log_error(app.logger, 'NOTIFICATION', f"Shortfall notification for user {user_id}: {e}")
+        return
+    if send:
+        _deliver_notification(user_id, user, message, now, notification_id, unread, kind='low_balance')
+    elif changed and app.config.get('REDIS_OK'):
+        try:
+            _redis_client.delete(f"notifications:v1:{user_id}")
+        except Exception:
+            pass
+    if changed:
+        log_info(app.logger, 'NOTIFICATION',
+                 f"Shortfall notification for user {user_id}: "
+                 f"{'cleared' if message is None else first_date.isoformat() + ', ' + format(short_by, '.2f') + ' short'}")
 
 def check_and_hide_bundle_category(bundle_id):
     """
