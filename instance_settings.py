@@ -419,18 +419,32 @@ def save_smtp_config(smtp_server, smtp_port, smtp_username, from_email,
         return (False, 'Could not save settings.')
 
 
-def get_notification_recipient():
+def get_notification_recipient(user):
     """
-    Where notification emails go, or None if nowhere.
+    Where this user's notification emails go - their own address - or None
+    if nowhere.
 
-    Returns None until the address has confirmed a code. An unverified address
-    is one nobody has shown can receive mail, and notifications are exactly the
-    traffic that fails silently - so this refuses rather than firing into the
-    dark. get_verification_state() is what the UI uses to explain why.
+    Their own, and only theirs (2026-10-18). Until then every user's
+    notifications went to the instance mailbox, the address mail is sent
+    from: right for the one-person install this began as, wrong the moment a
+    second person signed up - on BA-01 another user's bills and bank activity
+    were landing in the administrator's inbox. There is no fallback to the
+    instance mailbox and no copy to it: a user with no usable address gets no
+    email, rather than someone else getting theirs.
 
-    Still the seam for per-user destinations: callers delegate the decision
-    here, so that change stays local to this function.
+    Returns None until the mail settings have confirmed a code. An unverified
+    configuration is one nobody has shown can send, and notifications are
+    exactly the traffic that fails silently - so this refuses rather than
+    firing into the dark. get_verification_state() is what the UI uses to
+    explain why.
+
+    The address is users.email, or the username, which is the same address
+    on every Blankee account.
     """
-    if not is_verified():
+    if not is_verified() or not user:
         return None
-    return get_smtp_config().get('from_email') or None
+    for field in ('email', 'username'):
+        address = str(user.get(field) or '').strip()
+        if '@' in address:
+            return address
+    return None

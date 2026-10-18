@@ -8,6 +8,18 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.59.1 — 2026-10-18
+
+### Fixed
+
+- **Notification emails go to the person they are for.** Every user's
+  notification emails were being sent to the server's own mailbox - the
+  address mail is sent from, set up in the admin console - rather than to
+  the user. On an install with more than one person, that put one person's
+  bills and bank activity in someone else's inbox. Each email now goes to
+  the account's own address, and only there: no copy to the mailbox, and
+  nothing at all for an account with no address.
+
 ## 1.59.0 — 2026-10-17
 
 ### Fixed

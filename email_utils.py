@@ -369,8 +369,9 @@ def send_notification_email_for_user(user, message, notification_date, kind=None
     same rule is how they drift, and the recipient rule in particular is the one
     most likely to change (see instance_settings.get_notification_recipient).
 
-    Recipient is the instance mailbox, not user['email']: notifications are sent
-    from and to the configured address. The per-user opt-in still gates it.
+    Recipient is the user's own address (get_notification_recipient), sent
+    from the instance mailbox. Never anyone else's, and no copy to the
+    instance mailbox. The per-user opt-in gates it.
 
     kind names which sort of notification this is, so the per-type switches can
     narrow what gets sent - see notification_kinds. The gate belongs here rather
@@ -388,13 +389,16 @@ def send_notification_email_for_user(user, message, notification_date, kind=None
                  f"type switched off")
         return False
 
-    from instance_settings import get_notification_recipient, get_smtp_config
-    recipient = get_notification_recipient()
+    from instance_settings import get_notification_recipient, get_smtp_config, is_verified
+    recipient = get_notification_recipient(user)
     if not recipient:
-        # Two different causes, and telling them apart in the log saves a real
-        # debugging session: nothing filled in, versus filled in but never
-        # proven to receive mail.
-        if get_smtp_config()['configured']:
+        # Three different causes, and telling them apart in the log saves a
+        # real debugging session: nothing filled in, filled in but never proven
+        # to send, and a user with no address to send to.
+        if is_verified():
+            log_error(logger, 'EMAIL',
+                      f"Notification not emailed: user {user.get('id')} has no email address.")
+        elif get_smtp_config()['configured']:
             log_error(logger, 'EMAIL',
                       'Notification not emailed: the mail settings have not been verified. '
                       'Save them under Email Delivery in Settings and enter the code.')
