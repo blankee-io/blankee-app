@@ -1472,6 +1472,8 @@ window.blankeeNotificationArrivals = (function () {
         if (v == null || !newer(v)) { return; }
         // The page's own write can raise a notification too.
         arrivals();
+        // And can change what waits to be confirmed: the kept list goes.
+        if (typeof forgetBucketPending === 'function') { forgetBucketPending(); }
         known = String(v);
         // This page has caught up on its own - its write finished after the
         // poll saw the change - so there is nothing to reload for.
@@ -2665,8 +2667,7 @@ function _postPendingRecurring(row, pending) {
             // has given the category its real id, and the row's choices
             // carry it under the name the form was filled in for.
             var txn = String(row.getAttribute("data-transaction-id"));
-            return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
-              .then(function (r) { return r.ok ? r.json() : null; })
+            return fetchBucketPending()
               .then(function (d) {
                 var item = ((d && d.bank_items) || []).filter(function (i) {
                     return String(i.transaction_id) === txn; })[0];
@@ -2924,11 +2925,75 @@ function resolveAllBucketRows(bodyEl, action, close) {
     next();
 }
 
+// The list the prompt opens with, kept from the last time it was fetched -
+// the page's own load (runMoneyPrompts), syncMoneyLaunchers, the count read
+// after the dialog closes, the pointer reaching the nav bar's bubble - so a
+// click on the bubble opens it at once. It takes the better part of a second
+// to build (every bank row comes with its categories), and waiting for it was
+// the pause between the click and the dialog. Kept until this page writes
+// something of its own (the change poller's adopt() drops it - a change made
+// elsewhere reloads the page anyway), and never past BUCKET_PREFETCH_MS.
+// Taken once: each opening after that starts from a fresh fetch or a fresh
+// keep.
+var BUCKET_PREFETCH_MS = 10 * 60 * 1000;
+var _bucketPrefetch = null;   // {at, promise}
+var _bucketKeptRound = 0;     // moves whenever the page writes (forgetBucketPending)
+
+function keepBucketPending(data) {
+    _bucketPrefetch = { at: Date.now(), promise: Promise.resolve(data) };
+}
+
+function fetchBucketPending() {
+    var promise = fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : null; });
+    // In flight, it is kept only when nothing is: a list already in hand
+    // opens the dialog at once, where one on its way would make it wait.
+    // Once it lands it replaces whatever is kept - unless the page wrote
+    // something while it was out, which makes it suspect too.
+    var round = _bucketKeptRound;
+    if (!_bucketPrefetch) {
+        _bucketPrefetch = { at: Date.now(), promise: promise.catch(function () { return null; }) };
+    }
+    promise.then(function (d) {
+        if (d && d.success && round === _bucketKeptRound) { keepBucketPending(d); }
+    }, function () {});
+    return promise;
+}
+
+function prefetchBucketPending() {
+    if (_bucketPrefetch && Date.now() - _bucketPrefetch.at < BUCKET_PREFETCH_MS) { return; }
+    fetchBucketPending().catch(function () {});
+}
+
+function forgetBucketPending() {
+    _bucketPrefetch = null;
+    _bucketKeptRound++;
+}
+
+function _bucketPending() {
+    var kept = _bucketPrefetch;
+    _bucketPrefetch = null;
+    if (kept && Date.now() - kept.at < BUCKET_PREFETCH_MS) {
+        return kept.promise.then(function (d) { return d || fetchBucketPending(); });
+    }
+    return fetchBucketPending();
+}
+
 function showBucketPrompt(opts) {
     opts = opts || {};
-    return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
-        .then(function (r) { return r.ok ? r.json() : null; })
+    var round = _bucketKeptRound;
+    return _bucketPending()
         .then(function (data) {
+            if (data && data.success) {
+                // How many wait beyond the rows shown - for counting what is
+                // left when it closes without asking (openBucketPrompt).
+                opts.beyond = Math.max(0, (data.total || 0) - (data.shown || 0));
+                // And the list itself, with the write round it belongs to: a
+                // dialog closed with nothing answered leaves it as true as it
+                // was, to reopen with at once.
+                opts.data = data;
+                opts.round = round;
+            }
             if (!data || !data.success || !data.total) {
                 if (opts.announceEmpty) {
                     showToast("Nothing waiting to be confirmed.", "info");
@@ -3244,12 +3309,29 @@ function bucketLauncher() {
     if (!el) { return null; }
     if (!el.dataset.bound) {
         el.dataset.bound = "1";
+        // The list is fetched as the pointer arrives, so the click has it.
+        ["pointerenter", "focus", "touchstart"].forEach(function (name) {
+            el.addEventListener(name, prefetchBucketPending, { passive: true });
+        });
         el.addEventListener("click", function () {
+            // A press while a prompt is already opening or open does nothing -
+            // several presses used to start several openings.
+            if (bucketPromptIsOpen()) { return; }
+            // The bounce at once, the moment it is pressed - not after the
+            // list has come back. The dialog grows out of where the bubble
+            // was as soon as the list is in hand (startBucketOpenSequence
+            // finds the bubble already on its way and does not wait again).
+            var count = el.querySelector(".bucket-launcher-count");
+            var before = count ? count.textContent : "";
+            bounceBucketLauncherOut();
             // Same chain as the page-load path. Clearing the last entry from
             // here has to lead to the balance too, or whether the prompt
             // follows would depend on how the dialog happened to be opened.
             openBucketPrompt().then(function (left) {
-                if (!left) { return openBalanceStep(); }
+                if (left === 0) { return openBalanceStep(); }
+            }, function () {
+                // The list never came: the bubble comes back as it was.
+                setBucketLauncher(parseInt(before, 10) || (before ? 99 : 0));
             });
         });
     }
@@ -3298,8 +3380,7 @@ function setBalanceLauncher(show) {
    Called after anything that could change either count, which is why it reads
    both rather than trusting what the caller thought it knew. */
 function syncMoneyLaunchers() {
-    return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
-        .then(function (r) { return r.ok ? r.json() : null; })
+    return fetchBucketPending()
         .then(function (d) {
             var left = (d && d.success) ? d.total : 0;
             setBucketLauncher(left);
@@ -3625,8 +3706,10 @@ function releaseBucketExpand(prepared) {
 }
 
 function startBucketOpenSequence() {
-    // Beat one: the dialog is hidden at the corner and the bubble bounces.
-    // Beat two: the bubble is gone and the dialog grows into its place.
+    // One beat, not two: the bubble bounces away and the dialog grows out of
+    // where it is, together. They used to take turns - the bounce, then the
+    // growth - and the second waited on the first for the better part of a
+    // second.
     var prepared = prepareBucketExpand();
     if (!prepared) {
         // No animation to play. prepareBucketExpand has already undone the
@@ -3636,9 +3719,8 @@ function startBucketOpenSequence() {
         bounceBucketLauncherOut();
         return;
     }
-    var wait = bounceBucketLauncherOut();
-    if (!wait) { releaseBucketExpand(prepared); return; }
-    setTimeout(function () { releaseBucketExpand(prepared); }, wait);
+    bounceBucketLauncherOut();
+    releaseBucketExpand(prepared);
 }
 function minimiseBucketPrompt(remaining) {
     // Shrink the dialog into the bubble it is becoming, so the count in the
@@ -3655,12 +3737,11 @@ function minimiseBucketPrompt(remaining) {
         if (still) { resolve(); return; }
 
         // The bubble has to exist and be laid out before it can be measured,
-        // so reveal it first - it is behind the dialog and cannot be seen yet.
-        // Measured while still hidden, and revealed only once the dialog has
-        // gone. Showing it up front looked safe - it sits behind the modal -
-        // but the backdrop is transparent, it is only a blur, and that blur is
-        // fading out during this very animation. The bubble came into view
-        // under the shrinking dialog. The two are never both on screen.
+        // so it is revealed for the measuring and hidden again; it arrives
+        // with its pop as the dialog flies into it, below. (It once waited
+        // until the dialog had gone, so the two were never on screen at once;
+        // that doubled the time the close took, and catching the dialog reads
+        // well enough.)
         var launcher = bucketLauncher();
         var wasHidden = launcher.classList.contains("bucket-prompt-hidden");
         if (wasHidden) { launcher.classList.remove("bucket-prompt-hidden"); }
@@ -3679,6 +3760,15 @@ function minimiseBucketPrompt(remaining) {
 
         modal.classList.add("bucket-prompt-minimising");
 
+        // The bubble pops in as the dialog flies into it - catching it - rather
+        // than waiting for the dialog to be gone and then arriving on its own,
+        // which doubled the time the whole thing took.
+        setBucketLauncher(remaining);
+        launcher.classList.add("bucket-launcher-pop");
+        setTimeout(function () {
+            launcher.classList.remove("bucket-launcher-pop");
+        }, 400);
+
         // transitionend would be tidier, but it never fires if the element is
         // hidden mid-flight or the transition is interrupted, and that would
         // leave the dialog open for good. The timer always fires.
@@ -3692,43 +3782,70 @@ function minimiseBucketPrompt(remaining) {
                 modal.classList.remove("bucket-prompt-minimising");
                 content.style.removeProperty("--bucket-fly-x");
                 content.style.removeProperty("--bucket-fly-y");
-                // Only now, with the dialog gone, does the bubble appear.
-                setBucketLauncher(remaining);
-                launcher.classList.add("bucket-launcher-pop");
-                setTimeout(function () {
-                    launcher.classList.remove("bucket-launcher-pop");
-                }, 340);
             }, 40);
         }, BUCKET_MINIMISE_MS);
     });
 }
 
+// One prompt at a time. Several clicks on the bubble in a row used to start
+// several openings at once - a bounce each, a fetch each once the kept list
+// was spent, and dialogs opening over one another. _bucketPromptOpen is up
+// from the moment one starts until its dialog has closed (not until the count
+// after it has come back - the bubble can be pressed again at once), and
+// _bucketPromptRound tells that count whether another prompt has opened since,
+// in which case it leaves the bubble alone.
+var _bucketPromptOpen = false;
+var _bucketPromptRound = 0;
+
+function bucketPromptIsOpen() {
+    return _bucketPromptOpen;
+}
+
 function openBucketPrompt(opts) {
     opts = opts || {};
+    // Already open or opening: nothing more to do. Resolved with null, which
+    // callers read as "not mine to follow up".
+    if (_bucketPromptOpen) { return Promise.resolve(null); }
+    _bucketPromptOpen = true;
+    var round = ++_bucketPromptRound;
 
-    return showBucketPrompt({
+    var prompt = {
         announceEmpty: !!opts.announceEmpty,
         // Runs while the dialog is still on screen. Counts what is left, and
         // if anything is, flies the dialog into the corner bubble before the
         // shared helper dismantles it.
+        //
+        // Counted here, not asked for: the rows still in the dialog (an
+        // answered row is removed; one whose answer is on its way does not
+        // count) and those beyond the list it showed. Asking the server first
+        // held the dialog still for a round trip before it moved. The count
+        // the server gives once it has closed, below, sets the bubble right
+        // if the two differ - another device answering some meanwhile.
         beforeClose: function () {
-            return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (d) {
-                    var left = (d && d.success) ? d.total : 0;
-                    return left ? minimiseBucketPrompt(left) : null;
-                })
-                .catch(function () { /* close without the flourish */ });
+            var modal = document.getElementById("generic-confirm-modal");
+            var shown = modal ? modal.querySelectorAll(".bucket-prompt-item:not(.bucket-prompt-busy)").length : 0;
+            var left = shown + (prompt.beyond || 0);
+            return left ? minimiseBucketPrompt(left) : null;
         }
-    })
+    };
+
+    return showBucketPrompt(prompt)
         .then(function () {
+            _bucketPromptOpen = false;
+            // Nothing written while it was open: what it showed is still what
+            // waits, so the next press opens with it rather than waiting on
+            // the count below.
+            if (prompt.data && prompt.round === _bucketKeptRound) { keepBucketPending(prompt.data); }
             // However the dialog closed, ask what is left: answered rows are
-            // gone, so this is what decides bubble-or-nothing.
-            return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
-                .then(function (r) { return r.ok ? r.json() : null; })
+            // gone, so this is what decides bubble-or-nothing - and the answer
+            // is kept for the next opening.
+            return fetchBucketPending()
                 .then(function (d) {
                     var left = (d && d.success) ? d.total : 0;
-                    setBucketLauncher(left);
+                    // Another prompt has opened since: the bubble is its business.
+                    if (round === _bucketPromptRound && !_bucketPromptOpen) {
+                        setBucketLauncher(left);
+                    }
 
                     // Flush anything the debounce is still holding. Answers
                     // already applied themselves as they landed; this catches
@@ -3743,6 +3860,10 @@ function openBucketPrompt(opts) {
                     return left;
                 })
                 .catch(function () { return 0; });
+        }, function (err) {
+            // The list never came: free the bubble for the next press.
+            _bucketPromptOpen = false;
+            throw err;
         });
 }
 
@@ -4101,8 +4222,7 @@ document.addEventListener("DOMContentLoaded", function () {
    nothing hidden there is no distinction left to draw. */
 function runMoneyPrompts() {
     try {
-        return fetch("/api/buckets/pending", { headers: { "Accept": "application/json" } })
-            .then(function (r) { return r.ok ? r.json() : null; })
+        return fetchBucketPending()
             .then(function (d) {
                 var total = (d && d.success) ? d.total : 0;
 
@@ -4138,6 +4258,8 @@ function runMoneyPrompts() {
                 // which is the point at which there is something to count.
                 markBucketSeen();
                 return openBucketPrompt().then(function (left) {
+                    // A prompt was already open (null): it follows up itself.
+                    if (left === null) { return null; }
                     // Cleared them all in one go: the balance follows
                     // immediately, which is the whole shape of this - one
                     // question after the other, not two at once.

@@ -8,6 +8,39 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.61.0 — 2026-10-18
+
+### Changed
+
+- **The side menu stays open on a wide screen.** From 1175px wide - room for
+  the page and the menu beside it - the menu is open from the moment a page
+  loads, standing on the left under the nav bar, and the page moves over to
+  make room. Clicking elsewhere, Escape and the other menus no longer close
+  it; the menu button tucks it away (and Blankee remembers that) and brings
+  it back.
+- **The menu opens under the nav bar at every width.** The bar now runs the
+  full width of the window, so its menu button and logo head the menu, and
+  the version has moved down to the menu's footer. On a narrower screen it
+  is still the drawer: it slides over the page, blurs what is under it, and
+  a click outside or Escape closes it.
+- The side menu has dividers under Dashboards and under Bundles, so its
+  three groups - where to look, what to plan with, and the settings - read
+  as groups.
+
+### Fixed
+
+- **The entries-to-confirm button reacts at once.** Clicking it waited for
+  the list to come back from the server before the button bounced and the
+  dialog grew, and closing the dialog waited for a count before it shrank
+  back into the button. The button now bounces the moment it is pressed -
+  its bounce had also stopped playing under the pointer - the dialog opens
+  with the list the page already has, and it shrinks the moment it is
+  closed. The button's bounce and the dialog's growth now run together, as
+  do the dialog's shrink and the button popping back, rather than one
+  waiting for the other. Pressing it several times in a row opens it once
+  instead of tangling several openings together, and reopening it straight
+  after closing without answering anything is immediate.
+
 ## 1.60.0 — 2026-10-18
 
 ### Added

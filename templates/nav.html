@@ -1,4 +1,14 @@
 <!-- Top navigation bar -->
+{# Wide enough, the menu is docked open beside the page (style.css, "THE MENU,
+   DOCKED"). Tucked away with the menu button, it stays tucked: applied here,
+   before the bar or the page is drawn, so a tucked menu never flashes open. #}
+<script>
+    try {
+        if (localStorage.getItem('blankee.sideMenu.tucked') === '1') {
+            document.documentElement.classList.add('side-menu-tucked');
+        }
+    } catch (e) {}
+</script>
 {# data-version is the page's baseline for the change poller in script.js:
    the data version at the moment this page was rendered. Anything newer is
    a change made elsewhere. On the nav root rather than a <meta>, because
@@ -416,34 +426,66 @@
         // Opened by the hamburger, closed by the backdrop or Escape.
         // Exposed as window.blankeeSideMenu so the page tutorials can drive
         // it the way they already drive the profile dropdown.
+        //
+        // Wide enough, it is docked instead (style.css, "THE MENU, DOCKED"):
+        // open beside the page, and nothing closes it - not a click elsewhere,
+        // not Escape, not another menu opening. The hamburger tucks it away
+        // and brings it back, and that choice is kept. Under the width it is
+        // the drawer, exactly as before.
         const sideMenu = document.getElementById('sideMenu');
         const sideMenuBackdrop = document.getElementById('sideMenuBackdrop');
         const sideMenuToggle = document.getElementById('navMenuToggle');
+        const DOCK_WIDTH = 1175;   // 875 + the menu's 300 - as in style.css
+        const wide = window.matchMedia('(min-width: ' + DOCK_WIDTH + 'px)');
+        const root = document.documentElement;
 
         if (sideMenu && sideMenuBackdrop && sideMenuToggle) {
+            const docked = function () { return wide.matches && !root.classList.contains('side-menu-tucked'); };
+            const sync = function () {
+                var shown = docked() || sideMenu.classList.contains('open');
+                sideMenu.setAttribute('aria-hidden', shown ? 'false' : 'true');
+                sideMenuToggle.setAttribute('aria-expanded', shown ? 'true' : 'false');
+            };
             const setMenu = function (open) {
                 sideMenu.classList.toggle('open', open);
                 sideMenuBackdrop.classList.toggle('open', open);
-                sideMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
-                sideMenuToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                sync();
+            };
+            const setTucked = function (tucked) {
+                root.classList.toggle('side-menu-tucked', tucked);
+                try { localStorage.setItem('blankee.sideMenu.tucked', tucked ? '1' : '0'); } catch (e) {}
+                sync();
             };
             window.blankeeSideMenu = {
-                open: function () { setMenu(true); },
-                close: function () { setMenu(false); }
+                // Wide, open means docked; and close does nothing - another
+                // menu opening, or a tutorial step, does not take it away.
+                open: function () { if (wide.matches) { setTucked(false); } else { setMenu(true); } },
+                close: function () { if (!wide.matches) { setMenu(false); } },
+                docked: docked
             };
 
             sideMenuToggle.addEventListener('click', function (event) {
                 event.stopPropagation();
+                if (wide.matches) {
+                    setTucked(docked());
+                    return;
+                }
                 var opening = !sideMenu.classList.contains('open');
                 if (opening) { closeProfileDropdown(); }
                 setMenu(opening);
             });
             sideMenuBackdrop.addEventListener('click', function () { setMenu(false); });
             document.addEventListener('keydown', function (event) {
-                if (event.key === 'Escape' && sideMenu.classList.contains('open')) {
+                if (event.key === 'Escape' && !wide.matches && sideMenu.classList.contains('open')) {
                     setMenu(false);
                 }
             });
+            // Across the width: the drawer's open state means nothing docked,
+            // and a drawer left open while the window widened would come back
+            // open over the page when it narrowed again.
+            var crossed = function () { setMenu(false); };
+            if (wide.addEventListener) { wide.addEventListener('change', crossed); } else if (wide.addListener) { wide.addListener(crossed); }
+            sync();
         }
 
         // The collapsing rows - Dashboards, Manage Recurring - all behave the

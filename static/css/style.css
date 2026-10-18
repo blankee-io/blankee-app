@@ -785,6 +785,80 @@ body {
     pointer-events: auto;
 }
 
+/* ===== THE MENU UNDER THE NAV BAR, DOCKED WHEN THERE IS ROOM (2026-10-18) =====
+   The menu hangs from the nav bar at every width: it opens below the bar
+   rather than over it, so the bar's menu button and logo are its heading -
+   the menu's own header, which repeated them, is gone, and the version it
+   carried is in the menu's footer. For that the bar runs the full width
+   whenever the page has the menu, its button and logo at the left edge
+   above where the menu opens. The signed-out pages have no menu
+   (body:has(#sideMenu)) and keep their bar as it was.
+
+   Under 1175px it is still the drawer: it slides in over the page, the
+   backdrop dims and blurs what is under it - below the bar, which stays
+   clear - and a click on the backdrop or Escape closes it.
+
+   From 1175px (an 875px page and the 300px menu beside it) it is docked
+   instead: open from the first paint, the page moved over to make room, no
+   backdrop, and nothing closes it but the menu button, which tucks it away
+   (html.side-menu-tucked, set by nav.html's first script from localStorage
+   before anything is painted) and brings it back. CSS decides it rather than
+   script, so a page is drawn in place instead of shuffling there once the
+   script runs. 1175 is 875 + 300: change the menu's width and change this,
+   and DOCK_WIDTH in nav.html. */
+body:has(#sideMenu) .nav-bar-container {
+    max-width: none;
+}
+
+.side-menu,
+.side-menu-backdrop {
+    top: 50px;
+    height: calc(100% - 50px);
+}
+
+.side-menu-header,
+.side-menu > .side-menu-divider {
+    display: none;
+}
+
+.side-menu .app-footer-version {
+    display: inline;
+}
+
+@media (min-width: 1175px) {
+    body:has(#sideMenu) {
+        transition: padding-left 0.25s ease;
+    }
+
+    body:has(#sideMenu) .nav-bar {
+        transition: margin-left 0.25s ease;
+    }
+
+    /* The page beside the menu, and the bar across the top of both - its
+       negative margin cancels the page's offset, so it does not move. */
+    html:not(.side-menu-tucked) body:has(#sideMenu) {
+        padding-left: 300px;
+    }
+
+    html:not(.side-menu-tucked) body:has(#sideMenu) .nav-bar {
+        margin-left: -300px;
+    }
+
+    /* There for good, under the bar's own dropdowns (the bar is 100). */
+    html:not(.side-menu-tucked) .side-menu {
+        z-index: 90;
+        width: 300px;
+        max-width: none;
+        box-shadow: 1px 0 3px var(--shadow-sm);
+        transform: none;
+        backdrop-filter: none;
+    }
+
+    html:not(.side-menu-tucked) .side-menu-backdrop {
+        display: none;
+    }
+}
+
 /* The same dim and blur a dialog puts behind itself, for the profile menu.
 
    z-index 99 puts it under the nav bar rather than over it, which is the one
@@ -17628,10 +17702,10 @@ tr[data-collapsed] {
     border-top-color: var(--secondary-hover);
 }
 
-/* The wordmark and the version are both at the top of the panel already, and
-   the separator only ever made sense in a row wide enough not to wrap. */
+/* The wordmark is the nav bar's, at the head of the panel, and the separator
+   only ever made sense in a row wide enough not to wrap. The version shows
+   here - the panel's own header that carried it is gone. */
 .side-menu .app-footer-brand,
-.side-menu .app-footer-version,
 .side-menu .app-footer-sep {
     display: none;
 }
@@ -18622,8 +18696,22 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     animation: bucket-launcher-bounce-out 300ms cubic-bezier(0.3, 0, 0.4, 1) forwards;
 }
 
+/* Two classes, over .bucket-launcher:hover (which stops the idle pulse with
+   animation-name: none, and outranks a single class). The bounce plays the
+   moment the bubble is clicked - with the pointer still on it, hovering - and
+   at one class the hover rule won and the bounce never ran. */
+.bucket-launcher.bucket-launcher-bounce-out {
+    animation: bucket-launcher-bounce-out 300ms cubic-bezier(0.3, 0, 0.4, 1) forwards;
+}
+
+.bucket-launcher.bucket-launcher-pop {
+    animation: bucket-launcher-pop 380ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
-    .bucket-launcher {
+    .bucket-launcher,
+    .bucket-launcher.bucket-launcher-bounce-out,
+    .bucket-launcher.bucket-launcher-pop {
         animation: none;
     }
 }
