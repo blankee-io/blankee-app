@@ -8,6 +8,25 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.62.1 — 2026-10-18
+
+### Fixed
+
+- **A card created with a recurring payment was paid twice a month.**
+  Adding a credit account with a recurring payment - or turning the
+  recurring payment on for one that had none - put each payment on the
+  card twice, so the card's forecast fell twice as fast as its payments.
+  Each payment now reaches the card once.
+- **A change to a card's payment left the old payments on the card.**
+  Scheduling a change to a card's recurring payment that moved it to
+  another day kept paying the card on the old day as well, and undoing a
+  change kept its payments on the card after the old ones came back. The
+  card now loses the payments the change takes away, and its balance is
+  worked out again straight after the change.
+- This release does not remove extra payments a card already carries from
+  either. Applying a payment plan to the card rebuilds its payments from
+  the plan's first payment on.
+
 ## 1.62.0 — 2026-10-18
 
 ### Added

@@ -20527,6 +20527,13 @@ def _delete_chain_entries(kind, user_id, recurring_id, on_or_after=None, forecas
 
     forecasts_only keeps whatever has already come through - a confirmed entry
     is a record of money that moved, not a forecast of this link's to take back.
+
+    A card's payment category is mirrored onto the card (c_payment_entries, by
+    card and date), and the card's balance walk reads only the mirror. So what
+    leaves here leaves the mirror too, or a change that moved the payment day
+    went on paying the card on the old one as well (dev, 2026-10-18). The card
+    is not recalculated here - the caller is about to lay the new link's
+    entries - but by _recalc_payment_card once it has.
     """
     table = _CHAIN_KINDS[kind]['entries']
     entries = _get_entries_from_redis(table, user_id)
@@ -20534,6 +20541,7 @@ def _delete_chain_entries(kind, user_id, recurring_id, on_or_after=None, forecas
         return 0
 
     kept, dropped_ids, dropped = [], [], 0
+    gone = {}  # (category_id, day) -> amount, for the card's mirror
     for e in entries:
         matches = int(e.get('recurring_id') or 0) == int(recurring_id)
         if matches and on_or_after is not None:
@@ -20546,6 +20554,10 @@ def _delete_chain_entries(kind, user_id, recurring_id, on_or_after=None, forecas
             entry_id = e.get('id')
             if entry_id and int(entry_id) > 0:
                 dropped_ids.append(str(entry_id))
+            day = _as_date(e.get('date'))
+            if day:
+                key = (int(e.get('category_id') or 0), day)
+                gone[key] = gone.get(key, 0.0) + float(e.get('amount') or 0)
         else:
             kept.append(e)
 
@@ -20556,7 +20568,41 @@ def _delete_chain_entries(kind, user_id, recurring_id, on_or_after=None, forecas
             _redis_client.sadd(pending_key, *dropped_ids)
             _redis_client.expire(pending_key, 604800)
             _redis_client.sadd(f"dirty_tables:{user_id}", table)
+        if kind == 'expense':
+            for (category_id, day), amount in sorted(gone.items()):
+                account_id = _payment_card_of(user_id, category_id)
+                if account_id and amount:
+                    _shift_payment_in_redis(user_id, account_id, day, None, amount, None)
     return dropped
+
+
+def _payment_card_of(user_id, category_id):
+    """The card an expense category pays (its credit_account_id), or None."""
+    for cat in _get_categories_from_redis('expense_categories', user_id) or []:
+        if int(cat.get('id') or 0) == int(category_id or 0):
+            if int(cat.get('is_credit_account') or 0) == 1 and cat.get('credit_account_id'):
+                return int(cat['credit_account_id'])
+            return None
+    return None
+
+
+def _recalc_payment_card(user_id, kind, category_id, since):
+    """Walk the card's balance again after a chain change to its payment category.
+
+    Only an expense category that pays a card has anything to redo; anything
+    else returns at once. A failure is logged, not raised: the change itself has
+    been made, and the next recalculation puts the balance right.
+    """
+    if kind != 'expense':
+        return
+    account_id = _payment_card_of(user_id, category_id)
+    if not account_id:
+        return
+    try:
+        _recalc_ca_daily_balance(user_id, since)
+    except Exception as e:
+        log_warning(app.logger, 'RECURRING', f"user {user_id}: card {account_id} not recalculated "
+                                             f"after a change to its payment: {e}")
 
 
 def _cadence_aligned_start(start, not_before, interval, unit):
@@ -21151,6 +21197,8 @@ def _schedule_recurring_change(user_id, kind, category_id, effective, amount, ca
         if new_no_end or (resumed and resumed['no_end_date']):
             _update_category_in_redis(spec['categories'], user_id, category_id,
                                       {'no_end_date': 1})
+
+        _recalc_payment_card(user_id, kind, category_id, effective)
 
         message = f'{spec["label"].capitalize()} scheduled.'
         if resumed:
@@ -23000,6 +23048,8 @@ def delete_recurring_expense():
         # single-link case below is untouched.
         healed = _delete_chain_link('expense', current_user.id, int(category_id), recurring_id)
         if healed:
+            _recalc_payment_card(current_user.id, 'expense', category_id,
+                                 _user_today_for(current_user.id))
             return jsonify({'status': 'success', 'message': healed})
         
         # Convert to non-recurring instead of deleting the category
@@ -26040,12 +26090,13 @@ def _resync_payment_mirror(user_id, account_id, category_id, since):
     Make the card's payments (c_payment_entries, which its balance walk reads)
     from `since` on match its payment category's entries, then recalculate.
 
-    The mirror is kept by card and date, not by recurring link, so taking a
-    link's entries away (_delete_chain_entries) leaves its payments on the card,
-    and a card created with a recurring payment is mirrored twice over (seen on
-    dev, 2026-10-18). A plan is only right if the card is paid exactly what the
-    plan says, so from its first payment on the mirror is rebuilt from the
-    entries rather than trusted.
+    The mirror is kept by card and date, not by recurring link. Until 1.62.1
+    taking a link's entries away (_delete_chain_entries) left its payments on
+    the card, and a card created with a recurring payment was mirrored twice
+    over (seen on dev, 2026-10-18); both are fixed, but a card made before then
+    still carries what they left. A plan is only right if the card is paid
+    exactly what the plan says, so from its first payment on the mirror is
+    rebuilt from the entries rather than trusted.
     """
     _delete_payment_entry_in_redis(user_id, account_id, since, date(9999, 12, 31))
     by_day = {}
@@ -26379,75 +26430,8 @@ def add_credit_account():
                     user_id=current_user.id
                 )
                 
-                # Also generate c_payment_entries for the same dates
-                # These track payments TO the credit account
-                try:
-                    # Generate the same dates as expense entries
-                    payment_dates = []
-                    year = start_date.year
-                    month = start_date.month
-                    while True:
-                        for day_str in monthly_days:
-                            try:
-                                if str(day_str).lower() == 'last day':
-                                    day_num = calendar.monthrange(year, month)[1]
-                                else:
-                                    day_num = int(day_str)
-                                    last_day_of_month = calendar.monthrange(year, month)[1]
-                                    if day_num > last_day_of_month:
-                                        continue
-                                payment_date = date(year=year, month=month, day=day_num)
-                            except Exception:
-                                continue
-                            if payment_date < start_date:
-                                continue
-                            if payment_date > end_date:
-                                continue
-                            payment_dates.append(payment_date)
-                        month += 1
-                        while month > 12:
-                            month -= 12
-                            year += 1
-                        if (year > end_date.year) or (year == end_date.year and month > end_date.month):
-                            break
-                    
-                    # Add c_payment_entries to Redis
-                    if payment_dates:
-                        payment_redis_key = f"c_payment_entries:v1:{current_user.id}"
-                        cached = _redis_client.get(payment_redis_key)
-                        payments = json.loads(cached) if cached else []
-                        
-                        # Generate temp IDs
-                        existing_ids = [int(p.get('id', 0)) for p in payments]
-                        min_id = min(existing_ids) if existing_ids else 0
-                        next_id = min_id - 1 if min_id <= 0 else -1
-                        
-                        for payment_date in payment_dates:
-                            payments.append({
-                                'id': next_id,
-                                'account_id': temp_account_id,  # Temp ID, will be resolved by flush worker
-                                'date': payment_date.strftime('%Y-%m-%d'),
-                                'amount': float(payment_amount),
-                                'recurring_id': recurring_id,
-                                'processed': 0
-                            })
-                            next_id -= 1
-                        
-                        # Save to Redis
-                        _redis_client.setex(
-                            payment_redis_key,
-                            PERSISTENT_CACHE_TTL,
-                            json.dumps(payments, cls=DecimalEncoder)
-                        )
-                        
-                        # Mark dirty
-                        dirty_key = f"dirty_tables:{current_user.id}"
-                        _redis_client.sadd(dirty_key, 'c_payment_entries')
-                        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-                        
-                        
-                except Exception as payment_err:
-                    log_error(app.logger, 'ADD_CREDIT_ACCOUNT', f"Error generating c_payment_entries: {payment_err}")
+                # generate_expense_entries has already mirrored each payment onto the card
+                # (c_payment_entries); writing them again here paid the card twice a month.
             
         except Exception as e:
             log_error(app.logger, 'ADD_CREDIT_ACCOUNT', f"Error creating recurring payment: {e}")
@@ -26709,74 +26693,8 @@ def update_credit_account():
                 except Exception as gen_err:
                     log_exception(app.logger, 'UPDATE_CREDIT_ACCT', f"generate_expense_entries FAILED: {gen_err}")
                 
-                # Also generate c_payment_entries for the same dates
-                try:
-                    payment_dates = []
-                    year = start_date.year
-                    month = start_date.month
-                    while True:
-                        for day_str in monthly_days:
-                            try:
-                                if str(day_str).lower() == 'last day':
-                                    day_num = calendar.monthrange(year, month)[1]
-                                else:
-                                    day_num = int(day_str)
-                                    last_day_of_month = calendar.monthrange(year, month)[1]
-                                    if day_num > last_day_of_month:
-                                        continue
-                                payment_date = date(year=year, month=month, day=day_num)
-                            except Exception:
-                                continue
-                            if payment_date < start_date:
-                                continue
-                            if payment_date > end_date:
-                                continue
-                            payment_dates.append(payment_date)
-                        month += 1
-                        while month > 12:
-                            month -= 12
-                            year += 1
-                        if (year > end_date.year) or (year == end_date.year and month > end_date.month):
-                            break
-                    
-                    if payment_dates:
-                        log_info(app.logger, 'UPDATE_CREDIT_ACCT', f"Creating {len(payment_dates)} c_payment_entries for account_id={account_id}, first_date={payment_dates[0]}, last_date={payment_dates[-1]}")
-                        payment_redis_key = f"c_payment_entries:v1:{current_user.id}"
-                        cached = _redis_client.get(payment_redis_key)
-                        payments = json.loads(cached) if cached else []
-                        log_info(app.logger, 'UPDATE_CREDIT_ACCT', f"Existing c_payment_entries in Redis: {len(payments)}")
-                        
-                        existing_ids = [int(p.get('id', 0)) for p in payments]
-                        min_id = min(existing_ids) if existing_ids else 0
-                        next_id = min_id - 1 if min_id <= 0 else -1
-                        
-                        for payment_date in payment_dates:
-                            payments.append({
-                                'id': next_id,
-                                'account_id': account_id,  # Real account ID since account already exists
-                                'date': payment_date.strftime('%Y-%m-%d'),
-                                'amount': float(payment_amount),
-                                'recurring_id': recurring_id,
-                                'processed': 0
-                            })
-                            next_id -= 1
-                        
-                        _redis_client.setex(
-                            payment_redis_key,
-                            PERSISTENT_CACHE_TTL,
-                            json.dumps(payments, cls=DecimalEncoder)
-                        )
-                        
-                        dirty_key = f"dirty_tables:{current_user.id}"
-                        _redis_client.sadd(dirty_key, 'c_payment_entries')
-                        _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
-                        log_info(app.logger, 'UPDATE_CREDIT_ACCT', f"Saved {len(payments)} total c_payment_entries to Redis")
-                        
-                    else:
-                        log_warning(app.logger, 'UPDATE_CREDIT_ACCT', f"payment_dates is EMPTY, no c_payment_entries created")
-                        
-                except Exception as payment_err:
-                    log_exception(app.logger, 'UPDATE_CREDIT_ACCOUNT', f"Error generating c_payment_entries: {payment_err}")
+                # generate_expense_entries has already mirrored each payment onto the card
+                # (c_payment_entries); writing them again here paid the card twice a month.
             
             save_totals_remainders_d()
             
