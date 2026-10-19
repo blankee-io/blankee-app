@@ -13438,23 +13438,31 @@ td.credit-account-action-cell button {
 
 /* The weekly and three-month dashboards keep their headers in view (asked for
    on 2026-10-18): the month and year, the category buttons under them, and
-   the row of Fridays, frozen just under .nav-bar (50px) and .calendarnav
-   (52px; 44px on a phone, where its padding is 6px). Sticky to the page,
-   which is what scrolls - neither column has a scroll box of its own.
+   the row of Fridays. Sticky to the page, which is what scrolls - neither
+   column has a scroll box of its own.
 
-   Each takes the page's colour so the rows scroll out of sight behind it,
-   and the buttons' shadow fills the 10px between them and the header. The
-   header's list opens over the buttons, and the buttons' menus over the
-   Fridays, so they stack 62, 61, 59 - all below .calendarnav (98).
-   The Fridays table sits in .fridays-sticky so its current-week outline and
-   T, drawn into that wrapper, move with it. */
+   Frozen where they already sit, not at the calendar bar's edge: stuck any
+   higher, they slid up the gap first and only then stopped, which does not
+   read as frozen. --dash-freeze-top is that resting place - .nav-bar (50px)
+   and .calendarnav (52px; 44px on a phone, where its padding is 6px), plus
+   the gap below it (30px; 25px on a phone) - and the header and the Fridays
+   fill the gap above them with the page's colour, so nothing scrolls
+   through it. The buttons have no band behind them, only their own round
+   backgrounds (asked for).
+
+   The header's list opens over the buttons, and the buttons' menus over the
+   Fridays, so they stack 62, 61, 59 - all below .calendarnav (98). The
+   Fridays table sits in .fridays-sticky so its current-week outline and T,
+   drawn into that wrapper, move with it. */
 .dashbaord_container {
-    --dash-freeze-top: 102px;
+    --dash-freeze-gap: 30px;
+    --dash-freeze-top: calc(102px + var(--dash-freeze-gap));
 }
 
 @media (width <= 600px) {
     .dashbaord_container {
-        --dash-freeze-top: 94px;
+        --dash-freeze-gap: 25px;
+        --dash-freeze-top: calc(94px + var(--dash-freeze-gap));
     }
 }
 
@@ -13462,6 +13470,7 @@ td.credit-account-action-cell button {
     top: var(--dash-freeze-top);
     z-index: 62;
     background-color: var(--bg-page);
+    box-shadow: 0 calc(-1 * var(--dash-freeze-gap)) 0 var(--bg-page);
 }
 
 .dashbaord_container .category-btn-container.unified {
@@ -13469,8 +13478,12 @@ td.credit-account-action-cell button {
     /* the header's 25px and its 10px margin */
     top: calc(var(--dash-freeze-top) + 35px);
     z-index: 61;
+}
+
+.dashbaord_container .category-btn-container.unified > button,
+.dashbaord_container .category-btn-container.unified .type-selector-wrapper > button {
     background-color: var(--bg-page);
-    box-shadow: 0 -10px 0 var(--bg-page);
+    box-shadow: 0 1px 3px var(--shadow-md);
 }
 
 #month-table-container > .fridays-sticky {
@@ -13478,6 +13491,7 @@ td.credit-account-action-cell button {
     top: var(--dash-freeze-top);
     z-index: 59;
     background-color: var(--bg-page);
+    box-shadow: 0 calc(-1 * var(--dash-freeze-gap)) 0 var(--bg-page);
 }
 
 .dashboard-m-month-year-header,
