@@ -553,6 +553,11 @@ function showConfirmModal(opts) {
             bodyEl.style.display = 'none';
         }
         confirmBtn.style.display = opts.hideConfirm ? 'none' : '';
+        // A caller may disable the confirm button while its body is not ready
+        // to be confirmed - onReady hands it the button. A disabled button
+        // answers neither a click nor Enter. Enabled again on every opening,
+        // because the element is shared.
+        confirmBtn.disabled = false;
 
         // A modifier class for callers that need this dialog to look or behave
         // differently - the bucket prompt blurs the page behind it. Cleared
@@ -604,7 +609,7 @@ function showConfirmModal(opts) {
         // and close the dialog with whatever result it likes, while still
         // reusing this shell's escape, backdrop and cleanup behaviour.
         if (typeof opts.onReady === 'function') {
-            try { opts.onReady(bodyEl, function (r) { cleanup(r); }); }
+            try { opts.onReady(bodyEl, function (r) { cleanup(r); }, confirmBtn); }
             catch (e) { /* a caller's wiring must not trap the dialog open */ }
         }
 
@@ -659,6 +664,7 @@ function showConfirmModal(opts) {
             }
         }
         function onConfirm() {
+            if (confirmBtn.disabled) { return; }
             persistCheckbox('confirm');
             cleanup(true);
         }

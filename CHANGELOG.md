@@ -8,6 +8,32 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.62.0 — 2026-10-18
+
+### Added
+
+- **A payment plan for a credit account.** The new button on each row of
+  Credit Accounts works out equal monthly payments that clear the card -
+  from the most you can pay a month, or from how many months you want it
+  paid off in - and shows the payment, the dates, what it costs in interest
+  and what happens after, before anything is saved. Applying it writes the
+  plan as the card's payment category's recurring expense: a change to the
+  recurring payment it has from the first plan payment on, payments before
+  then left as they are, or a new recurring payment if it had none. A plan
+  replaces any change already scheduled from that date, an earlier plan
+  included.
+- The plan is worked out on the card's own forecast - its charges, its
+  statement cycle and the grace period it already projects interest with -
+  so the card's forecast reaches $0 on the last plan payment, give or take
+  a few cents in your favour. The card's own recurring charges are part of
+  the plan, and once it is paid off a smaller payment carries on to cover
+  them; with no recurring charges the payment simply ends.
+
+### Fixed
+
+- The credit accounts table no longer runs past the edge of a phone screen;
+  the delete button at the end of each row was partly cut off.
+
 ## 1.61.0 — 2026-10-18
 
 ### Changed

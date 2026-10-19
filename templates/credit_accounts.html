@@ -110,6 +110,9 @@
                                     {# A linked card's transactions and balance come from the bank; its
                                        name, rate and dates are still the person's to edit. Deleting it
                                        means unlinking it first, in Settings. #}
+                                    <button class="payment-plan-btn" data-account-id="{{ account.id }}" title="Payment plan" aria-label="Payment plan">
+                                        <i class="fa-solid fa-calendar-check"></i>
+                                    </button>
                                     <button class="edit-credit-account-btn" data-account-id="{{ account.id }}">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
@@ -673,6 +676,168 @@
                 }
             });
         }
+
+        // A payment plan (1.62.0): equal monthly payments that clear the card,
+        // worked out from the most the person can pay a month or from how many
+        // months they want it gone in. The server does the sums from the
+        // card's own forecast; applying it writes the card's payment category's
+        // recurring expense - a change to the one it has, or a new one.
+        $(function() {
+            const cs = '{{ "$" if currency_type == "USD" else "€" if currency_type == "EUR" else currency_type }}';
+            function money(v) {
+                return cs + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+            function day(iso) {
+                const p = String(iso).split('-').map(Number);
+                return new Date(p[0], p[1] - 1, p[2]).toLocaleDateString(undefined,
+                    { month: 'short', day: 'numeric', year: 'numeric' });
+            }
+            const LABELS = {
+                payment: { label: 'Most you can pay a month', step: '0.01', placeholder: '0.00' },
+                months:  { label: 'Months to pay it off in', step: '1', placeholder: '12' }
+            };
+
+            $('.credit-accounts-table').on('click', '.payment-plan-btn', async function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const $row = $(this).closest('tr');
+                const accountId = $row.data('account-id');
+                let mode = 'payment';
+                let applied = null;     // the request the current preview answers
+
+                const body =
+                    '<div class="payment-plan">' +
+                        '<div class="graph-toggle-group payment-plan-modes">' +
+                            '<button type="button" class="graph-toggle-btn active" data-mode="payment">Maximum payment</button>' +
+                            '<button type="button" class="graph-toggle-btn" data-mode="months">Time to pay off</button>' +
+                        '</div>' +
+                        '<div class="footer-form-group payment-plan-field">' +
+                            '<label for="payment-plan-value" class="payment-plan-label"></label>' +
+                            '<input type="number" id="payment-plan-value" min="0" inputmode="decimal">' +
+                        '</div>' +
+                        '<p class="payment-plan-facts"></p>' +
+                        '<div class="payment-plan-result"></div>' +
+                    '</div>';
+
+                const ok = await showConfirmModal({
+                    title: 'Payment Plan',
+                    message: $row.attr('data-name'),
+                    bodyHtml: body,
+                    confirmText: 'Apply plan',
+                    onReady: function(el, close, confirmBtn) {
+                        const $el = $(el);
+                        const $input = $el.find('#payment-plan-value');
+                        const $facts = $el.find('.payment-plan-facts');
+                        const $result = $el.find('.payment-plan-result');
+                        let timer = null;
+                        let seq = 0;
+
+                        function setMode(next) {
+                            mode = next;
+                            $el.find('.payment-plan-modes .graph-toggle-btn').each(function() {
+                                $(this).toggleClass('active', $(this).data('mode') === mode);
+                            });
+                            $el.find('.payment-plan-label').text(LABELS[mode].label);
+                            $input.attr({ step: LABELS[mode].step, placeholder: LABELS[mode].placeholder,
+                                          inputmode: mode === 'months' ? 'numeric' : 'decimal' }).val('');
+                            refresh(0);
+                            $input.trigger('focus');
+                        }
+
+                        function line(text, cls) {
+                            return $('<p>').addClass(cls || '').text(text);
+                        }
+
+                        function show(r, value) {
+                            $facts.text(
+                                'Owed by ' + day(r.owed_on) + ': ' + money(r.balance) +
+                                (r.apr !== null && r.apr !== undefined ? ' at ' + r.apr + '% APR' : '') +
+                                (r.charges > 0 ? '. Its recurring charges come to about ' + money(r.charges) + ' a month.' : '.'));
+                            $result.empty();
+                            if (r.status !== 'success') {
+                                if (value !== '') { $result.append(line(r.message, 'payment-plan-error')); }
+                                return false;
+                            }
+                            $result.append(line(r.months === 1
+                                ? 'One payment of ' + money(r.payment) + ' on ' + day(r.first) + '.'
+                                : r.months + ' payments of ' + money(r.payment) + ', ' + day(r.first) +
+                                  ' to ' + day(r.last) + '.', 'payment-plan-headline'));
+                            $result.append(line(r.interest > 0
+                                ? 'About ' + money(r.interest) + ' in interest along the way, as the card\'s forecast works it out.'
+                                : 'No interest along the way, as the card\'s forecast works it out.'));
+                            $result.append(line(r.after > 0
+                                ? 'After that, ' + money(r.after) + ' a month keeps paying the card\'s recurring charges.'
+                                : 'After that, the payment stops.'));
+                            $result.append(line(r.has_payment
+                                ? 'This changes the card\'s recurring payment from ' + day(r.first) + ' on. Payments before then stay as they are.'
+                                : 'This sets up the card\'s payment as a recurring expense.', 'payment-plan-note'));
+                            if (r.replaces && r.replaces.length) {
+                                $result.append(line('It replaces the change already scheduled for ' +
+                                    r.replaces.map(day).join(', ') + '.', 'payment-plan-note'));
+                            }
+                            return true;
+                        }
+
+                        function refresh(delay) {
+                            clearTimeout(timer);
+                            confirmBtn.disabled = true;
+                            applied = null;
+                            const value = String($input.val() || '').trim();
+                            const mine = ++seq;
+                            timer = setTimeout(function() {
+                                $.ajax({
+                                    url: '/api/payment-plan-preview/' + accountId,
+                                    method: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({ mode: mode, value: value }),
+                                    success: function(r) {
+                                        if (mine !== seq) return;
+                                        if (show(r, value)) {
+                                            applied = { mode: mode, value: value };
+                                            confirmBtn.disabled = false;
+                                        }
+                                    },
+                                    error: function(xhr) {
+                                        if (mine !== seq) return;
+                                        const r = xhr.responseJSON || {};
+                                        $facts.text('');
+                                        $result.empty().append(line(r.message || 'Could not work out a plan.', 'payment-plan-error'));
+                                    }
+                                });
+                            }, delay);
+                        }
+
+                        $el.on('click', '.payment-plan-modes .graph-toggle-btn', function() {
+                            if ($(this).data('mode') !== mode) setMode($(this).data('mode'));
+                        });
+                        $input.on('input', function() { refresh(250); });
+                        setMode('payment');
+                    }
+                });
+                if (!ok || !applied) return;
+
+                $('#loading-screen').show();
+                $.ajax({
+                    url: '/api/payment-plan/' + accountId,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(applied),
+                    success: function(r) {
+                        $('#loading-screen').hide();
+                        if (r.status === 'success') {
+                            showToast('Payment plan saved: ' + (r.months === 1 ? 'one payment' : r.months + ' payments') +
+                                      ' of ' + money(r.payment) + ' from ' + day(r.first) + '.', 'success', 5000);
+                        } else {
+                            showToast(r.message || 'The plan could not be saved.', 'error');
+                        }
+                    },
+                    error: function(xhr) {
+                        $('#loading-screen').hide();
+                        showToast((xhr.responseJSON && xhr.responseJSON.message) || 'The plan could not be saved.', 'error');
+                    }
+                });
+            });
+        });
 
         $(function() {
             // Delete credit account with confirmation

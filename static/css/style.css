@@ -13108,6 +13108,20 @@ td.credit-account-action-cell button {
     vertical-align: middle;
 }
 
+/* On a phone, three buttons a row (payment plan, edit, delete) and the 12px
+   either side of every cell are more than 375px holds - the delete button was
+   cut off at the edge. Tighter cells give that room back. */
+@media (max-width: 600px) {
+    .credit-accounts-table th, .credit-accounts-table td {
+        padding: 4px 6px;
+    }
+
+    .payment-plan-btn,
+    .edit-credit-account-btn {
+        margin-right: 4px;
+    }
+}
+
 .credit-accounts-table th {
     color: white;
 }
@@ -13177,6 +13191,72 @@ td.credit-account-action-cell button {
 .delete-credit-account-btn:hover {
     color: var(--text-dark);
     transform: scale(1.2);
+}
+
+.payment-plan-btn {
+    width: 20px;
+    height: 20px;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    color: var(--secondary-dark);
+    cursor: pointer;
+    margin-right: 8px;
+}
+
+.payment-plan-btn:hover {
+    color: var(--text-dark);
+    transform: scale(1.2);
+}
+
+/* The payment plan dialog, in the shared confirm modal's body: the two ways
+   of asking, the one field, what the plan is worked from, and the plan.
+   Its paragraphs are scoped by the modal's id, as the modal's own rule for
+   paragraphs is. */
+.payment-plan-modes {
+    justify-content: center;
+    margin-bottom: 14px;
+}
+
+.payment-plan-modes .graph-toggle-btn:hover {
+    transform: none;
+}
+
+.payment-plan-modes .graph-toggle-btn.active:hover {
+    background: var(--primary);
+}
+
+.payment-plan-field {
+    margin-bottom: 4px;
+}
+
+#generic-confirm-modal .payment-plan-facts {
+    margin: 0 0 10px;
+    color: var(--secondary-dark);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+#generic-confirm-modal .payment-plan-result p {
+    margin: 0 0 8px;
+    color: var(--text-dark);
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+#generic-confirm-modal .payment-plan-result p.payment-plan-headline {
+    color: var(--primary);
+    font-size: 16px;
+    font-weight: 600;
+}
+
+#generic-confirm-modal .payment-plan-result p.payment-plan-note {
+    color: var(--secondary-dark);
+    font-size: 13px;
+}
+
+#generic-confirm-modal .payment-plan-result p.payment-plan-error {
+    color: var(--danger);
 }
 
 .bank-linked-btn {
@@ -17161,6 +17241,16 @@ tr[data-collapsed] {
 #generic-confirm-btn.danger:hover,
 .generic-confirm-stacked .generic-confirm-btn.danger:hover {
     background-color: var(--danger-hover);
+}
+
+/* Disabled by a caller whose body is not ready to confirm yet - the payment
+   plan, until its preview is in. It answers neither a click nor Enter. */
+#generic-confirm-btn:disabled,
+.generic-confirm-stacked .generic-confirm-btn:disabled {
+    transform: none;
+    box-shadow: none;
+    background-color: var(--secondary);
+    cursor: default;
 }
 
 #generic-cancel-btn,
