@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.65.1 — 2026-10-18
+
+### Fixed
+
+- On the week and three-month dashboards, the category buttons' menus
+  opened under the table beside them - the current week's outline, the
+  badges and the figures showed through. They open over all of it again.
+
 ## 1.65.0 — 2026-10-18
 
 ### Changed

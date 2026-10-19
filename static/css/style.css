@@ -13535,6 +13535,17 @@ td.credit-account-action-cell button {
     will-change: auto;
 }
 
+/* The left column's menus - the category buttons' add and recurring
+   choices - open out over the table on the right, and have to be over
+   everything in it. #categories-container is a stacking context (z-index on
+   a flex item), so its menus can rise no higher than it: at 10 they went
+   under the current-week outline (15), the late badges (16) and the
+   bank-sync marker (25). 30 is over all of those and still under the frozen
+   row of dates (98) and the calendar bar. */
+.dashbaord_container #categories-container {
+    z-index: 30;
+}
+
 #month-table-container > .fridays-sticky {
     position: sticky;
     top: var(--dash-freeze-top);
