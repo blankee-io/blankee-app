@@ -18389,9 +18389,8 @@ def confirm_transaction():
                                         change['date'], change['amount'],
                                         entry_id=change['entry_id'], transaction_id=str(transaction_id))
 
-    remaining = bank_import.count_pending(current_user.id)
-    if remaining == 0:
-        bank_import.clear_notification_if_none(current_user.id)
+    # The bell's count follows each confirmation, and goes at zero.
+    remaining = bank_import.refresh_notification(current_user.id)
     # No reconcile here. The balances were matched to the bank after the
     # pull, and nothing the modal does moves anything dated before today:
     # a row keeps the bank's amount and date whichever category it goes to,

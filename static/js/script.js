@@ -2824,6 +2824,9 @@ function categoriseBankRow(row, categoryId) {
         // The last row answered: the balances were matched to the bank.
         if (res.note) { showToast(res.note, "info", 6000); }
         if (res.drift) { queueDriftPrompt(res.drift); }
+        // The last one confirmed takes the bell's notification with it, and
+        // so its unread dot (bank_import.refresh_notification).
+        if (res.remaining === 0 && typeof refreshNotificationBadge === "function") { refreshNotificationBadge(); }
         return true;
       })
       .catch(function () {

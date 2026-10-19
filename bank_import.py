@@ -1725,23 +1725,82 @@ def _delete_notification(user_id: int) -> int:
     return n
 
 
-def notify(user_id: int) -> int:
+def _notification_message(total: int) -> str:
+    one = total == 1
+    return (f'{total} bank transaction{"" if one else "s"} with a guessed category '
+            f'{"is" if one else "are"} waiting to be checked. <a href="/dashboard">Check '
+            f'{"it" if one else "them"}</a>.')
+
+
+def notify(user_id: int, announce: bool = True) -> int:
     """
-    One notification, replaced rather than added to, saying how many
-    imported entries wait. Found again by notifications.type, not by its
-    wording. The link is the dashboard: the modal opens there by itself,
-    and the push deep-links wherever the message's href points.
+    The one notification saying how many imported entries wait, kept to the
+    count (2026-10-18). Found by notifications.type, never by its wording.
+
+    announce - a pull has just brought new ones: the notification there is
+    restated, unread again and dated now, and emailed and pushed; with none
+    there, one is made. It is never a second notification: the next day's
+    transactions update yesterday's.
+
+    Not announcing - the person has confirmed or removed some
+    (refresh_notification): the count is rewritten quietly, and at zero the
+    notification goes. With none there, nothing is made.
+
+    The link is the dashboard: the modal opens there by itself, and the push
+    deep-links wherever the message's href points. Returns the count.
     """
     total = count_pending(user_id)
-    _delete_notification(user_id)
     if total <= 0:
+        _delete_notification(user_id)
         return 0
-    from app import add_notification
-    one = total == 1
-    message = (f'{total} bank transaction{"" if one else "s"} {"was" if one else "were"} added with a guessed '
-               f'category. <a href="/dashboard">Check {"it" if one else "them"}</a>.')
-    add_notification(user_id, message, kind=NOTIFICATION_TYPE, notification_type=NOTIFICATION_TYPE)
+    message = _notification_message(total)
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            cursor.execute("SELECT id, message FROM notifications WHERE user_id = %s AND type = %s ORDER BY id",
+                           (user_id, NOTIFICATION_TYPE))
+            rows = cursor.fetchall() or []
+            ids = [r['id'] if isinstance(r, dict) else r[0] for r in rows]
+            standing = ids[0] if ids else None
+            if len(ids) > 1:
+                cursor.execute(f"DELETE FROM notifications WHERE id IN ({','.join(['%s'] * (len(ids) - 1))})",
+                               ids[1:])
+            if standing is not None:
+                if announce:
+                    cursor.execute("UPDATE notifications SET message = %s, date = NOW(), is_read = 0 WHERE id = %s",
+                                   (message, standing))
+                else:
+                    cursor.execute("UPDATE notifications SET message = %s WHERE id = %s", (message, standing))
+    except Exception as e:
+        log_error(logger, TAG, f'user {user_id}: could not update the pending notification: {e}')
+        return total
+    _forget_notifications_cache(user_id)
+    if standing is None:
+        if announce:
+            from app import add_notification
+            add_notification(user_id, message, kind=NOTIFICATION_TYPE, notification_type=NOTIFICATION_TYPE)
+        return total
+    if announce:
+        # Restated rather than added, but still news: sent as add_notification sends.
+        try:
+            from app import _deliver_notification
+            from datetime import datetime as _dt
+            with get_db_pool().get_cursor(dictionary=True) as cursor:
+                cursor.execute("SELECT email, email_notifications, first_name, email_notify_disabled "
+                               "  FROM users WHERE id = %s", (user_id,))
+                user = cursor.fetchone()
+                cursor.execute("SELECT COUNT(*) AS total FROM notifications WHERE user_id = %s AND is_read = 0",
+                               (user_id,))
+                row = cursor.fetchone()
+            unread = (row.get('total') if isinstance(row, dict) else (row[0] if row else 0)) or 0
+            _deliver_notification(user_id, user, message, _dt.now(), standing, unread, kind=NOTIFICATION_TYPE)
+        except Exception as e:
+            log_warning(logger, TAG, f'user {user_id}: could not send the restated notification: {e}')
     return total
+
+
+def refresh_notification(user_id: int) -> int:
+    """The count rewritten after the person confirms or removes one; gone at zero."""
+    return notify(user_id, announce=False)
 
 
 def clear_notification_if_none(user_id: int) -> bool:

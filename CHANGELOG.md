@@ -39,6 +39,14 @@ this file; the admin console links to it, it does not read it.
 - A new table, `payment_plans` (`install/sql/add_payment_plans.sql`), holds
   one row per card with a plan. The update applies it.
 
+### Changed
+
+- **The bell's notification about bank transactions keeps to the count.** It
+  now says how many are waiting to be checked, and the number goes down as
+  you confirm them; once the last is confirmed, it disappears. When the next
+  pull brings more while it is still there, that same notification is
+  updated and shown as new again, rather than a second one being added.
+
 ## 1.62.1 — 2026-10-18
 
 ### Fixed
