@@ -13451,8 +13451,8 @@ td.credit-account-action-cell button {
    cells' markers and edges through, which sit higher than it. The buttons
    have no band behind them, only their own round backgrounds (asked for).
 
-   The header's list opens over the buttons, and the buttons' menus over the
-   Fridays, so they stack 62, 61, 59 - all below .calendarnav (98). The
+   The header's list opens over the buttons, so they stack 62 and 61, below
+   .calendarnav (98); the Fridays are at 98 themselves - see below. The
    Fridays table sits in .fridays-sticky so its current-week outline and T,
    drawn into that wrapper, move with it. */
 .dashbaord_container {
@@ -13505,10 +13505,14 @@ td.credit-account-action-cell button {
     box-shadow: 0 1px 3px var(--shadow-md);
 }
 
+/* At the calendar bar's level, and later in the page, so its own flags - the
+   bank-sync marker and the start-date flag, which stand up to 30px above the
+   row - draw over the bar's extension instead of being cut off by it. Still
+   under .profile-backdrop (99) and .nav-bar (100). */
 #month-table-container > .fridays-sticky {
     position: sticky;
     top: var(--dash-freeze-top);
-    z-index: 59;
+    z-index: 98;
     background-color: var(--bg-page);
 }
 

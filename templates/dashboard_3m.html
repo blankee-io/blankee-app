@@ -6700,7 +6700,9 @@
                 const cell = document.querySelector('.has-member-since-badge');
                 if (!cell) return;
                 
-                const tableContainer = document.getElementById('table-container');
+                // On the frozen Fridays row, drawn into its wrapper so it stays on
+                // the row (and above the calendar bar's edge) as the page scrolls.
+                const tableContainer = cell.closest('#fridays-sticky') || document.getElementById('table-container');
                 if (!tableContainer) return;
                 
                 const cellRect = cell.getBoundingClientRect();
