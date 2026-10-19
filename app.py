@@ -9134,6 +9134,11 @@ def update_daily_ca_totals(user_id, start_date):
                           f"Could not write interest entries for account "
                           f"{account_id}: {e}")
 
+    # The card's balances are what a payment plan is checked against, and
+    # this is where every path that changes them ends up - a recalculation,
+    # a new recurring charge on the card, the bank pull. See _check_payment_plans.
+    _check_payment_plans(user_id)
+
 def update_weekly_ca_totals(user_id, start_date, goofy_week_mode=False):
     with get_db_pool().get_connection() as conn:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -9975,7 +9980,6 @@ def _recalc_ca_daily_balance(user_id, start_date=None):
         ]
 
         # Open pages redraw on this - see the note before the other return.
-        _check_payment_plans(user_id)
         _bump_data_version(user_id)
         return ({
             "status": "success",
@@ -10050,7 +10054,6 @@ def _recalc_ca_daily_balance(user_id, start_date=None):
     # figures on every open page are now stale, and the pages only redraw when
     # this changes. A repair run without it left a dashboard showing the old
     # balance until somebody reloaded.
-    _check_payment_plans(user_id)
     _bump_data_version(user_id)
 
     return ({
@@ -26135,7 +26138,7 @@ def _plan_superseded(inputs):
 # purchase on the card, a payment made by hand, a payment skipped or changed -
 # leaves it no longer paying the card off. Only the card's recurring charges
 # are part of the plan; everything else is checked for here. Each time the
-# card's balances are worked out again (_recalc_ca_daily_balance - an edit,
+# card's balances are worked out again (update_daily_ca_totals - an edit,
 # an entry confirmed, the morning bank pull) the forecast on the plan's last
 # payment day is compared with $0, and the person is told once, by a
 # notification that opens the plan dialog on what they chose before.
@@ -26222,7 +26225,7 @@ def _check_payment_plans(user_id):
     unread again, not emailed again. Back on the plan (within a dollar), the
     notification goes and notified is cleared, so the next time it goes off is
     news again. A plan whose last payment has passed, or whose card has gone,
-    is forgotten. Called from _recalc_ca_daily_balance; never raises.
+    is forgotten. Called at the end of update_daily_ca_totals; never raises.
     """
     try:
         plans = _payment_plans_for(user_id)
