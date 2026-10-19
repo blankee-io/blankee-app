@@ -13517,7 +13517,7 @@ td.credit-account-action-cell button {
     padding: 0 8px;
     background-color: var(--bg-page);
     border-radius: 0 0 14px 14px;
-    box-shadow: 0 -10px 0 var(--bg-page), 0 3px 4px -2px var(--shadow-md);
+    box-shadow: 0 -10px 0 var(--bg-page);
 }
 
 /* At the calendar bar's level, and later in the page, so its own flags - the
