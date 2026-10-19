@@ -859,8 +859,11 @@
                     slideWithAnimation('left');
                 }
             } else {
-                // Reset the container position if swipe is less than 20%
-                mainContainer.style.transform = 'translateX(0)';
+                // Reset the container position if swipe is less than 20%. Cleared,
+                // not translateX(0): any transform makes the container a stacking
+                // context, and the frozen row of dates inside it would then sit
+                // under the calendar bar, its flags cut off.
+                mainContainer.style.transform = '';
             }
 
             // Reset touch positions
@@ -890,7 +893,7 @@
 
                 // Reset the container position after the view update
                 mainContainer.style.transition = 'none';
-                mainContainer.style.transform = 'translateX(0)';
+                mainContainer.style.transform = '';   // cleared - see the swipe reset above
                 isAnimating = false;
             }, 100); // This matches the CSS transition duration
         }

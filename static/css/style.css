@@ -13508,7 +13508,18 @@ td.credit-account-action-cell button {
 /* At the calendar bar's level, and later in the page, so its own flags - the
    bank-sync marker and the start-date flag, which stand up to 30px above the
    row - draw over the bar's extension instead of being cut off by it. Still
-   under .profile-backdrop (99) and .nav-bar (100). */
+   under .profile-backdrop (99) and .nav-bar (100).
+
+   For that the row has to be stacked against the bar at all. #table-container
+   carries will-change: transform, which makes it a stacking context of its
+   own: everything in it, this row included, was stacked as one layer at the
+   page's level 0, under the bar whatever its z-index. Here it does without -
+   the slide between months still runs, its transform only lasting as long
+   as the slide. */
+.dashbaord_container #table-container {
+    will-change: auto;
+}
+
 #month-table-container > .fridays-sticky {
     position: sticky;
     top: var(--dash-freeze-top);
