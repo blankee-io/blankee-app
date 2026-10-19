@@ -27,6 +27,9 @@ this file; the admin console links to it, it does not read it.
   page's category list left out the cards' payment categories, so a card
   payment could only be set to repeat from a dashboard. They are in the
   list now, as they are on the dashboards.
+- **The Summary page's graphs open on today.** Each graph scrolled to today
+  as it was drawn, but putting the sections in your order afterwards moved
+  them on the page, which scrolled every graph back to its first day.
 - This release does not remove extra payments a card already carries from
   either. Applying a payment plan to the card rebuilds its payments from
   the plan's first payment on.

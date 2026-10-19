@@ -1103,6 +1103,7 @@
             if (todayIndex !== -1) {
                 const scrollContainer = document.getElementById('balance-graph-container');
                 const scrollPosition = Math.max(0, (todayIndex * pointSpacing) - (scrollContainer.clientWidth / 2));
+                scrollContainer.dataset.todayLeft = scrollPosition;   // see scrollGraphsToToday
                 scrollContainer.scrollLeft = scrollPosition;
                 
                 // Update date indicator
@@ -1465,6 +1466,19 @@
                 $(el).find('.widget-eye').attr('title', hidden ? 'Show this section' : 'Hide this section')
                     .attr('aria-pressed', hidden ? 'true' : 'false')
                     .find('i').attr('class', hidden ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye');
+            });
+            scrollGraphsToToday();
+        }
+
+        // Each graph opens on today. A graph scrolls itself there as it is
+        // drawn and remembers where that was (data-today-left), but putting
+        // the sections in the person's order above appends each one again,
+        // and an element moved in the page loses its scroll position - every
+        // graph was back at its first day by the time the page showed. So the
+        // layout puts them back afterwards.
+        function scrollGraphsToToday() {
+            document.querySelectorAll('.graph-container[data-today-left]').forEach(function (g) {
+                g.scrollLeft = Number(g.dataset.todayLeft) || 0;
             });
         }
 
@@ -2511,6 +2525,7 @@
             if (todayIndex !== -1) {
                 const scrollContainer = document.getElementById(containerId);
                 const scrollPosition = Math.max(0, (todayIndex * pointSpacing) - (scrollContainer.clientWidth / 2));
+                scrollContainer.dataset.todayLeft = scrollPosition;   // see scrollGraphsToToday
                 scrollContainer.scrollLeft = scrollPosition;
                 
             }
