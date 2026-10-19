@@ -16,6 +16,9 @@ this file; the admin console links to it, it does not read it.
   month and year, the category buttons under them, and the row of dates
   stay at the top as you scroll down, under the nav bar, with the current
   week's outline and its T on the dates.
+- The category buttons on those two pages sit together in a tab under the
+  month heading, and hovering a date enlarges just the date - not the
+  bank-sync marker on it.
 
 ## 1.64.0 — 2026-10-18
 
