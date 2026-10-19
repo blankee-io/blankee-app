@@ -13445,10 +13445,11 @@ td.credit-account-action-cell button {
    higher, they slid up the gap first and only then stopped, which does not
    read as frozen. --dash-freeze-top is that resting place - .nav-bar (50px)
    and .calendarnav (52px; 44px on a phone, where its padding is 6px), plus
-   the gap below it (30px; 25px on a phone) - and the header and the Fridays
-   fill the gap above them with the page's colour, so nothing scrolls
-   through it. The buttons have no band behind them, only their own round
-   backgrounds (asked for).
+   the gap below it (30px; 25px on a phone). That gap is the calendar bar's
+   own: on these pages its background reaches down to the frozen row, so
+   nothing scrolls through above it - a fill drawn by the row itself let the
+   cells' markers and edges through, which sit higher than it. The buttons
+   have no band behind them, only their own round backgrounds (asked for).
 
    The header's list opens over the buttons, and the buttons' menus over the
    Fridays, so they stack 62, 61, 59 - all below .calendarnav (98). The
@@ -13470,7 +13471,25 @@ td.credit-account-action-cell button {
     top: var(--dash-freeze-top);
     z-index: 62;
     background-color: var(--bg-page);
-    box-shadow: 0 calc(-1 * var(--dash-freeze-gap)) 0 var(--bg-page);
+}
+
+/* The bar's background carried down over the gap, and its scrolled shadow
+   under that rather than under the bar. body#dashboard is these two pages;
+   .calendarnav is outside .dashbaord_container, so the gap is restated. */
+#dashboard .calendarnav {
+    --calnav-gap: 30px;
+    box-shadow: 0 var(--calnav-gap) 0 var(--bg-page);
+}
+
+#dashboard .calendarnav.scrolled {
+    box-shadow: 0 var(--calnav-gap) 0 var(--bg-page),
+                0 calc(var(--calnav-gap) + 2px) 5px var(--shadow-lg);
+}
+
+@media (width <= 600px) {
+    #dashboard .calendarnav {
+        --calnav-gap: 25px;
+    }
 }
 
 .dashbaord_container .category-btn-container.unified {
@@ -13491,7 +13510,6 @@ td.credit-account-action-cell button {
     top: var(--dash-freeze-top);
     z-index: 59;
     background-color: var(--bg-page);
-    box-shadow: 0 calc(-1 * var(--dash-freeze-gap)) 0 var(--bg-page);
 }
 
 .dashboard-m-month-year-header,
