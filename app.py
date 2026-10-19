@@ -21036,6 +21036,96 @@ def _lay_out_family(links, today):
     return ([active] if active is not None else []) + upcoming
 
 
+def _retire_ended_recurring(user_id, today=None):
+    """
+    A recurring whose end date has passed stops being recurring (asked for on
+    2026-10-18): the links of a chain that have run their course are removed,
+    so the one in force today is the category's recurring - the first row of
+    the table, with the changes still to come under it - and a category none
+    of whose links is left is a plain category again, as Stop Recurring leaves
+    it. The table already showed it that way (_lay_out_family); this makes the
+    data say so too.
+
+    Only the recurring rows go. The entries they made stay where they are -
+    they are the record of what came and went - and so do their bucket
+    records. A link waits while any forecast it made is still unanswered,
+    in the evening prompt or moved on by the bank pull: the prompt reads the
+    category's recurring row to know a bill from an allowance, and an
+    unanswered bill must not become an allowance under it.
+
+    "Passed" is on the person's own calendar: a link that ends today still
+    runs today. Returns (links removed, categories no longer recurring).
+    """
+    from collections import defaultdict
+    today = today or _user_today_for(user_id)
+    removed, stopped = 0, []
+    for kind, spec in _CHAIN_KINDS.items():
+        links = _get_recurring_from_redis(spec['recurring'], user_id) or []
+        if not links:
+            continue
+        waiting = set()
+        for e in _get_entries_from_redis(spec['entries'], user_id) or []:
+            if (e.get('recurring_id') and int(e.get('is_bucket') or 0) == 1
+                    and float(e.get('amount') or 0) > 0):
+                waiting.add(int(e['recurring_id']))
+        families = defaultdict(list)
+        for link in links:
+            if link.get('category_id') is not None:
+                families[int(link['category_id'])].append(link)
+        for category_id, family in families.items():
+            done = [l for l in family
+                    if not _chain_link_is_open_ended(l)
+                    and _as_date(l.get('end_date')) and _as_date(l.get('end_date')) < today
+                    and int(l.get('id') or 0) not in waiting]
+            if not done:
+                continue
+            for link in done:
+                _delete_recurring_in_redis(spec['recurring'], user_id, link.get('id'))
+                try:
+                    from redis_crud import delete_recurring_mismatch
+                    delete_recurring_mismatch(spec['recurring'], link.get('id'), user_id=user_id)
+                except Exception:
+                    pass
+            removed += len(done)
+            if len(done) == len(family):
+                _update_category_in_redis(spec['categories'], user_id, category_id,
+                                          {'is_recurring': 0, 'no_end_date': 0})
+                stopped.append((kind, category_id))
+    if removed:
+        log_info(app.logger, 'RECURRING', f"[retire] user {user_id}: {removed} ended link(s) removed, "
+                                          f"{len(stopped)} categor{'y' if len(stopped) == 1 else 'ies'} "
+                                          f"no longer recurring, as of {today}")
+        _bump_data_version(user_id)
+    return removed, stopped
+
+
+@app.before_request
+def _retire_ended_recurring_daily():
+    """
+    _retire_ended_recurring once a day per person: on the first page they
+    open on a new day of their own calendar - which is when the change can be
+    seen - after the middleware has hydrated them. recurring_retired:{user_id}
+    holds the date it last ran for; until it moves, this is one Redis read.
+    """
+    if not current_user.is_authenticated or request.method != 'GET':
+        return
+    if request.path.startswith(('/static/', '/api/data-version')):
+        return
+    try:
+        import redis_manager
+        user_id = current_user.id
+        if not app.config.get('REDIS_OK') or not redis_manager.is_user_hydrated(user_id):
+            return
+        today = _user_today_for(user_id).isoformat()
+        key = f"recurring_retired:{user_id}"
+        if _redis_client.get(key) == today:
+            return
+        _redis_client.setex(key, 172800, today)
+        _retire_ended_recurring(user_id)
+    except Exception as e:
+        log_error(app.logger, 'RECURRING', f"[retire] user {getattr(current_user, 'id', None)}: {e}")
+
+
 def _schedule_recurring_change(user_id, kind, category_id, effective, amount, cadence_interval,
                                cadence_unit, end_date=None, no_end_date=0, weekdays=None,
                                monthly_days=None, yearly_day=None, yearly_month=None, pay=None,

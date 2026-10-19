@@ -77,6 +77,7 @@ These keys are hydrated from MySQL when a user becomes active, and flushed back 
 | `force_refresh:{user_id}` | STRING ("1") | 60s | Signal for frontend to auto-refresh dashboard after a provider sync. NOTE: written by the sync engine, but no consumer was found in app.py, middleware.py, redis_manager.py or the templates — verify before relying on it |
 | `provider_sync_lock:{user_id}` | STRING ("1") | 300s (5 min) | Per-user mutex preventing concurrent provider sync processing (SETNX). Reserved: no producer until a bank provider is configured |
 | `linked_connections_to_delete:{user_id}` | SET | — | Connection IDs recently deleted by user; webhook handlers skip events for these |
+| `recurring_retired:{user_id}` | STRING (YYYY-MM-DD) | 2 days | The user's local date `_retire_ended_recurring` last ran for. Set on the first page they open each day; while it matches today, ended recurrings are not looked for again |
 
 ---
 

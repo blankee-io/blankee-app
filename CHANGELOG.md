@@ -8,6 +8,19 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.64.0 — 2026-10-18
+
+### Changed
+
+- **A recurring that has ended stops being recurring.** The day after its
+  end date, on your own calendar, a recurring income or expense - or a
+  card's - is removed, and the category is a plain category again, as Stop
+  Recurring leaves it. With raises or price changes, only the ones that
+  have run their course go, and the one in force becomes the recurring,
+  with the changes still to come under it. The entries it made all stay.
+  One whose last forecasts are still waiting to be confirmed waits for
+  them, so an unanswered bill is still asked about as a bill.
+
 ## 1.63.0 — 2026-10-18
 
 ### Added
