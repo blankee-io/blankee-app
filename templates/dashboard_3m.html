@@ -358,13 +358,17 @@
             <div class="month-table-container" id="month-table-container">
 
                 <!-- Table displaying the Fridays of the current month -->
-                <table id="fridays-table">
-                    <thead>
-                        <tr id="friday-dates-row">
-                            <!-- Friday dates will be dynamically inserted here -->
-                        </tr>
-                    </thead>
-                </table>
+                {# Frozen under the calendar bar as the page scrolls, with its current-week
+                   outline inside it so the outline and its T go with it. #}
+                <div class="fridays-sticky" id="fridays-sticky">
+                    <table id="fridays-table">
+                        <thead>
+                            <tr id="friday-dates-row">
+                                <!-- Friday dates will be dynamically inserted here -->
+                            </tr>
+                        </thead>
+                    </table>
+                </div>
 
                 <div class="search-btn-container income" id="income-search-btn-container">
                     <button class="clear-filter-btn income" id="clear-income-filter-btn" title="Clear Filter">
@@ -6749,7 +6753,10 @@
                 const outline = document.createElement('div');
                 outline.className = 'current-week-outline';
 
-                const tableContainer = document.getElementById('table-container');
+                // The Fridays row's outline lives in its frozen wrapper, so it
+                // stays on the row when the row sticks; the rest in #table-container.
+                const tableContainer = (tableId === 'fridays-table' && document.getElementById('fridays-sticky'))
+                    || document.getElementById('table-container');
                 if (!tableContainer) return;
                 
                 const parentRect = tableContainer.getBoundingClientRect();

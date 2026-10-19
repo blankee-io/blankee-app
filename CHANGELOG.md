@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.65.0 — 2026-10-18
+
+### Changed
+
+- **The week and three-month dashboards keep their headers in view.** The
+  month and year, the category buttons under them, and the row of dates
+  stay at the top as you scroll down, under the nav bar, with the current
+  week's outline and its T on the dates.
+
 ## 1.64.0 — 2026-10-18
 
 ### Changed
