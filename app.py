@@ -26126,6 +26126,43 @@ def _resync_payment_mirror(user_id, account_id, category_id, since):
     _recalc_ca_daily_balance(user_id, since)
 
 
+def _settle_last_plan_payment(user_id, account_id, category_id, last):
+    """
+    The last plan payment, made exactly what the card owes by then, so the
+    card ends at $0.00 rather than a few cents past it. The plan's payment is
+    the least whole cent that clears the card, which overshoots by up to a
+    cent a month; the difference comes off the last payment. Worked from the
+    forecast itself, after the plan is written, so it is exact whatever the
+    walk got. Returns the last payment, or None when there was nothing to do.
+    """
+    left = None
+    for row in _get_ca_balances_from_redis('c_a_balances_d', user_id, account_id) or []:
+        if _as_date(row.get('date')) == last:
+            left = round(float(row.get('balance') or 0), 2)
+            break
+    if left is None or abs(left) < 0.005:
+        return None
+    entry = next((e for e in (_get_entries_from_redis('expense_entries', user_id) or [])
+                  if int(e.get('category_id') or 0) == int(category_id)
+                  and _as_date(e.get('date')) == last and int(e.get('is_bucket') or 0) == 1
+                  and e.get('recurring_id')), None)
+    if entry is None:
+        return None
+    amount = round(float(entry.get('amount') or 0) + left, 2)
+    if amount <= 0:
+        return None
+    _update_entry_in_redis('expense_entries', user_id, category_id, last, amount,
+                           entry_id=entry.get('id'), is_bucket=True, original_amount=amount,
+                           match_entry_id=entry.get('id'))
+    try:
+        from recurring_bucket_manager import set_bucket_record_amount
+        set_bucket_record_amount('recurring_expense_buckets', category_id, last, amount, user_id)
+    except Exception as e:
+        log_error(app.logger, 'EXPENSE', f"[payment_plan] last payment's bucket record: {e}")
+    _resync_payment_mirror(user_id, account_id, category_id, last)
+    return amount
+
+
 def _plan_superseded(inputs):
     """The links of the card's payment that start on or after the first plan payment."""
     first = inputs['first']
@@ -26350,6 +26387,7 @@ def payment_plan_preview(account_id):
     if message:
         return jsonify(dict(base, status='error', message=message))
     return jsonify(dict(base, status='success', payment=result['payment'], months=result['months'],
+                        last_payment=result['last_payment'],
                         interest=result['interest'], after=inputs['charges'],
                         last=inputs['pay_dates'][result['months'] - 1].isoformat()))
 
@@ -26420,6 +26458,7 @@ def payment_plan_apply(account_id):
                 return jsonify(payload), status
         _remember_payment_plan(user_id, account_id, data.get('mode'), data.get('value'), result, inputs, last)
         _resync_payment_mirror(user_id, account_id, category['id'], first)
+        last_payment = _settle_last_plan_payment(user_id, account_id, category['id'], last) or result['payment']
         try:
             import redis_manager as _rm
             _rm.flush_dirty_tables_for_user(user_id)
@@ -26431,6 +26470,7 @@ def payment_plan_apply(account_id):
     log_info(app.logger, 'EXPENSE', f"[payment_plan] user {user_id}, account {account_id}: "
                                     f"{months} x {result['payment']} from {first}, then {inputs['charges']}")
     return jsonify({'status': 'success', 'payment': result['payment'], 'months': months,
+                    'last_payment': last_payment,
                     'first': first.isoformat(), 'last': last.isoformat(), 'after': inputs['charges']})
 
 

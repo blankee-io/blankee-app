@@ -766,10 +766,15 @@
                                 if (value !== '') { $result.append(line(r.message, 'payment-plan-error')); }
                                 return false;
                             }
+                            // The last payment is a few cents less, so the card
+                            // ends at exactly $0.00 (payment_plan.py).
+                            const trimmed = r.last_payment !== undefined && r.last_payment !== null &&
+                                            Number(r.last_payment) !== Number(r.payment);
                             $result.append(line(r.months === 1
-                                ? 'One payment of ' + money(r.payment) + ' on ' + day(r.first) + '.'
+                                ? 'One payment of ' + money(trimmed ? r.last_payment : r.payment) + ' on ' + day(r.first) + '.'
                                 : r.months + ' payments of ' + money(r.payment) + ', ' + day(r.first) +
-                                  ' to ' + day(r.last) + '.', 'payment-plan-headline'));
+                                  ' to ' + day(r.last) + (trimmed ? ' - the last one ' + money(r.last_payment) : '') + '.',
+                                'payment-plan-headline'));
                             $result.append(line(r.interest > 0
                                 ? 'About ' + money(r.interest) + ' in interest along the way, as the card\'s forecast works it out.'
                                 : 'No interest along the way, as the card\'s forecast works it out.'));
@@ -839,6 +844,9 @@
                         if (r.status === 'success') {
                             showToast('Payment plan saved: ' + (r.months === 1 ? 'one payment' : r.months + ' payments') +
                                       ' of ' + money(r.payment) + ' from ' + day(r.first) + '.', 'success', 5000);
+                            // Applying a plan clears the card's "plan is off"
+                            // notification; the bell's unread dot follows.
+                            if (typeof refreshNotificationBadge === 'function') refreshNotificationBadge();
                         } else {
                             showToast(r.message || 'The plan could not be saved.', 'error');
                         }

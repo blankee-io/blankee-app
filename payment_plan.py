@@ -21,8 +21,9 @@ THE WALK
 
 THE SEARCH
   More paid never leaves more owed, so the least payment that clears the card
-  in n months is found by bisection, to the cent. The last payment lands at or
-  a few cents past zero, never short of it.
+  in n months is found by bisection, to the cent. That leaves the card a few
+  cents past zero, so the last payment is that much less ('last_payment') and
+  the card ends at exactly $0.00.
 """
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -88,10 +89,13 @@ def plan(balance, mode, value, walk, least=None):
     `least` is what a month adds to the card - its interest and charges - for
     the message when a payment never gets anywhere.
 
-    Returns {'ok', 'error', 'payment', 'months', 'interest'}: payment each
-    month for months months, and the interest that costs on the way.
+    Returns {'ok', 'error', 'payment', 'months', 'last_payment', 'interest'}:
+    payment each month for months months - the last of them last_payment, a
+    few cents less, so the card ends at exactly zero - and the interest that
+    costs on the way.
     """
-    out = {'ok': False, 'error': None, 'payment': None, 'months': None, 'interest': None}
+    out = {'ok': False, 'error': None, 'payment': None, 'months': None, 'last_payment': None,
+           'interest': None}
     try:
         balance = float(balance or 0)
         value = float(value)
@@ -138,6 +142,10 @@ def plan(balance, mode, value, walk, least=None):
         return out
 
     payment = cents / 100.0
-    _, interest = walk(payment, months)
-    out.update(ok=True, payment=payment, months=months, interest=_cents(max(interest, 0.0)))
+    owed, interest = walk(payment, months)
+    # What the full payment would pay past zero comes off the last one.
+    over = min(owed[-1], 0.0) if owed else 0.0
+    last_payment = _cents(payment + over)
+    out.update(ok=True, payment=payment, months=months, last_payment=last_payment,
+               interest=_cents(max(interest, 0.0)))
     return out

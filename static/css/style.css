@@ -1286,6 +1286,11 @@ body:has(#sideMenu) .nav-bar-container {
 .notif-dd-list {
     display: flex;
     flex-direction: column;
+    /* Whole notifications make a taller list; past the screen's height it
+       scrolls rather than running off the bottom. dvh, not vh: see the
+       bucket prompt. */
+    max-height: calc(100dvh - 140px);
+    overflow-y: auto;
 }
 
 .notif-dd-item {
@@ -1328,11 +1333,6 @@ body:has(#sideMenu) .nav-bar-container {
     background-color: var(--accent-light);
 }
 
-/* Three lines, not two: cut at two, the balance - the point of it - went. */
-.notif-dd-item.is-pinned .notif-dd-text {
-    -webkit-line-clamp: 3;
-}
-
 /* Its title, where the others show their date: it is a state, not news. */
 .notif-dd-title {
     color: var(--accent);
@@ -1348,14 +1348,13 @@ body:has(#sideMenu) .nav-bar-container {
     min-width: 0;
 }
 
-/* Two lines at most: the full text is a tap away. */
+/* The whole notification, however long (asked for on 2026-10-18): cut at two
+   lines, the figure a notification is about - a balance, how far a plan is
+   off - was often the part that went. */
 .notif-dd-text {
-    display: -webkit-box;
-    overflow: hidden;
     font-size: 13px;
     line-height: 1.35;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
 }
 
 .notif-dd-item.is-unread .notif-dd-text {

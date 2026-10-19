@@ -27,6 +27,15 @@ this file; the admin console links to it, it does not read it.
   payment, or the months left to the same last payment.
 - "Payment plan off track" can be switched off as an email under
   Notifications in Settings, like the other kinds.
+- **A payment plan ends at exactly $0.00.** Its payment is the least whole
+  cent that clears the card, which used to leave the card a few cents in
+  credit; the last payment is now that much less, and the plan dialog says
+  so ("the last one $143.47").
+- Applying a plan clears the card's "plan is off" notification at once,
+  the bell's unread dot included.
+- **The bell's list shows every notification in full.** It cut each one at
+  two lines, which often lost the figure the notification was about. The
+  list is longer now, and scrolls if it would run past the screen.
 - A new table, `payment_plans` (`install/sql/add_payment_plans.sql`), holds
   one row per card with a plan. The update applies it.
 
