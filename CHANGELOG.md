@@ -23,6 +23,10 @@ this file; the admin console links to it, it does not read it.
   change kept its payments on the card after the old ones came back. The
   card now loses the payments the change takes away, and its balance is
   worked out again straight after the change.
+- **A card's payment can be made recurring from Recurring Expenses.** The
+  page's category list left out the cards' payment categories, so a card
+  payment could only be set to repeat from a dashboard. They are in the
+  list now, as they are on the dashboards.
 - This release does not remove extra payments a card already carries from
   either. Applying a payment plan to the card rebuilds its payments from
   the plan's first payment on.
