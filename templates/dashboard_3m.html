@@ -1400,7 +1400,12 @@
                 const th = document.createElement('th');
                 th.setAttribute('data-date', monthObj.date);
                 th.style.position = 'relative';
-                th.textContent = monthObj.label;
+                // The month in a span of its own: the hover enlarges the label,
+                // not the cell, which also holds the bank-sync marker.
+                const monthLabel = document.createElement('span');
+                monthLabel.className = 'friday-date-label';
+                monthLabel.textContent = monthObj.label;
+                th.appendChild(monthLabel);
                 th.style.cursor = 'pointer';
                 th.title = 'Click to view this month in weekly view';
                 

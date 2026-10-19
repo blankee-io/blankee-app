@@ -1369,7 +1369,12 @@
                 const thFriday = document.createElement('th');
                 thFriday.setAttribute('data-date', fridayDate);
                 thFriday.style.position = 'relative';
-                thFriday.textContent = friday.getUTCDate(); // Show the day number (e.g., 5, 12, 19, 26)
+                // The day number in a span of its own: the hover enlarges the date,
+                // not the cell, which also holds the bank-sync marker.
+                const fridayLabel = document.createElement('span');
+                fridayLabel.className = 'friday-date-label';
+                fridayLabel.textContent = friday.getUTCDate(); // Show the day number (e.g., 5, 12, 19, 26)
+                thFriday.appendChild(fridayLabel);
                 
                 // Check if member_since falls within or after this week's range
                 let isBeforeMemberSince = false;

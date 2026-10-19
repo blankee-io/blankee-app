@@ -6201,15 +6201,21 @@ td:has(.bucket-progress-container) {
     height: 25px;
     padding: 0;
     text-align: center;
-    transition: transform 0.2s ease;
     cursor:pointer;
     vertical-align: middle;
+}
+
+#fridays-table th .friday-date-label {
+    display: inline-block;
+    transition: transform 0.2s ease;
 }
 
 /* Grow the date text on hover rather than tinting the cell. The two
    :first-child/:last-child hover rules that used to round the tint's corners
    went with it - they had nothing left to round. */
-#fridays-table th:hover {
+/* The date itself, not the cell: the cell also holds the bank-sync marker,
+   which grew with it. */
+#fridays-table th:hover .friday-date-label {
     transform: scale(1.2);
 }
 
@@ -13449,7 +13455,7 @@ td.credit-account-action-cell button {
    own: on these pages its background reaches down to the frozen row, so
    nothing scrolls through above it - a fill drawn by the row itself let the
    cells' markers and edges through, which sit higher than it. The buttons
-   have no band behind them, only their own round backgrounds (asked for).
+   sit in a tab hanging from the header (below).
 
    The header's list opens over the buttons, so they stack 62 and 61, below
    .calendarnav (98); the Fridays are at 98 themselves - see below. The
@@ -13499,10 +13505,19 @@ td.credit-account-action-cell button {
     z-index: 61;
 }
 
-.dashbaord_container .category-btn-container.unified > button,
-.dashbaord_container .category-btn-container.unified .type-selector-wrapper > button {
+/* The buttons as one tab hanging from the month header (asked for): as wide
+   as the buttons, the page's colour carried up through the 10px above it so
+   it reads as part of the header, and the two bottom corners rounded. Only
+   once the page has scrolled under it does it show as a tab - at rest it is
+   the same colour as what is around it. */
+.dashbaord_container .category-btn-container.unified {
+    width: fit-content;
+    /* 8px either side, the left taken back so the buttons stay where they were */
+    margin-left: -8px;
+    padding: 0 8px;
     background-color: var(--bg-page);
-    box-shadow: 0 1px 3px var(--shadow-md);
+    border-radius: 0 0 14px 14px;
+    box-shadow: 0 -10px 0 var(--bg-page), 0 3px 4px -2px var(--shadow-md);
 }
 
 /* At the calendar bar's level, and later in the page, so its own flags - the
