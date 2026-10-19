@@ -47,6 +47,11 @@ this file; the admin console links to it, it does not read it.
   pull brings more while it is still there, that same notification is
   updated and shown as new again, rather than a second one being added.
 
+### Fixed
+
+- On the Summary page, a graph whose point for today was its highest cut
+  the "Today" label off at the top. The graphs leave room above for it.
+
 ## 1.62.1 — 2026-10-18
 
 ### Fixed

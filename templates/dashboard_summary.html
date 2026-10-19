@@ -1053,6 +1053,9 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    // Room above the plot for the Today label, which is drawn above its
+                    // point - at the top of the range it was cut off.
+                    layout: { padding: { top: 24 } },
                     interaction: {
                         intersect: false,
                         mode: 'index'
@@ -2484,6 +2487,9 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    // Room above the plot for the Today label, which is drawn above its
+                    // point - at the top of the range it was cut off.
+                    layout: { padding: { top: 24 } },
                     interaction: { intersect: false, mode: 'index' },
                     plugins: {
                         legend: { display: false },
