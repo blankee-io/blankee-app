@@ -9975,6 +9975,7 @@ def _recalc_ca_daily_balance(user_id, start_date=None):
         ]
 
         # Open pages redraw on this - see the note before the other return.
+        _check_payment_plans(user_id)
         _bump_data_version(user_id)
         return ({
             "status": "success",
@@ -10049,6 +10050,7 @@ def _recalc_ca_daily_balance(user_id, start_date=None):
     # figures on every open page are now stale, and the pages only redraw when
     # this changes. A repair run without it left a dashboard showing the old
     # balance until somebody reloaded.
+    _check_payment_plans(user_id)
     _bump_data_version(user_id)
 
     return ({
@@ -25839,8 +25841,18 @@ def credit_accounts():
             else:
                 ca_recurring_info[account['id']] = {'enabled': False}
 
+    # A card with a plan opens the plan dialog on what was chosen before.
+    plan_prefill = {}
+    try:
+        today = _user_today_for(current_user.id)
+        for account_id, plan in _payment_plans_for(current_user.id).items():
+            plan_prefill[account_id] = _payment_plan_prefill(plan, today)
+    except Exception as e:
+        log_error(app.logger, 'CREDIT', f"[payment_plan] prefill for user {current_user.id}: {e}")
+
     return render_template(
         'credit_accounts.html',
+        plan_prefill=plan_prefill,
         credit_accounts=credit_accounts,
         c_expense_categories=c_expense_categories,
         c_expense_entries=c_expense_entries,
@@ -26118,6 +26130,208 @@ def _plan_superseded(inputs):
             if _as_date(l.get('start_date')) and _as_date(l.get('start_date')) >= first]
 
 
+# ------------------------------------------------- a payment plan, kept to
+# A plan pays fixed amounts on fixed days, so anything it did not expect - a
+# purchase on the card, a payment made by hand, a payment skipped or changed -
+# leaves it no longer paying the card off. Only the card's recurring charges
+# are part of the plan; everything else is checked for here. Each time the
+# card's balances are worked out again (_recalc_ca_daily_balance - an edit,
+# an entry confirmed, the morning bank pull) the forecast on the plan's last
+# payment day is compared with $0, and the person is told once, by a
+# notification that opens the plan dialog on what they chose before.
+# payment_plans is written straight to MySQL, as notifications are: a row per
+# card, written when a plan is applied and read by this check.
+
+PAYMENT_PLAN_TOLERANCE = 1.00   # a plan lands within cents; a dollar is news
+PAYMENT_PLAN_NOTIFICATION_PREFIX = 'payment_plan:'   # + the card's id
+
+
+def _plan_notification_type(account_id):
+    return f'{PAYMENT_PLAN_NOTIFICATION_PREFIX}{int(account_id)}'
+
+
+def _remember_payment_plan(user_id, account_id, mode, value, result, inputs, last):
+    """The plan just applied, replacing the card's last one, not yet off."""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO payment_plans (user_id, account_id, mode, value, payment, months, pay_day,
+                                       first_date, last_date, notified)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0)
+            ON DUPLICATE KEY UPDATE mode = VALUES(mode), value = VALUES(value),
+                payment = VALUES(payment), months = VALUES(months), pay_day = VALUES(pay_day),
+                first_date = VALUES(first_date), last_date = VALUES(last_date), notified = 0
+        """, (user_id, int(account_id), mode, float(value), result['payment'], result['months'],
+              str(inputs['pay_day'])[:8], inputs['first'], last))
+        conn.commit()
+        cursor.close()
+
+
+def _forget_payment_plan(user_id, account_id):
+    """The card's plan and its notification, gone: replaced, finished, or the card deleted."""
+    try:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM payment_plans WHERE user_id = %s AND account_id = %s",
+                           (user_id, int(account_id)))
+            cursor.execute("DELETE FROM notifications WHERE user_id = %s AND type = %s",
+                           (user_id, _plan_notification_type(account_id)))
+            gone = cursor.rowcount
+            conn.commit()
+            cursor.close()
+        if gone and app.config.get('REDIS_OK'):
+            _redis_client.delete(f"notifications:v1:{user_id}")
+    except Exception as e:
+        log_error(app.logger, 'NOTIFICATION', f"[payment_plan] forgetting user {user_id}'s plan "
+                                              f"for card {account_id}: {e}")
+
+
+def _payment_plans_for(user_id):
+    """The user's plans, by card id: {account_id: row}."""
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT * FROM payment_plans WHERE user_id = %s", (user_id,))
+        rows = cursor.fetchall() or []
+        cursor.close()
+    return {int(r['account_id']): r for r in rows}
+
+
+def _payment_plan_prefill(plan, today):
+    """What the plan dialog opens on for a card that has a plan: what was chosen,
+    with a number of months counted to the same last payment, so re-planning
+    keeps the end date the person picked rather than starting it over."""
+    from bucket_utils import recurring_occurrence_dates
+    value = float(plan['value'])
+    if plan['mode'] == 'months':
+        last = _as_date(plan['last_date'])
+        left = [d for d in recurring_occurrence_dates(1, 'months', today + timedelta(days=1), last,
+                                                      monthly_days=[plan['pay_day']]) if d <= last]
+        value = max(len(left), 1)
+        return {'mode': 'months', 'value': str(value)}
+    return {'mode': 'payment', 'value': f'{value:.2f}'}
+
+
+def _check_payment_plans(user_id):
+    """
+    Each of the user's plans against the card's forecast as it now stands.
+
+    Off by more than PAYMENT_PLAN_TOLERANCE on the last plan payment day - owed,
+    or paid past zero - and the person is told, once: notifications.type
+    'payment_plan:<card>' is raised and payment_plans.notified set. While it
+    stays off the notification's wording follows the figure, quietly - not
+    unread again, not emailed again. Back on the plan (within a dollar), the
+    notification goes and notified is cleared, so the next time it goes off is
+    news again. A plan whose last payment has passed, or whose card has gone,
+    is forgotten. Called from _recalc_ca_daily_balance; never raises.
+    """
+    try:
+        plans = _payment_plans_for(user_id)
+    except Exception as e:
+        log_error(app.logger, 'NOTIFICATION', f"[payment_plan] reading user {user_id}'s plans: {e}")
+        return
+    if not plans:
+        return
+    today = _user_today_for(user_id)
+    accounts = {int(a.get('id') or 0): a for a in (_get_credit_accounts_from_redis(user_id) or [])}
+    for account_id, plan in plans.items():
+        try:
+            last = _as_date(plan['last_date'])
+            account = accounts.get(account_id)
+            if account is None or last < today:
+                _forget_payment_plan(user_id, account_id)
+                continue
+            owed = None
+            for row in _get_ca_balances_from_redis('c_a_balances_d', user_id, account_id) or []:
+                if _as_date(row.get('date')) == last:
+                    owed = float(row.get('balance') or 0)
+                    break
+            if owed is None:
+                with get_db_pool().get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT balance FROM c_a_balances_d WHERE account_id = %s AND date = %s",
+                                   (account_id, last))
+                    row = cursor.fetchone()
+                    cursor.close()
+                if row is None:
+                    continue
+                owed = float(row[0] or 0)
+            _set_payment_plan_notification(user_id, account, plan, owed)
+        except Exception as e:
+            log_error(app.logger, 'NOTIFICATION', f"[payment_plan] checking user {user_id}'s plan "
+                                                  f"for card {account_id}: {e}")
+
+
+def _set_payment_plan_notification(user_id, account, plan, owed):
+    """Raise, restate or clear one card's plan notification for what the forecast owes at its end."""
+    account_id = int(account['id'])
+    kind = _plan_notification_type(account_id)
+    last = _as_date(plan['last_date'])
+    off = abs(owed) > PAYMENT_PLAN_TOLERANCE
+    message = None
+    if off:
+        name = account.get('name') or 'your card'
+        when = last.strftime('%B %d, %Y')
+        if owed > 0:
+            body = (f'Your payment plan for {name} will not pay it off: about ${owed:,.2f} will still be '
+                    f'owed after its last payment on {when}, from charges or payments the plan did not expect.')
+        else:
+            body = (f'Your payment plan for {name} now pays about ${-owed:,.2f} more than the card will owe '
+                    f'by its last payment on {when}, from payments or credits the plan did not expect.')
+        message = f'{body} <a href="/credit_accounts?payment_plan={account_id}">Click here to adjust it</a>.'
+
+    send = changed = False
+    notification_id = user = unread = None
+    now = datetime.now()
+    with get_db_pool().get_connection() as conn:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT id, message FROM notifications WHERE user_id = %s AND type = %s ORDER BY id",
+                       (user_id, kind))
+        rows = cursor.fetchall() or []
+        standing = rows[0] if rows else None
+        if len(rows) > 1:
+            extra = [r['id'] for r in rows[1:]]
+            cursor.execute(f"DELETE FROM notifications WHERE id IN ({','.join(['%s'] * len(extra))})", extra)
+            changed = True
+        if not off:
+            if standing:
+                cursor.execute("DELETE FROM notifications WHERE id = %s", (standing['id'],))
+                changed = True
+            if int(plan.get('notified') or 0):
+                cursor.execute("UPDATE payment_plans SET notified = 0 WHERE id = %s", (plan['id'],))
+        elif not int(plan.get('notified') or 0):
+            cursor.execute("""
+                INSERT INTO notifications (user_id, date, message, is_read, type)
+                VALUES (%s, %s, %s, 0, %s)
+            """, (user_id, now, message, kind))
+            notification_id = cursor.lastrowid
+            cursor.execute("UPDATE payment_plans SET notified = 1 WHERE id = %s", (plan['id'],))
+            changed = send = True
+            cursor.execute("""
+                SELECT email, email_notifications, first_name, email_notify_disabled
+                  FROM users WHERE id = %s
+            """, (user_id,))
+            user = cursor.fetchone()
+            cursor.execute("SELECT COUNT(*) AS total FROM notifications WHERE user_id = %s AND is_read = 0",
+                           (user_id,))
+            unread = (cursor.fetchone() or {}).get('total', 0)
+        elif standing and standing['message'] != message:
+            # Told already: the figure moves with every purchase, and a
+            # notification per purchase is the thing this must not become.
+            cursor.execute("UPDATE notifications SET message = %s WHERE id = %s", (message, standing['id']))
+            changed = True
+        conn.commit()
+        cursor.close()
+    if send:
+        _deliver_notification(user_id, user, message, now, notification_id, unread, kind='payment_plan')
+        log_info(app.logger, 'NOTIFICATION', f"[payment_plan] user {user_id}, card {account_id}: "
+                                             f"off by {owed:.2f} at {last}")
+    elif changed and app.config.get('REDIS_OK'):
+        try:
+            _redis_client.delete(f"notifications:v1:{user_id}")
+        except Exception:
+            pass
+
+
 @app.route('/api/payment-plan-preview/<int:account_id>', methods=['POST'])
 @login_required
 def payment_plan_preview(account_id):
@@ -26154,7 +26368,8 @@ def payment_plan_apply(account_id):
     deleted (_delete_chain_link). Nothing before the first plan payment moves.
     """
     user_id = current_user.id
-    inputs, result, message = _card_plan(user_id, account_id, request.get_json(silent=True))
+    data = request.get_json(silent=True) or {}
+    inputs, result, message = _card_plan(user_id, account_id, data)
     if message:
         return jsonify({'status': 'error', 'message': message}), 400
     category = inputs['payment_category']
@@ -26164,6 +26379,9 @@ def payment_plan_apply(account_id):
     keep_going = inputs['charges'] > 0
     spec = _CHAIN_KINDS['expense']
     try:
+        # The card's last plan goes first, so the recalculations below are
+        # not checked against it halfway through being replaced.
+        _forget_payment_plan(user_id, account_id)
         for link in _plan_superseded(inputs):
             _delete_chain_entries('expense', user_id, link.get('id'), forecasts_only=True)
             _delete_recurring_in_redis(spec['recurring'], user_id, link.get('id'))
@@ -26197,6 +26415,7 @@ def payment_plan_apply(account_id):
                 no_end_date=1, monthly_days=[inputs['pay_day']])
             if status != 200:
                 return jsonify(payload), status
+        _remember_payment_plan(user_id, account_id, data.get('mode'), data.get('value'), result, inputs, last)
         _resync_payment_mirror(user_id, account_id, category['id'], first)
         try:
             import redis_manager as _rm
@@ -27300,6 +27519,7 @@ def delete_credit_account():
                                     _redis_client.expire(pending_entry_key, PERSISTENT_CACHE_TTL)
 
 
+        _forget_payment_plan(current_user.id, account_id)
         save_ca_daily_balance()
         save_totals_remainders_d()
 

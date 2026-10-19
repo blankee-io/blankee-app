@@ -77,7 +77,9 @@
                                 data-recurring="{{ 'true' if recurring_info.get('enabled') else 'false' }}"
                                 data-payment-amount="{{ recurring_info.get('amount', 0) }}"
                                 data-due-date="{{ recurring_info.get('monthly_days', '1') }}"
-                                data-bank-linked="{{ account.is_linked|default(0) }}">
+                                data-bank-linked="{{ account.is_linked|default(0) }}"
+                                {%- set plan = plan_prefill.get(account.id) %}
+                                {%- if plan %} data-plan-mode="{{ plan.mode }}" data-plan-value="{{ plan.value }}"{% endif %}>
                                 <td class="credit-account-sort-cell">
                                     <span class="sort-handle"><i class="fa fa-bars"></i></span>
                                 </td>
@@ -702,6 +704,10 @@
                 e.stopPropagation();
                 const $row = $(this).closest('tr');
                 const accountId = $row.data('account-id');
+                // A card with a plan opens on it (data-plan-*, from the server:
+                // a months plan counted to the same last payment).
+                const current = $row.attr('data-plan-mode')
+                    ? { mode: $row.attr('data-plan-mode'), value: $row.attr('data-plan-value') } : null;
                 let mode = 'payment';
                 let applied = null;     // the request the current preview answers
 
@@ -715,6 +721,8 @@
                             '<label for="payment-plan-value" class="payment-plan-label"></label>' +
                             '<input type="number" id="payment-plan-value" min="0" inputmode="decimal">' +
                         '</div>' +
+                        (current ? '<p class="payment-plan-current">Filled in from the plan this card has now, ' +
+                                   'worked out again from what it owes today.</p>' : '') +
                         '<p class="payment-plan-facts"></p>' +
                         '<div class="payment-plan-result"></div>' +
                     '</div>';
@@ -811,7 +819,11 @@
                             if ($(this).data('mode') !== mode) setMode($(this).data('mode'));
                         });
                         $input.on('input', function() { refresh(250); });
-                        setMode('payment');
+                        setMode(current ? current.mode : 'payment');
+                        if (current && current.value) {
+                            $input.val(current.value);
+                            refresh(0);
+                        }
                     }
                 });
                 if (!ok || !applied) return;
@@ -837,6 +849,19 @@
                     }
                 });
             });
+
+            // Arriving from the notification that a plan is off
+            // (?payment_plan=<card>): the plan dialog opens on that card. The
+            // address loses it straight away, so a reload does not open it again.
+            const params = new URLSearchParams(window.location.search);
+            const planFor = params.get('payment_plan');
+            if (planFor) {
+                params.delete('payment_plan');
+                const rest = params.toString();
+                history.replaceState(null, '', window.location.pathname + (rest ? '?' + rest : '') + window.location.hash);
+                const $btn = $('.credit-accounts-table tr[data-account-id="' + CSS.escape(planFor) + '"] .payment-plan-btn');
+                if ($btn.length) $btn.first().trigger('click');
+            }
         });
 
         $(function() {

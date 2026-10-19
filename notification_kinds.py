@@ -37,6 +37,9 @@ KINDS = (
     ('bills_due', 'Bills due today',
      'Sent at the time you set here, naming the bills that fall on that day. '
      'Bills only - allowances are not included.'),
+    ('payment_plan', 'Payment plan off track',
+     'Sent when charges or payments a credit card\'s payment plan did not '
+     'expect mean it will no longer pay the card off by its last payment.'),
     ('pending_transactions', 'Pending transactions',
      'Sent when transactions synced from a bank account are waiting to be given '
      'a category.'),

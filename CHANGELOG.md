@@ -8,6 +8,28 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.63.0 — 2026-10-18
+
+### Added
+
+- **A payment plan tells you when it no longer pays the card off.** A plan
+  pays fixed amounts on fixed days, and it already covers the card's own
+  recurring charges. Anything else - a purchase, a payment made by hand, a
+  payment skipped or changed - leaves the card owing at the end of the plan,
+  or paid past zero. Whenever the card's balances are worked out again,
+  after an edit, an entry confirmed or the morning bank pull, the card's
+  forecast on the plan's last payment day is checked. More than a dollar
+  off either way, and you get one notification saying by how much, which
+  opens Credit Accounts with the plan dialog ready to adjust. While it
+  stays off, the notification's figure keeps up without notifying you
+  again; if the card comes back on track, it goes away by itself.
+- The plan dialog opens on the plan the card already has: the same maximum
+  payment, or the months left to the same last payment.
+- "Payment plan off track" can be switched off as an email under
+  Notifications in Settings, like the other kinds.
+- A new table, `payment_plans` (`install/sql/add_payment_plans.sql`), holds
+  one row per card with a plan. The update applies it.
+
 ## 1.62.1 — 2026-10-18
 
 ### Fixed

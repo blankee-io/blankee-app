@@ -13230,6 +13230,7 @@ td.credit-account-action-cell button {
     margin-bottom: 4px;
 }
 
+#generic-confirm-modal .payment-plan-current,
 #generic-confirm-modal .payment-plan-facts {
     margin: 0 0 10px;
     color: var(--secondary-dark);
