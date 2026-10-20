@@ -492,6 +492,15 @@ def api_delete_shelf(shelf_id):
     if loaf_data.get_shelf(current_user.id, shelf_id) is None:
         return jsonify({'status': 'error', 'message': 'No such job.'}), 404
 
+    # A recurring income calculated from this job would be left with nothing
+    # to read - refused here as on Blankee's side (app.api_delete_job).
+    from app import _jobs_in_use
+    incomes = _jobs_in_use(current_user.id).get(int(shelf_id))
+    if incomes:
+        return jsonify({'status': 'error', 'message': (
+            'Your recurring income %s is calculated from this job. Change it to a fixed amount '
+            'or another job on Recurring Income first.' % ', '.join(incomes))}), 400
+
     losing = len(loaf_data.baskets_on(current_user.id, shelf_id))
     if not loaf_data.delete_shelf(current_user.id, shelf_id):
         return jsonify({'status': 'error',

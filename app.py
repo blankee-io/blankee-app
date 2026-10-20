@@ -21447,27 +21447,35 @@ def _jobs_in_use(user_id):
 @login_required
 def jobs():
     """
-    The user's jobs, on Blankee's side (2026-10-19). A job is Loaf's shelf -
-    when pay lands and the working week - and Blankee's income calculated from
-    pay reads the same one, so it is managed here too, whether or not Loaf is
-    switched on. Editing uses Loaf's job editor through /api/jobs.
+    Jobs, on Blankee's side (2026-10-19): Loaf's own jobs page, rendered here.
+    A job - when pay lands and the working week - is shared by Loaf and by a
+    recurring income calculated from pay, so both apps have it, and it looks
+    the same in both. Here jobs save and delete through Blankee's /api/jobs, so
+    the page works with Loaf switched off, and the baskets under each job show
+    only while Loaf is on. See the note at the top of loaf/baskets.html.
     """
+    import apps_registry
+    import loaf_app
     import loaf_data
-    used = _jobs_in_use(current_user.id)
-    rows = []
-    for shelf in loaf_data.get_shelves(current_user.id):
-        row = _job_json(shelf)
-        row['describe_week'] = loaf_data.describe_week(shelf)
-        row['describe_pay'] = loaf_data.describe_cadence(shelf)
-        row['has_pay_date'] = bool(shelf.get('accrual_anchor_date'))
-        anchor = _as_date(shelf.get('accrual_anchor_date'))
-        row['next_pay_text'] = anchor.strftime('%b %d, %Y').replace(' 0', ' ') if anchor else None
-        row['incomes'] = used.get(int(shelf['id']), [])
-        row['baskets'] = [b.get('name') for b in loaf_data.baskets_on(current_user.id, shelf['id'])]
-        rows.append(row)
-    # Where Back goes, as the other pages decide it.
+    import loaf_holidays
+    loaf_on = apps_registry.is_enabled('loaf')
     landing_page = getattr(current_user, 'landing_page', None) or 'dashboard_3m'
-    return render_template('jobs.html', jobs=rows, landing_page=landing_page)
+    return render_template(
+        'loaf/baskets.html',
+        blankee_side=True,
+        show_baskets=loaf_on,
+        back_url=url_for(landing_page),
+        job_api='/api/jobs',
+        baskets=loaf_data.get_baskets(current_user.id) if loaf_on else [],
+        shelves={s['id']: s for s in loaf_data.get_shelves(current_user.id)},
+        today=_user_today_for(current_user.id),
+        weekday_prefixes=loaf_data.WEEKDAY_PREFIXES,
+        weekday_names=loaf_data.WEEKDAY_NAMES,
+        holidays=loaf_holidays.HOLIDAYS,
+        describe_fill=loaf_data.describe_fill,
+        describe_carryover=loaf_data.describe_carryover,
+        describe_week=loaf_data.describe_week,
+        **loaf_app._shell())
 
 
 @app.route('/api/jobs/<int:shelf_id>/delete', methods=['POST'])

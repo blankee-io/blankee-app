@@ -15,7 +15,15 @@
     <script src="{{ url_for('static', filename='js/loaf_basket_modal.js') }}" defer></script>
     {% include '_head_icons.html' %}
 </head>
-<body id="loaf-baskets-body" data-app="loaf">
+{#
+  Also Blankee's Jobs page (app.jobs, 2026-10-19): a job is shared by Loaf and
+  by a recurring income calculated from pay, so Blankee shows this same page.
+  There, blankee_side is set: Back goes to the person's landing page, jobs save
+  and delete through Blankee's /api/jobs (working with Loaf switched off), and
+  the baskets show only while Loaf is on (show_baskets).
+#}
+{%- set show_baskets = show_baskets if show_baskets is defined else true %}
+<body id="loaf-baskets-body"{% if not blankee_side %} data-app="loaf"{% endif %}>
     {% include 'nav.html' %}
     {# showToast and showConfirmModal. Never hand-rolled - CLAUDE.md 5a. #}
     {% include 'alert_modals.html' %}
@@ -27,7 +35,7 @@
                view switcher. Loaf's landing is its month view, which is what
                apps_registry declares as this app's start. #}
             <div class="nav-buttons">
-                <a href="{{ url_for('loaf.dashboard') }}" class="nav-button">
+                <a href="{{ back_url or url_for('loaf.dashboard') }}" class="nav-button">
                     <i class="fa-solid fa-turn-left"></i>
                     <span class="nav-tooltip">Back</span>
                 </a>
@@ -116,11 +124,13 @@
                                    here rather than above the table: a pool of
                                    hours with no job to be earned at is not a
                                    thing Loaf can cost. #}
+                                {% if show_baskets %}
                                 <button class="add-basket-btn" type="button"
                                         title="Add a basket to this job"
                                         data-shelf-id="{{ shelf.id }}">
                                     <i class="fa-solid fa-plus"></i>
                                 </button>
+                                {% endif %}
                                 <button class="edit-recurring-btn edit-shelf-btn" type="button"
                                         title="Edit job" data-shelf-id="{{ shelf.id }}">
                                     <i class="fa-solid fa-pen-to-square"></i>
@@ -134,7 +144,7 @@
                         </td>
                     </tr>
 
-                    {% set mine = baskets | selectattr('shelf_id', 'equalto', shelf.id) | list %}
+                    {% set mine = (baskets | selectattr('shelf_id', 'equalto', shelf.id) | list) if show_baskets else [] %}
                     {% for basket in mine %}
                     {# Every value the edit form needs is a data attribute. The
                        modal never scrapes a cell - the one thing most worth
@@ -201,7 +211,7 @@
                         </td>
                     </tr>
                     {% endfor %}
-                    {% if not mine %}
+                    {% if show_baskets and not mine %}
                     <tr class="loaf-basket-row loaf-basket-none">
                         <td class="basket-handle"></td>
                         <td class="basket-name" colspan="7">
@@ -237,7 +247,7 @@
         </div>
     </div>
 
-    {% include 'loaf/_basket_modal.html' %}
+    {% if show_baskets %}{% include 'loaf/_basket_modal.html' %}{% endif %}
     {% include 'loaf/_shelf_modal.html' %}
 
     {% include 'loading_modals.html' %}
@@ -264,7 +274,7 @@
         if (!ok) { return; }
 
         $.ajax({
-            url: '/loaf/api/shelves/' + shelfId + '/delete',
+            url: '{{ '/api/jobs/' if blankee_side else '/loaf/api/shelves/' }}' + shelfId + '/delete',
             method: 'POST',
             contentType: 'application/json',
             success: function (response) {

@@ -22,18 +22,16 @@ this file; the admin console links to it, it does not read it.
 - A new column, `loaf_baskets.balance_checked_on`
   (`install/sql/add_loaf_balance_check.sql`), remembers the last payday a
   basket was checked. The update applies it.
-
-- **Manage Jobs in Blankee.** A job - when your pay lands and the hours you
-  work - is shared by Loaf and by a recurring income calculated from your
-  pay, so Blankee's menu has a Manage Jobs page too, whether or not Loaf is
-  switched on. Each job shows its pay schedule, next pay date, working week
-  and what uses it; it is edited with the same job editor as Loaf's, and a
-  job a recurring income is calculated from cannot be deleted until that
-  income stops using it.
+- **Jobs in Blankee.** A job - when your pay lands and the hours you work -
+  is shared by Loaf and by a recurring income calculated from your pay, so
+  Blankee's menu has Jobs too, above Categories: the same page as Loaf's,
+  working whether or not Loaf is switched on (its baskets show while Loaf
+  is on). A job a recurring income is calculated from cannot be deleted,
+  in either app, until that income stops using it.
 
 ### Changed
 
-- Loaf's menu says "Manage Jobs" rather than "Manage Shelves".
+- Loaf's menu says "Jobs" rather than "Manage Shelves".
 
 ## 1.65.2 — 2026-10-19
 
