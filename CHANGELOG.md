@@ -32,6 +32,8 @@ this file; the admin console links to it, it does not read it.
 ### Changed
 
 - Loaf's menu says "Jobs" rather than "Manage Shelves".
+- The Jobs page is teal in both apps rather than Loaf's orange, since jobs
+  belong to both.
 
 ## 1.65.2 — 2026-10-19
 

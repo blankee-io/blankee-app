@@ -19708,12 +19708,16 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
     text-overflow: ellipsis;
 }
 
+/* The Jobs page is teal, in Loaf as in Blankee (asked for on 2026-10-19):
+   the same page is both apps' Jobs, and jobs belong to both - Blankee's
+   income calculated from pay reads them too - so it wears the shared colour
+   rather than Loaf's accent. The same teal as Blankee's recurring tables. */
 .recurring-header.baskets {
-    color: var(--accent);
+    color: var(--primary);
 }
 
 .recurring-header.baskets span {
-    color: var(--accent);
+    color: var(--primary);
 }
 
 .loaf-baskets-table {
@@ -19731,7 +19735,7 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 }
 
 .loaf-baskets-table thead {
-    background-color: var(--accent);
+    background-color: var(--primary);
     color: var(--text-light);
 }
 
@@ -19756,11 +19760,11 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 }
 
 .loaf-baskets-table tbody tr:nth-child(even) {
-    background-color: var(--accent-lighter);
+    background-color: var(--primary-lighter);
 }
 
 .loaf-baskets-table tbody tr:nth-child(odd) {
-    background-color: var(--accent-hover);
+    background-color: var(--primary-hover);
 }
 
 /* Column widths. Fills takes the most because it is the only cell holding a
@@ -20487,14 +20491,13 @@ label.loaf-holiday {
 
 /* Loaf's plus is the accent, like everything else it owns. .add-income-btn
    is Blankee teal, which beside an accent basket name reads as a control
-   belonging to a different app. */
-#loaf-page .add-income-btn,
-#loaf-baskets-body .add-income-btn {
+   belonging to a different app. Not on the Jobs page, which is teal in both
+   apps (see .recurring-header.baskets) and keeps the teal plus. */
+#loaf-page .add-income-btn {
     color: var(--accent);
 }
 
-#loaf-page .add-income-btn:hover,
-#loaf-baskets-body .add-income-btn:hover {
+#loaf-page .add-income-btn:hover {
     color: var(--accent-hover);
 }
 
