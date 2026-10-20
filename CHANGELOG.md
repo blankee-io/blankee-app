@@ -25,8 +25,8 @@ this file; the admin console links to it, it does not read it.
 - **Jobs in Blankee.** A job - when your pay lands and the hours you work -
   is shared by Loaf and by a recurring income calculated from your pay, so
   Blankee's menu has Jobs too, above Categories: the same page as Loaf's,
-  working whether or not Loaf is switched on (its baskets show while Loaf
-  is on). A job a recurring income is calculated from cannot be deleted,
+  working whether or not Loaf is switched on (baskets stay in Loaf).
+  A job a recurring income is calculated from cannot be deleted,
   in either app, until that income stops using it.
 
 ### Changed

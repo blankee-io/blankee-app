@@ -21451,22 +21451,20 @@ def jobs():
     A job - when pay lands and the working week - is shared by Loaf and by a
     recurring income calculated from pay, so both apps have it, and it looks
     the same in both. Here jobs save and delete through Blankee's /api/jobs, so
-    the page works with Loaf switched off, and the baskets under each job show
-    only while Loaf is on. See the note at the top of loaf/baskets.html.
+    the page works with Loaf switched off, and baskets are Loaf's alone: none
+    is shown or added here. See the note at the top of loaf/baskets.html.
     """
-    import apps_registry
     import loaf_app
     import loaf_data
     import loaf_holidays
-    loaf_on = apps_registry.is_enabled('loaf')
     landing_page = getattr(current_user, 'landing_page', None) or 'dashboard_3m'
     return render_template(
         'loaf/baskets.html',
         blankee_side=True,
-        show_baskets=loaf_on,
+        show_baskets=False,
         back_url=url_for(landing_page),
         job_api='/api/jobs',
-        baskets=loaf_data.get_baskets(current_user.id) if loaf_on else [],
+        baskets=[],
         shelves={s['id']: s for s in loaf_data.get_shelves(current_user.id)},
         today=_user_today_for(current_user.id),
         weekday_prefixes=loaf_data.WEEKDAY_PREFIXES,

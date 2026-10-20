@@ -20,7 +20,7 @@
   by a recurring income calculated from pay, so Blankee shows this same page.
   There, blankee_side is set: Back goes to the person's landing page, jobs save
   and delete through Blankee's /api/jobs (working with Loaf switched off), and
-  the baskets show only while Loaf is on (show_baskets).
+  baskets are Loaf's alone - none is shown or added there (show_baskets).
 #}
 {%- set show_baskets = show_baskets if show_baskets is defined else true %}
 <body id="loaf-baskets-body"{% if not blankee_side %} data-app="loaf"{% endif %}>
