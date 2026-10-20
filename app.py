@@ -21427,6 +21427,69 @@ def api_update_job(shelf_id):
     return jsonify({'status': 'success', 'shelf_id': saved})
 
 
+def _jobs_in_use(user_id):
+    """{shelf_id: [income category name, ...]} - the recurring incomes whose pay
+    is calculated from each job (recurring_income.shelf_id)."""
+    names = {int(c['id']): c.get('name') for c in (_get_categories_from_redis('income_categories', user_id) or [])}
+    used = {}
+    for link in _get_recurring_from_redis('recurring_income', user_id) or []:
+        shelf_id = link.get('shelf_id')
+        if not shelf_id or not link.get('pay_type'):
+            continue
+        name = names.get(int(link.get('category_id') or 0)) or link.get('category_name') or 'Income'
+        bucket = used.setdefault(int(shelf_id), [])
+        if name not in bucket:
+            bucket.append(name)
+    return used
+
+
+@app.route('/jobs')
+@login_required
+def jobs():
+    """
+    The user's jobs, on Blankee's side (2026-10-19). A job is Loaf's shelf -
+    when pay lands and the working week - and Blankee's income calculated from
+    pay reads the same one, so it is managed here too, whether or not Loaf is
+    switched on. Editing uses Loaf's job editor through /api/jobs.
+    """
+    import loaf_data
+    used = _jobs_in_use(current_user.id)
+    rows = []
+    for shelf in loaf_data.get_shelves(current_user.id):
+        row = _job_json(shelf)
+        row['describe_week'] = loaf_data.describe_week(shelf)
+        row['describe_pay'] = loaf_data.describe_cadence(shelf)
+        row['has_pay_date'] = bool(shelf.get('accrual_anchor_date'))
+        anchor = _as_date(shelf.get('accrual_anchor_date'))
+        row['next_pay_text'] = anchor.strftime('%b %d, %Y').replace(' 0', ' ') if anchor else None
+        row['incomes'] = used.get(int(shelf['id']), [])
+        row['baskets'] = [b.get('name') for b in loaf_data.baskets_on(current_user.id, shelf['id'])]
+        rows.append(row)
+    # Where Back goes, as the other pages decide it.
+    landing_page = getattr(current_user, 'landing_page', None) or 'dashboard_3m'
+    return render_template('jobs.html', jobs=rows, landing_page=landing_page)
+
+
+@app.route('/api/jobs/<int:shelf_id>/delete', methods=['POST'])
+@login_required
+def api_delete_job(shelf_id):
+    """A job and everything Loaf keeps on it - its baskets and their bookings.
+    Refused while a recurring income still calculates its pay from it: that
+    income would be left with no job to read."""
+    import loaf_data
+    if loaf_data.get_shelf(current_user.id, shelf_id) is None:
+        return jsonify({'status': 'error', 'message': 'No such job.'}), 404
+    incomes = _jobs_in_use(current_user.id).get(int(shelf_id))
+    if incomes:
+        return jsonify({'status': 'error', 'message': (
+            'Your recurring income %s is calculated from this job. Change it to a fixed amount '
+            'or another job on Recurring Income first.' % ', '.join(incomes))}), 400
+    losing = len(loaf_data.baskets_on(current_user.id, shelf_id))
+    if not loaf_data.delete_shelf(current_user.id, shelf_id):
+        return jsonify({'status': 'error', 'message': 'Could not delete that job.'}), 500
+    return jsonify({'status': 'success', 'baskets_deleted': losing})
+
+
 @app.route('/api/pay-preview', methods=['POST'])
 @login_required
 def api_pay_preview():

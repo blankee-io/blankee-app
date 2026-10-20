@@ -73,6 +73,8 @@
         {# The bank connection and AI categorization live on the Settings
            page now - they are configuration, not a place to go every day. #}
         <div class="dropdown-link"><a href="{{ url_for('bundles') }}">Bundles</a><i class="fa-light fa-boxes-stacked"></i></div>
+        {# The jobs Blankee's income calculated from pay and Loaf both read. #}
+        <div class="dropdown-link"><a href="{{ url_for('jobs') }}">Manage Jobs</a><i class="fa-light fa-briefcase"></i></div>
         <div class="dropdown-divider"></div>
         <div class="dropdown-link"><a href="{{ url_for('settings') }}">Settings</a><i class="fa-light fa-sliders"></i></div>
         {# Only means anything inside the iOS app, which injects window.nativeApp

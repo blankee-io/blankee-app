@@ -1897,6 +1897,7 @@ transform: scale(1.2);
     }
 
     #recurring-i-body .calendarnavbuttonscontainer,
+    #jobs-body .calendarnavbuttonscontainer,
     #credit-accounts-body .calendarnavbuttonscontainer,
     #profile-body .calendarnavbuttonscontainer,
     #bundles-body .calendarnavbuttonscontainer,
@@ -1907,6 +1908,7 @@ transform: scale(1.2);
     }
 
     #recurring-i-body .calendarnav,
+    #jobs-body .calendarnav,
     #credit-accounts-body .calendarnav,
     #profile-body .calendarnav,
     #bundles-body .calendarnav,
@@ -6633,6 +6635,88 @@ td:has(.bucket-progress-container) {
 /* /////////////////////////// Dashboard Month //////////////////////////////////// */
 
 #dashboard-m-body,
+/* Manage Jobs on Blankee's side (templates/jobs.html): a card per job in the
+   profile-box layout the notifications page uses - its name with edit and
+   delete, then what it is in four short lines. */
+/* The label each .profile-section carries on its tab - "Profile" by
+   default, the job's here. */
+.profile-section.job-card::before {
+    content: "Job";
+}
+
+.job-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.job-card-name {
+    margin: 0;
+    color: var(--primary);
+    font-size: 17px;
+}
+
+.job-card-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.job-edit-btn,
+.job-delete-btn {
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 15px;
+}
+
+.job-edit-btn {
+    color: var(--secondary-dark);
+}
+
+.job-delete-btn {
+    color: var(--danger);
+}
+
+.job-edit-btn:hover,
+.job-delete-btn:hover {
+    color: var(--text-dark);
+    transform: scale(1.2);
+}
+
+.job-card-facts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 14px;
+    margin: 0;
+    text-align: left;
+    color: var(--text-dark);
+    font-size: 14px;
+}
+
+.job-card-facts dt {
+    color: var(--secondary-dark);
+    font-weight: 600;
+}
+
+.job-card-facts dd {
+    margin: 0;
+}
+
+.job-card-use {
+    display: inline-block;
+    margin: 0 8px 4px 0;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background-color: var(--primary-lighter);
+}
+
+.job-card-use-kind {
+    color: var(--secondary-dark);
+    font-size: 11px;
+}
+
 /* Loaf's payday check (templates/loaf/_payday_check.html), in the shared
    confirm modal: a row per accruing basket - its name, Loaf's figure, and a
    box for the employer's. Scoped by the modal's id, as its own paragraph
