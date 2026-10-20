@@ -430,6 +430,28 @@ def _pay_date_before(when, interval, unit, **pattern):
     return earlier[-1] if earlier else back
 
 
+def pay_dates(shelf, after, through):
+    """The job's pay dates in (after, through] - the series project() accrues on.
+
+    Generated the way project() generates them (from the anchor, walked back
+    so none before it is missed), so a payday this reports is one the balance
+    actually moved on. Empty for a job with no next pay date set.
+    """
+    after, through = _as_date(after), _as_date(through)
+    anchor = _as_date(shelf.get('accrual_anchor_date'))
+    if not anchor or after is None or through is None or through <= after:
+        return []
+    interval = int(_as_float(shelf.get('cadence_interval'), 1)) or 1
+    unit = str(shelf.get('cadence_unit') or 'weeks')
+    occurrences = recurring_occurrence_dates(
+        interval, unit, _generate_from(anchor, after, interval, unit), through,
+        weekdays=_as_list(shelf.get('weekdays')),
+        monthly_days=_as_list(shelf.get('monthly_days')),
+        yearly_day=shelf.get('yearly_day'),
+        yearly_month=shelf.get('yearly_month'))
+    return sorted(d for d in occurrences if after < d <= through)
+
+
 def _scheduled_hours_between(shelf, after, through):
     """Hours this basket's week says are worked in (after, through].
 

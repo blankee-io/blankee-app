@@ -8,6 +8,25 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.66.0 — 2026-10-19
+
+### Added
+
+- **Loaf asks for your employer's balance on payday.** On each payday of a
+  job, Loaf shows its figure for the job's accruing baskets and asks what
+  your employer shows. Change any that differ and Loaf records the
+  difference as one "Balance correction" on that payday, so everything
+  after it starts from your employer's real figure. A correction never
+  changes how much any period accrues. "Later" asks again next time you
+  open Loaf; each payday is asked about once.
+- A new column, `loaf_baskets.balance_checked_on`
+  (`install/sql/add_loaf_balance_check.sql`), remembers the last payday a
+  basket was checked. The update applies it.
+
+### Changed
+
+- Loaf's menu says "Manage Jobs" rather than "Manage Shelves".
+
 ## 1.65.2 — 2026-10-19
 
 ### Changed

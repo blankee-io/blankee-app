@@ -1116,6 +1116,128 @@ def _basket_summary(user_id, basket, entries, baskets, today, extra=None):
     return summary
 
 
+# ------------------------------------------------------- the payday check ----
+# Each payday of a job, the person is asked what their employer shows for the
+# job's accruing baskets (2026-10-19). Loaf's walk and a payroll system agree
+# on the arithmetic, but not always on the edges - a rate rounded to four
+# places, a day recorded after the payroll ran - and the small differences
+# add up. Whatever the employer shows is the truth, so the difference goes in
+# as one correction on the payday: hours added when the employer shows more,
+# hours already taken when it shows less. Neither is absence, so neither
+# moves any period's accrual (see FLAT_DIRECTIONS). Asked once a payday per
+# basket; balance_checked_on remembers which.
+#
+# Compared after the payday, not on the day the employer posts: a payroll
+# often runs a couple of days before payday and its balance then already
+# holds that period's accrual, which Loaf adds on the payday itself.
+
+PAYDAY_CORRECTION_NOTE = 'Balance correction'
+
+
+def _balance_after(user_id, shelf, basket, baskets, entries, day, today):
+    """What Loaf has for the basket at the end of `day`."""
+    absence = loaf_forecast.absence_by_date(shelf, baskets, entries)
+    usage = loaf_forecast.usage_by_date(shelf, basket, entries)
+    credits = loaf_forecast.credit_by_date(basket, entries)
+    result = loaf_forecast.project(shelf, basket, usage, absence, max(day, today),
+                                   today=today, credits=credits)
+    return round(loaf_forecast.balance_on(result, day), 2)
+
+
+def _payday_checks(user_id, today):
+    """The paydays waiting to be checked, a job at a time:
+    [{'shelf_id', 'shelf_name', 'payday', 'baskets': [{'id', 'name', 'balance'}]}].
+
+    The latest payday on or before today for each job, and of its baskets
+    those that accrue, are not hidden, existed before that payday and have
+    not been checked against it. Earlier missed paydays are not asked about:
+    the latest balance already covers them."""
+    entries = loaf_data.get_entries(user_id)
+    out = []
+    for shelf in loaf_data.get_shelves(user_id):
+        paydays = loaf_forecast.pay_dates(shelf, today - timedelta(days=400), today)
+        if not paydays:
+            continue
+        payday = paydays[-1]
+        baskets = loaf_data.baskets_on(user_id, shelf['id'], include_hidden=False)
+        due = []
+        for basket in baskets:
+            if basket.get('accrual_hours') is None:
+                continue
+            checked = loaf_forecast._as_date(basket.get('balance_checked_on'))
+            if checked is not None and checked >= payday:
+                continue
+            began = loaf_forecast._as_date(basket.get('starting_date'))
+            if began is not None and began >= payday:
+                continue
+            due.append({'id': int(basket['id']), 'name': basket.get('name'),
+                        'balance': _balance_after(user_id, shelf, basket, baskets,
+                                                  entries, payday, today)})
+        if due:
+            out.append({'shelf_id': int(shelf['id']), 'shelf_name': shelf.get('name'),
+                        'payday': payday.isoformat(),
+                        'payday_text': payday.strftime('%b %d, %Y').replace(' 0', ' '),
+                        'baskets': due})
+    return out
+
+
+@loaf.route('/api/payday-check')
+@login_required
+def api_payday_check():
+    """What is waiting to be checked. Reads only."""
+    try:
+        return jsonify({'status': 'success', 'due': _payday_checks(current_user.id, _today())})
+    except Exception as e:
+        log_exception(logger, 'LOAF', 'Payday check for user %s: %s' % (current_user.id, e))
+        return jsonify({'status': 'success', 'due': []})
+
+
+@loaf.route('/api/payday-check', methods=['POST'])
+@login_required
+def api_payday_check_answer():
+    """The employer's figures for one job's payday, or a skip.
+
+    {shelf_id, payday, balances: {basket_id: hours}}: each figure that differs
+    from Loaf's by a cent or more becomes one correction on the payday. A
+    basket left out, or {skip: true}, is marked checked with nothing changed."""
+    user_id = current_user.id
+    today = _today()
+    data = _payload()
+    try:
+        shelf_id = int(data.get('shelf_id'))
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error', 'message': 'Which job?'}), 400
+    due = next((d for d in _payday_checks(user_id, today) if d['shelf_id'] == shelf_id), None)
+    if due is None or due['payday'] != str(data.get('payday') or ''):
+        # Already answered - on another device, say. Nothing to do.
+        return jsonify({'status': 'success', 'corrections': 0})
+    payday = due['payday']
+    stated = {} if data.get('skip') else (data.get('balances') or {})
+    corrections = 0
+    for item in due['baskets']:
+        raw = stated.get(str(item['id']), stated.get(item['id']))
+        if raw not in (None, ''):
+            try:
+                figure = round(float(raw), 2)
+            except (TypeError, ValueError):
+                return jsonify({'status': 'error',
+                                'message': 'That is not a number of hours for %s.' % item['name']}), 400
+            difference = round(figure - item['balance'], 2)
+            if abs(difference) >= 0.01:
+                values, error = loaf_data.clean_entry({
+                    'basket_id': item['id'],
+                    'direction': 'accrue' if difference > 0 else 'prior',
+                    'start_date': payday, 'status': 'taken',
+                    'hours': abs(difference), 'hours_overridden': '1',
+                    'note': '%s - employer showed %.2f h' % (PAYDAY_CORRECTION_NOTE, figure)})
+                if error or loaf_data.create_entry(user_id, values) is None:
+                    return jsonify({'status': 'error',
+                                    'message': error or 'Could not save that.'}), 500
+                corrections += 1
+        loaf_data.update_basket(user_id, item['id'], {'balance_checked_on': payday})
+    return jsonify({'status': 'success', 'corrections': corrections})
+
+
 @loaf.route('/summary')
 @login_required
 def summary():

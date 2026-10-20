@@ -94,6 +94,7 @@ EXPECTED_COLUMNS = (
     ('bill_reminders', 'notify_time'),
     ('bill_reminders', 'last_sent'),
     ('payment_plans', 'notified'),
+    ('loaf_baskets', 'balance_checked_on'),
     ('payment_plans', 'last_date'),
     ('recurring_income', 'pay_type'),
     ('recurring_income', 'shelf_id'),

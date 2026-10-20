@@ -1,0 +1,84 @@
+{#
+  The payday check (2026-10-19): on a job's payday, what does the employer
+  show for its accruing baskets? Loaf's figure is filled in; whatever the
+  person types instead goes in as one correction on the payday
+  (loaf_app.api_payday_check_answer). "Later" leaves it for the next
+  visit. Included by the Loaf pages after script.js, which supplies
+  showConfirmModal and showToast.
+#}
+<script>
+(function () {
+    function esc(text) {
+        var div = document.createElement('div');
+        div.textContent = text == null ? '' : String(text);
+        return div.innerHTML;
+    }
+
+    function ask(checks, changed) {
+        var check = checks.shift();
+        if (!check) {
+            if (changed) { window.location.reload(); }
+            return;
+        }
+        var rows = check.baskets.map(function (b) {
+            return '<div class="loaf-payday-row">' +
+                '<label class="loaf-payday-name" for="loaf-payday-' + b.id + '">' + esc(b.name) + '</label>' +
+                '<span class="loaf-payday-loaf">Loaf: ' + Number(b.balance).toFixed(2) + ' h</span>' +
+                '<input type="number" step="0.01" inputmode="decimal" class="loaf-payday-input"' +
+                ' id="loaf-payday-' + b.id + '" data-basket-id="' + b.id + '" value="' + Number(b.balance).toFixed(2) + '">' +
+                '</div>';
+        }).join('');
+        var body = '<p class="loaf-payday-hint">What does your employer show now? Change any that differ - ' +
+                   'Loaf records the difference on this payday and carries on from there.</p>' + rows;
+        var answers = null;
+        showConfirmModal({
+            title: 'Payday check',
+            message: check.shelf_name + ' - ' + check.payday_text,
+            bodyHtml: body,
+            confirmText: 'Save',
+            cancelText: 'Later',
+            onReady: function (el) {
+                var first = el.querySelector('.loaf-payday-input');
+                if (first) { first.focus(); first.select(); }
+            },
+            beforeClose: function (ok) {
+                if (!ok) { return; }
+                answers = {};
+                document.querySelectorAll('#generic-confirm-modal .loaf-payday-input').forEach(function (input) {
+                    answers[input.getAttribute('data-basket-id')] = input.value;
+                });
+            }
+        }).then(function (ok) {
+            if (!ok || !answers) { ask(checks, changed); return; }
+            fetch('/loaf/api/payday-check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shelf_id: check.shelf_id, payday: check.payday, balances: answers })
+            }).then(function (r) { return r.json(); })
+              .then(function (res) {
+                  if (!res || res.status !== 'success') {
+                      showToast((res && res.message) || 'Could not save that.', 'error');
+                      return;
+                  }
+                  if (res.corrections) {
+                      showToast(res.corrections === 1 ? 'Balance corrected.' : res.corrections + ' balances corrected.', 'success');
+                  }
+                  ask(checks, changed || res.corrections > 0);
+              })
+              .catch(function () { showToast('Could not reach the server.', 'error'); });
+        });
+    }
+
+    function start() {
+        fetch('/loaf/api/payday-check', { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d && d.due && d.due.length) { ask(d.due.slice(), false); } })
+            .catch(function () { /* asked again on the next visit */ });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+    } else {
+        start();
+    }
+})();
+</script>

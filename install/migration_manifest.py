@@ -61,6 +61,7 @@ MIGRATIONS = [
     'add_pay_types.sql',
     'add_summary_layout.sql',
     'add_payment_plans.sql',
+    'add_loaf_balance_check.sql',
 ]
 
 # install/sql/ holds only what a fresh install applies. The rollback scripts and

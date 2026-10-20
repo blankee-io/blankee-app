@@ -107,6 +107,9 @@ BASKET_COLUMNS = (
     'max_balance_hours', 'grant_hours', 'accrual_hours',
     'carryover_mode', 'carryover_cap_hours', 'low_balance_hours',
     'starting_hours', 'starting_date', 'accrual_basis',
+    # The last payday the basket was checked against the employer's figure
+    # (loaf_app._payday_checks). Written only by that check; no form sends it.
+    'balance_checked_on',
 )
 
 ENTRY_COLUMNS = (
