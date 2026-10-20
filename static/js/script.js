@@ -2862,9 +2862,23 @@ function resolveAllBucketRows(bodyEl, action, close) {
     var bulkRow = bodyEl.querySelector(".bucket-prompt-bulk");
     if (bulkRow) { bulkRow.classList.add("bucket-prompt-busy"); }
 
+    // The full-page spinner from the first answer to the last: a long list
+    // takes a while one row at a time, and nothing else on the page should
+    // be touched until it has been answered (asked for on 2026-10-19).
+    var loading = document.getElementById("loading-screen");
+    // Over the dialog it answers for (.loading-screen-over-dialogs), which
+    // sits far above the spinner's usual place.
+    function spinner(on) {
+        if (!loading) { return; }
+        loading.classList.toggle("loading-screen-over-dialogs", on);
+        loading.style.display = on ? "flex" : "none";
+    }
+    spinner(true);
+
     function next() {
         var row = rows.shift();
         if (!row) {
+            spinner(false);
             close(true);
             return;
         }
@@ -2891,6 +2905,11 @@ function resolveAllBucketRows(bodyEl, action, close) {
                     if (ok) { row.remove(); } else { row.classList.remove("bucket-prompt-busy"); }
                     next();
                 });
+            }).catch(function () {
+                // Making its category failed: this row waits for a per-row
+                // answer, and the rest carry on - the spinner must not stay up.
+                row.classList.remove("bucket-prompt-busy");
+                next();
             });
             return;
         }
@@ -2926,6 +2945,7 @@ function resolveAllBucketRows(bodyEl, action, close) {
             next();
           })
           .catch(function () {
+            spinner(false);
             row.classList.remove("bucket-prompt-busy");
             if (bulkRow) { bulkRow.classList.remove("bucket-prompt-busy"); }
             showToast("Could not reach the server.", "error");

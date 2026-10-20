@@ -17280,6 +17280,12 @@ tr[data-collapsed] {
     z-index: 9010;
 }
 
+/* The full-page spinner over these dialogs, while the entries prompt's "to
+   all" buttons work through the list (resolveAllBucketRows). */
+.loading-screen.loading-screen-over-dialogs {
+    z-index: 9020;
+}
+
 #generic-confirm-modal .modal-content,
 .generic-confirm-stacked .modal-content {
     max-width: 400px;

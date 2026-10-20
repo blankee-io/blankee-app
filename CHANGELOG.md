@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.65.2 — 2026-10-19
+
+### Changed
+
+- **The entries prompt's Yes to all, No to all and Skip all show the
+  loading screen until they are done.** They answer the list one entry at
+  a time, which takes a moment on a long one; the page is covered until
+  the last is answered.
+
 ## 1.65.1 — 2026-10-18
 
 ### Fixed
