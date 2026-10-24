@@ -8,6 +8,19 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.67.1 — 2026-10-23
+
+### Fixed
+
+- **A card's interest charge from the bank can be put in Interest Charge.**
+  The entries prompt left the card's Interest Charge category out of the
+  list, so the real charge the bank posted could only go somewhere else -
+  and the card then carried it and the projected one. It is offered now for
+  that card's own rows, and confirming it there answers that statement: the
+  projected charge goes and the card is charged the bank's figure once, even
+  when the bank posts it a day or two after the statement closes. The
+  guesser can learn it too.
+
 ## 1.67.0 — 2026-10-23
 
 ### Added

@@ -613,13 +613,54 @@ def _memory_pick(user_id: int, row: Dict[str, Any], plan: Dict[str, Any]) -> Opt
     return None
 
 
+def _interest_statement(user_id: int, table: str, category_id: Optional[int], when: Any) -> Optional[str]:
+    """
+    For an entry going into a card's Interest Charge category: the statement
+    date it is the charge for - the card's last statement day on or before
+    the day it posted. None for any other category.
+
+    The balance walk keys a real interest charge to its statement by
+    original_date (or, without one, the day it sits on), and a statement with
+    a real charge is not projected again (update_daily_ca_totals). A bank that
+    posts the charge a day after the statement closes would otherwise leave
+    that statement unanswered, and the card would carry the real charge and
+    the projected one.
+    """
+    if table != 'c_expense_entries' or category_id is None:
+        return None
+    import redis_manager
+    cats = redis_manager.get_table_cache('c_expense_categories', user_id) or []
+    cat = next((c for c in cats if str(c.get('id')) == str(category_id)), None)
+    if not cat or not _flag(cat.get('is_interest')):
+        return None
+    day = _parse(when)
+    accounts = redis_manager.get_table_cache('credit_accounts', user_id) or []
+    account = next((a for a in accounts if str(a.get('id')) == str(cat.get('account_id'))), None)
+    setting = (account or {}).get('statement_day')
+    if day is None or not setting:
+        return None
+    try:
+        from app import _previous_cycle_date_before
+        statement = _previous_cycle_date_before(setting, day + timedelta(days=1))
+    except Exception as e:
+        log_warning(logger, TAG, f'user {user_id}: no statement date for an interest charge on {when}: {e}')
+        return None
+    return statement.isoformat() if statement else None
+
+
 def _category_options(user_id: int, table: str, credit_account_id: Optional[int]) -> List[Dict[str, Any]]:
     """
     [{'id', 'name', <icon flags>}] a row on `table` may be sorted into: the
-    direction's categories, or a card's own. Hidden categories, interest
-    charges, bundles and the starting balance are nobody's to choose - the
-    same set every category picker in the app offers. The flags are what
-    the picker draws its icons from.
+    direction's categories, or a card's own. Hidden categories, bundles and
+    the starting balance are nobody's to choose - the same set every category
+    picker in the app offers. The flags are what the picker draws its icons
+    from.
+
+    A card's Interest Charge is offered for that card's own rows, unlike the
+    other pickers: the charge the bank posts is the real figure for the one
+    the card projects, and confirming it there is what answers that
+    statement (_interest_statement). Everywhere else interest is projected,
+    not typed.
     """
     import redis_manager
     from bucket_confirmation import ENTRY_TABLES as CATEGORY_TABLES
@@ -631,7 +672,9 @@ def _category_options(user_id: int, table: str, credit_account_id: Optional[int]
             cid = int(c['id'])
         except (TypeError, ValueError, KeyError):
             continue
-        if _flag(c.get('hidden')) or _flag(c.get('is_interest')) or _flag(c.get('is_bundle')):
+        if _flag(c.get('hidden')) or _flag(c.get('is_bundle')):
+            continue
+        if _flag(c.get('is_interest')) and table != 'c_expense_entries':
             continue
         if (c.get('name') or '') == 'Starting Balance':
             continue
@@ -641,7 +684,8 @@ def _category_options(user_id: int, table: str, credit_account_id: Optional[int]
                     'is_recurring': _flag(c.get('is_recurring')),
                     'is_credit_account': _flag(c.get('is_credit_account')),
                     'is_savings': _flag(c.get('is_savings')),
-                    'is_auto_adjustment': _flag(c.get('is_auto_adjustment'))})
+                    'is_auto_adjustment': _flag(c.get('is_auto_adjustment')),
+                    'is_interest': _flag(c.get('is_interest'))})
     return out
 
 
@@ -834,8 +878,9 @@ def apply_guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
         if not ok or change is None:
             log_warning(logger, TAG, f"user {user_id}: forecast {forecast['entry_id']} could not be taken: {msg}")
             return None
-        update_entry(table, forecast['entry_id'], {'date': when, 'original_date': None, 'pending': 1,
-                                                   'auto_confirmed': 0}, user_id)
+        update_entry(table, forecast['entry_id'], {'date': when, 'pending': 1, 'auto_confirmed': 0,
+                                                   'original_date': _interest_statement(user_id, table, cid, when)},
+                     user_id)
         _sync_mirror_payment(user_id, entry_type, cid, when, snapshot.get('date'))
         return dict(mark, imported_to_entry_id=int(forecast['entry_id']), depleted_bucket=snapshot, **suggestion)
 
@@ -850,7 +895,8 @@ def apply_guess(user_id: int, row: Dict[str, Any], plan: Dict[str, Any],
             snapshot = _snapshot(table, bucket)
     except Exception as e:
         log_warning(logger, TAG, f'user {user_id}: could not look ahead at the forecast for {table}/{cid}: {e}')
-    data = {'category_id': cid, 'date': when, 'original_date': None, 'amount': amount, 'recurring_id': None,
+    data = {'category_id': cid, 'date': when, 'original_date': _interest_statement(user_id, table, cid, when),
+            'amount': amount, 'recurring_id': None,
             'is_bucket': 0, 'original_amount': None, 'processed': 1, 'auto_confirmed': 0,
             'is_auto_adjustment': 0, 'pending': 1}
     if table != 'income_entries':
@@ -960,7 +1006,15 @@ def create_entries(user_id: int) -> Dict[str, Any]:
             continue
         updates.append(update)
         cards = cards or plan['credit_account_id'] is not None
-        earliest = when if earliest is None or when < earliest else earliest
+        # An interest charge answers its statement, which may be a day or two
+        # before it posted; the recalculation has to start there for the
+        # projected charge on that statement to go (_interest_statement).
+        first = when
+        if rec is None:
+            statement = _interest_statement(user_id, plan['table'], g.get('category_id'), when)
+            if statement and statement < first:
+                first = statement
+        earliest = first if earliest is None or first < earliest else earliest
     if updates:
         bulk_upsert_linked_transactions(updates, user_id)
     return {'imported': len(updates), 'skipped': skipped, 'cards': cards, 'earliest': earliest}
@@ -1345,6 +1399,9 @@ def confirm(user_id: int, transaction_id: str, entry_id: int, entry_type: str,
     target['processed'] = 1
     if moved:
         target['category_id'] = new_cid
+        # The statement an interest charge answers, or nothing - a bank row
+        # is a record of money that moved, never a forecast carried forward.
+        target['original_date'] = _interest_statement(user_id, table, new_cid, when)
     redis_manager.set_table_cache(table, user_id, entries, mark_dirty=True)
 
     restored = None
@@ -1394,7 +1451,13 @@ def confirm(user_id: int, transaction_id: str, entry_id: int, entry_type: str,
         bulk_upsert_linked_transactions([row_update], user_id)
 
     try:
-        recalc(user_id, when, cards=(table == 'c_expense_entries'))
+        # From the statement an interest charge answers when it is earlier
+        # than the day it posted - see _interest_statement.
+        since = when
+        statement = _iso(target.get('original_date')) if target.get('original_date') else None
+        if statement and statement < since:
+            since = statement
+        recalc(user_id, since, cards=(table == 'c_expense_entries'))
     except Exception as e:
         log_exception(logger, TAG, f'user {user_id}: recalculation after confirming failed: {e}')
 
