@@ -15861,7 +15861,53 @@ def _summary_bill_sources(user_id):
             recurring_c_expense_records = list(cursor.fetchall())
             cursor.close()
     
+    # Income, which the list shows beside the bills (2026-10-23): the
+    # recurring income categories, their entries and bucket records, and the
+    # templates - read the same way as the expense side above.
+    all_income_categories = _get_categories_from_redis('income_categories', user_id)
+    if all_income_categories is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, name, is_recurring, hidden
+                FROM income_categories
+                WHERE user_id = %s
+                ORDER BY display_order DESC
+            """, (user_id,))
+            all_income_categories = list(cursor.fetchall())
+            cursor.close()
+    income_categories = [c for c in all_income_categories if c.get('is_recurring') == 1]
+    income_entries = _get_entries_from_redis('income_entries', user_id)
+    if income_entries is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT ie.id, ie.category_id, ie.date, ie.amount, ie.is_bucket, ie.original_amount
+                FROM income_entries ie
+                JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ic.user_id = %s
+            """, (user_id,))
+            income_entries = list(cursor.fetchall())
+            cursor.close()
+    income_bucket_records = _get_entries_from_redis('recurring_income_buckets', user_id) or []
+    recurring_income_records = _get_entries_from_redis('recurring_income', user_id)
+    if recurring_income_records is None:
+        with get_db_pool().get_connection() as conn:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT id, category_id, wage_bill, amount, cadence_interval, cadence_unit,
+                       start_date, end_date, weekdays, monthly_days, yearly_day, yearly_month
+                FROM recurring_income
+                WHERE user_id = %s
+            """, (user_id,))
+            recurring_income_records = list(cursor.fetchall())
+            cursor.close()
+
     return {
+        'income_categories': income_categories,
+        'income_entries': income_entries,
+        'income_bucket_records': income_bucket_records,
+        'recurring_income_records': recurring_income_records,
         'all_expense_categories': all_expense_categories,
         'expense_categories': expense_categories,
         'expense_entries': expense_entries,
@@ -15917,15 +15963,32 @@ def _summary_bill_rows(user_id, src):
                                  templates=_templates)
     _card_rows = upcoming_rows(c_expense_categories, c_expense_entries, c_expense_bucket_records, _c_wage_bill, _today,
                                account_names=_card_names, templates=_c_templates)
-    # The key a pin or a filter names the row by - the two tables' ids overlap.
+    # Income beside the bills (2026-10-23), built the same way: Wages is paid
+    # in one go like a bill, Variable income is a bucket that fills. flow
+    # tells the two apart for the page, the widget and the filter.
+    _i_wage_bill = {int(r['category_id']): int(r.get('wage_bill') or 0)
+                    for r in (src.get('recurring_income_records') or []) if r.get('category_id') is not None}
+    _i_templates = {}
+    for r in (src.get('recurring_income_records') or []):
+        if r.get('category_id') is not None:
+            _i_templates.setdefault(int(r['category_id']), []).append(r)
+    _income_rows = upcoming_rows(src.get('income_categories'), src.get('income_entries'),
+                                 src.get('income_bucket_records'), _i_wage_bill, _today,
+                                 templates=_i_templates)
+    # The key a pin or a filter names the row by - the tables' ids overlap.
     for _row in _budget_rows:
         _row['key'] = _summary_layout.bill_key('e', _row['category_id'])
+        _row['flow'] = 'expense'
     for _row in _card_rows:
         _row['key'] = _summary_layout.bill_key('c', _row['category_id'])
+        _row['flow'] = 'expense'
+    for _row in _income_rows:
+        _row['key'] = _summary_layout.bill_key('i', _row['category_id'])
+        _row['flow'] = 'income'
     # What the Paid / Unpaid filters read, worked out against the person's own today.
-    for _row in _budget_rows + _card_rows:
+    for _row in _budget_rows + _card_rows + _income_rows:
         _row['paid_this_month'], _row['due_this_month'] = month_status(_row, _today)
-    bucket_rows = sort_rows(_budget_rows + _card_rows)
+    bucket_rows = sort_rows(_budget_rows + _card_rows + _income_rows)
 
     # "as of": the day the bank has spoken for - the same last sync the
     # entry routes lock up to (bank_import.locked_day). Paid or not on a
@@ -17114,6 +17177,11 @@ def widget_upcoming_bills():
     pinned = _summary_layout.parse(user_data.get('summary_layout'))['bills']['pinned']
 
     rows, as_of = _summary_bill_rows(user_id, _summary_bill_sources(user_id))
+    # Income rows only for an app that knows them (?income=1, 2026-10-23): a
+    # widget from before decodes every row as a bill and would show a
+    # paycheck as one.
+    if request.args.get('income') != '1':
+        rows = [r for r in rows if r.get('flow') != 'income']
     for row in rows:
         row['pinned'] = row['key'] in pinned
     rows = [r for r in rows if r['pinned']] + [r for r in rows if not r['pinned']]
@@ -17129,6 +17197,7 @@ def widget_upcoming_bills():
         'as_of': as_of,
         'rows': [{
             'key': r['key'],
+            'flow': r.get('flow') or 'expense',
             'name': r.get('name') or '',
             'account_name': r.get('account_name'),
             'is_bill': bool(r.get('is_bill')),

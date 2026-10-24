@@ -14739,6 +14739,12 @@ transform: scale(1.2);
 
    Grey on white, now that the row is white: the badge was white-on-tint and
    would otherwise vanish into the row it sits on. */
+/* Income coming in, beside the bills (2026-10-23): teal, the colour income
+   wears everywhere else in the app. */
+.summary-row-income {
+    background: var(--primary-lighter);
+}
+
 .summary-row-credit .summary-category-name .account-label {
     background: var(--secondary-lighter);
     color: var(--text-dark);

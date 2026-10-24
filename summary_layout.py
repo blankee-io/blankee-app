@@ -9,7 +9,7 @@ users row. Pure: nothing here touches Redis or MySQL.
       "order":  ["bills", "balance", "ca:12", "savings"],
       "hidden": ["savings", "buffer"],
       "bills":  {"pinned": ["e:45", "c:12"],
-                 "filter": {"source": "card", "kind": "all", "status": "unpaid"}}
+                 "filter": {"flow": "all", "source": "card", "kind": "all", "status": "unpaid"}}
     }
 
 order   the right column's sections, top to bottom. A section missing from
@@ -19,12 +19,15 @@ order   the right column's sections, top to bottom. A section missing from
 hidden  sections shown only while arranging. 'buffer' is the left column's
         Short-term Buffer card: it can be hidden, not moved.
 bills   pinned: Upcoming Bills rows by key - 'e:<expense category id>' for
-        the budget's, 'c:<card expense category id>' for a card's - which sit
-        at the top. A bill that no longer exists simply never matches.
+        the budget's, 'c:<card expense category id>' for a card's,
+        'i:<income category id>' for an income - which sit at the top. A row
+        that no longer exists simply never matches.
         filter: which rows the list shows, by kind rather than by name -
-        source (the budget's or a card's), kind (a bill, paid in one go, or a
-        bucket spent down) and status this month (summary_buckets.
-        month_status). 'all' on each is the list unfiltered.
+        flow (money going out or coming in, 2026-10-23), source (the
+        budget's or a card's; an income is neither, and is not filtered by
+        it), kind (paid in one go, or a bucket spent down) and status this
+        month (summary_buckets.month_status). 'all' on each is the list
+        unfiltered.
 
 Anything malformed is dropped rather than refused: the page posts the whole
 layout on every change, and one bad key must not lose the rest.
@@ -34,9 +37,10 @@ import re
 
 SECTION = re.compile(r'^(balance|savings|bills|ca:\d{1,10})$')
 HIDEABLE = re.compile(r'^(buffer|balance|savings|bills|ca:\d{1,10})$')
-BILL = re.compile(r'^[ec]:\d{1,10}$')
+BILL = re.compile(r'^[eci]:\d{1,10}$')
 LIMIT = 500
 FILTERS = {
+    'flow': ('all', 'expense', 'income'),
     'source': ('all', 'budget', 'card'),
     'kind': ('all', 'bill', 'bucket'),
     'status': ('all', 'unpaid', 'paid'),
@@ -80,5 +84,6 @@ def parse(raw):
 
 
 def bill_key(kind, category_id):
-    """'e:' for the budget's bills, 'c:' for a card's - see the module docstring."""
-    return ('c:' if kind == 'c' else 'e:') + str(int(category_id))
+    """'e:' for the budget's bills, 'c:' for a card's, 'i:' for an income - see
+    the module docstring."""
+    return {'c': 'c:', 'i': 'i:'}.get(kind, 'e:') + str(int(category_id))

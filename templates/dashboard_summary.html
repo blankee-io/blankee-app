@@ -1170,7 +1170,10 @@
         // from what the server worked out for it: the day it sits on, the
         // figure, what is left of it, and for a bill whether it was paid.
         // `compact` shrinks date/text for the side-by-side display.
-        function renderBucketSideHTML(side, isBill, compact) {
+        // An income row (isIncome) says the same in its own words: Received
+        // and Expected rather than Paid and Unpaid, received and to come
+        // rather than spent and remaining.
+        function renderBucketSideHTML(side, isBill, compact, isIncome) {
             if (!side) {
                 return `<div class="summary-no-bucket"><span>—</span></div>`;
             }
@@ -1181,18 +1184,20 @@
 
             if (isBill) {
                 if (side.paid) {
+                    const paidWord = isIncome ? 'Received' : 'Paid';
                     return `
                         <div class="summary-week-label">${dateLabel}</div>
                         <div class="summary-bill-status">
-                            <span class="status-paid" title="Paid"><i class="fa-solid fa-hand-holding-dollar"></i>${compact ? '' : ' Paid'}</span>
+                            <span class="status-paid" title="${paidWord}"><i class="fa-solid fa-hand-holding-dollar"></i>${compact ? '' : ' ' + paidWord}</span>
                             ${compact ? '' : `<span class="bill-amount paid">${formatCurrency(originalAmount)}</span>`}
                         </div>
                     `;
                 }
+                const unpaidWord = isIncome ? 'Expected' : 'Unpaid';
                 return `
                     <div class="summary-week-label">${dateLabel}</div>
                     <div class="summary-bill-status">
-                        <span class="status-unpaid" title="Unpaid"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i>${compact ? '' : ' Unpaid'}</span>
+                        <span class="status-unpaid" title="${unpaidWord}"><i class="fa-kit fa-solid-hand-holding-dollar-slash"></i>${compact ? '' : ' ' + unpaidWord}</span>
                         ${compact ? '' : `<span class="bill-amount unpaid">${formatCurrency(originalAmount)}</span>`}
                     </div>
                 `;
@@ -1204,9 +1209,9 @@
 
             let remainingText;
             if (remaining < 0) {
-                remainingText = `<span class="remaining-amount overspent">${formatCurrency(Math.abs(remaining))} overspent</span>`;
+                remainingText = `<span class="remaining-amount overspent">${formatCurrency(Math.abs(remaining))} ${isIncome ? 'more than expected' : 'overspent'}</span>`;
             } else {
-                remainingText = `<span class="remaining-amount">${formatCurrency(remaining)} remaining</span>`;
+                remainingText = `<span class="remaining-amount">${formatCurrency(remaining)} ${isIncome ? 'to come' : 'remaining'}</span>`;
             }
 
             return `
@@ -1216,7 +1221,7 @@
                         <div class="bucket-bar ${isOver ? 'bucket-bar-over' : 'bucket-bar-ok'}" style="width: ${percentage}%"></div>
                     </div>
                     <div class="summary-amounts">
-                        <span class="spent-amount">${formatCurrency(spent)} spent</span>
+                        <span class="spent-amount">${formatCurrency(spent)} ${isIncome ? 'received' : 'spent'}</span>
                         ${remainingText}
                     </div>
                 </div>
@@ -1228,8 +1233,9 @@
             const row = document.createElement('div');
             // Budget and card bills share one list now, so each row has to say
             // which it is on its own - the section heading no longer does it.
-            row.className = 'summary-row ' +
-                (item.account_name ? 'summary-row-credit' : 'summary-row-budget');
+            const isIncome = item.flow === 'income';
+            row.className = 'summary-row ' + (isIncome ? 'summary-row-income'
+                : (item.account_name ? 'summary-row-credit' : 'summary-row-budget'));
 
             // The pin: on the left of every row, so pinning is one tap from
             // the list itself. Pinned rows lead the list (renderExpenseBuckets).
@@ -1262,11 +1268,11 @@
             progressContainer.innerHTML = `
                 <div class="bucket-dual">
                     <div class="bucket-side bucket-prev">
-                        ${renderBucketSideHTML(item.last, item.is_bill, true)}
+                        ${renderBucketSideHTML(item.last, item.is_bill, true, isIncome)}
                     </div>
                     <div class="bucket-dual-divider"></div>
                     <div class="bucket-side bucket-cur">
-                        ${renderBucketSideHTML(item.upcoming, item.is_bill, true)}
+                        ${renderBucketSideHTML(item.upcoming, item.is_bill, true, isIncome)}
                     </div>
                 </div>
             `;
@@ -1293,7 +1299,7 @@
             container.innerHTML = '';
             updateBillsFilterCount();
             if (!bucketRows.length) {
-                container.innerHTML = '<div class="summary-empty">No recurring expense categories</div>';
+                container.innerHTML = '<div class="summary-empty">Nothing recurring yet</div>';
                 return;
             }
             const shown = bucketRows.filter(billMatches);
@@ -1341,6 +1347,7 @@
         // measured against the person's own today; buckets are neither, so
         // Paid or Unpaid shows bills only.
         const BILL_FILTERS = [
+            {name: 'flow', label: 'Type', choices: [['all', 'All'], ['expense', 'Bills'], ['income', 'Income']]},
             {name: 'source', label: 'Paid from', choices: [['all', 'All'], ['budget', 'Budget'], ['card', 'Credit cards']]},
             {name: 'kind', label: 'Kind', choices: [['all', 'All'], ['bill', 'Bills'], ['bucket', 'Buckets']]},
             {name: 'status', label: 'This month', choices: [['all', 'All'], ['unpaid', 'Unpaid'], ['paid', 'Paid']]}
@@ -1348,9 +1355,14 @@
 
         function billMatches(item) {
             const f = pageLayout.bills.filter;
+            const income = item.flow === 'income';
             const card = item.key.indexOf('c:') === 0;
-            if (f.source === 'budget' && card) { return false; }
-            if (f.source === 'card' && !card) { return false; }
+            if (f.flow === 'expense' && income) { return false; }
+            if (f.flow === 'income' && !income) { return false; }
+            // Paid from is a question about bills: an income is paid from
+            // neither, so it is left alone by it.
+            if (!income && f.source === 'budget' && card) { return false; }
+            if (!income && f.source === 'card' && !card) { return false; }
             if (f.kind === 'bill' && !item.is_bill) { return false; }
             if (f.kind === 'bucket' && item.is_bill) { return false; }
             if (f.status === 'unpaid' && !item.due_this_month) { return false; }
@@ -2678,7 +2690,7 @@
                 { selector: '#trend-indicator', text: 'The arrow shows whether your balance is trending up or down. If you see a red <span class=\"tutorial-negative-badge\">!</span> badge on the header, it means your balance goes negative at some point in the future.' },
                 { selector: '[data-widget^="ca:"]', text: 'A trend for each credit account, the same way as your checking balance.' },
                 { selector: '#savings-graph-section', text: 'Your savings trend over time.' },
-                { selector: '#expense-buckets-section', text: 'Everything due, wherever it is paid from \u2014 your budget and every card in one list, soonest first. Rows tinted orange come out of your budget; grey ones come off a card and carry its name.' }
+                { selector: '#expense-buckets-section', text: 'Everything due, wherever it is paid from \u2014 your budget and every card in one list, soonest first. Rows tinted orange come out of your budget; grey ones come off a card and carry its name; teal ones are income coming in.' }
             ], { onComplete: function() { window.scrollTo({ top: 0, behavior: 'smooth' }); } });
 
             // Drag-to-scroll functionality

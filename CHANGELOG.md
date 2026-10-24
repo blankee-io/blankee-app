@@ -8,6 +8,19 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.67.0 — 2026-10-23
+
+### Added
+
+- **Income in Upcoming Bills.** The Summary page's list shows your recurring
+  income beside the bills, tinted teal: a paycheck reads Received or
+  Expected, variable income how much has come in and how much is still to
+  come. The filter has a new Type choice - All, Bills or Income - and
+  "Paid from" now applies to bills only. Income can be pinned like a bill.
+- The iOS widget's feed (`/api/widget/upcoming-bills`) sends the income rows
+  to an app that asks for them (`?income=1`), each row saying whether it is
+  income or a bill; an older app still gets bills only.
+
 ## 1.66.0 — 2026-10-19
 
 ### Added
