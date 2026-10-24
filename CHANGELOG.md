@@ -8,6 +8,14 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.67.2 — 2026-10-24
+
+### Fixed
+
+- **One "Due today" notification at a time.** Each day's reminder of the
+  bills due now replaces the one before, read or not, instead of piling up
+  in the list. Any already stacked up go the next time one is sent.
+
 ## 1.67.1 — 2026-10-23
 
 ### Fixed

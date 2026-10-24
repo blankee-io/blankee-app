@@ -180,6 +180,29 @@ def message(items, day=None):
     return '\n'.join(lines)
 
 
+def _clear_previous(user_id):
+    """
+    Remove the reminders already sent, read or not: today's replaces them, so
+    there is only ever one "Due today" in the list (asked for on 2026-10-24)
+    rather than a day's worth stacking up behind it.
+    """
+    try:
+        with get_db_pool().get_cursor(commit=True) as cursor:
+            cursor.execute("DELETE FROM notifications WHERE user_id = %s AND type = %s", (user_id, KIND))
+            removed = cursor.rowcount
+    except Exception as e:
+        log_warning(logger, TAG, f'user {user_id}: could not clear the earlier reminders: {e}')
+        return 0
+    if removed:
+        try:
+            import redis_manager
+            if redis_manager._redis_client:
+                redis_manager._redis_client.delete(f'notifications:v1:{user_id}')
+        except Exception:
+            pass
+    return removed
+
+
 def raise_if_due(user_id, local_now):
     """
     Send today's reminder if it is on, the hour has come and nothing has
@@ -205,6 +228,7 @@ def raise_if_due(user_id, local_now):
         return False
     try:
         from app import add_notification
+        _clear_previous(user_id)
         add_notification(user_id, message(items, local_date), kind=KIND, notification_type=KIND)
     except Exception as e:
         log_warning(logger, TAG, f'user {user_id}: could not send the reminder: {e}')
