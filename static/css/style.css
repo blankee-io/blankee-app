@@ -10386,28 +10386,20 @@ transform: scale(1.2);
 
 /* Opening ---------------------------------------------------------------------
 
-   A dialog grows out of whatever was last clicked, which is the control that
-   opened it, while its sheet fades the page behind it.
+   A dialog grows a little into place while its sheet fades the page behind
+   it - and one opened by a press grows out of the very spot that was
+   pressed, from almost nothing (.modal-from-press below).
 
    Driven by @keyframes on the dialog rather than by script, because a CSS
    animation plays whenever an element goes from display:none to shown - and
    every overlay in this app is opened exactly that way, by an inline style
-   rather than a class. So nothing at those call sites had to change, and an
-   overlay added later gets this for free by carrying one of these classes.
-
-   The origin comes from two custom properties that script.js sets on :root
-   from the last pointer or keyboard activation. The 50% terms resolve against
-   the dialog's own box and the viewport terms against the screen, so
-   `click - 50vw + 50%` is the click's distance from the dialog's left edge -
-   exact for a dialog centred horizontally, which margin:auto makes all of
-   them. Vertically it is approximate, since a tall dialog starts at the top
-   rather than centring; close enough for a 160ms scale, and it falls back to
-   the middle of the screen when nothing has been clicked.
+   or a class. So nothing at those call sites had to change, and an overlay
+   added later gets this for free by carrying one of these classes.
 
    Closing is not here. An element set to display:none is gone on the same
    frame, so animating it out means holding the element open past the moment
-   the code that closed it thinks it is shut - which is a change at every one
-   of those call sites, not a stylesheet. */
+   the code that closed it thinks it is shut - see "Closing an overlay" in
+   script.js. */
 @keyframes modal-grow-in {
     from { opacity: 0; transform: scale(0.94); }
     to   { opacity: 1; transform: scale(1); }
@@ -10442,10 +10434,33 @@ transform: scale(1.2);
 .add-credit-account-modal-content,
 .change-password-modal-content,
 .test-purchase-modal-content {
-    transform-origin:
-        calc(var(--open-x, 50vw) - 50vw + 50%)
-        calc(var(--open-y, 50vh) - 50vh + 50%);
     animation: modal-grow-in 0.16s ease-out;
+}
+
+/* Opened by a press (script.js, "Opening an overlay"): out of the pressed
+   spot, which script.js measures into --press-x/--press-y in the dialog's
+   own pixels as it opens. A short fade at the start so the first frames are
+   not a hard dot. Before "Closing", so .modal-closing wins on a tie. */
+@keyframes modal-press-in {
+    0%   { opacity: 0; transform: scale(0.05); }
+    35%  { opacity: 1; }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+.modal-from-press .modal-content,
+.modal-from-press .modal-content-center,
+.modal-from-press .alert-modal-content,
+.modal-from-press .center-modal-content,
+.modal-from-press .modal-content-setup-profile,
+.modal-from-press .modal-content-category-recommendations,
+.modal-from-press .footer-modal-content,
+.modal-from-press .dashboard-d-modal-content,
+.modal-from-press .category-edit-modal-content,
+.modal-from-press .add-credit-account-modal-content,
+.modal-from-press .change-password-modal-content,
+.modal-from-press .test-purchase-modal-content {
+    transform-origin: var(--press-x, 50%) var(--press-y, 50%);
+    animation: modal-press-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 
 /* Closing ---------------------------------------------------------------------

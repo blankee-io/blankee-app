@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.70.0 — 2026-10-31
+
+### Changed
+
+- **Dialogs grow out of what opened them.** A dialog opened by a click, a
+  tap, or Enter on a button now grows out of the exact spot that was
+  pressed. A dialog that opens by itself - on load, after a sync - still
+  eases in from its centre.
+
 ## 1.69.0 — 2026-10-31
 
 ### Changed

@@ -97,9 +97,9 @@ function setupCategoryDuplicateCheck(inputEl, getCats, opts) {
  */
 /* ── Where a dialog grows from ───────────────────────────────────────────────
  *
- * Records the last activation point so the opening animation can start there
- * rather than in the middle of the screen - see "Opening" in style.css, which
- * reads these two properties off :root.
+ * Records the last press - a click, a tap, or Enter or Space on a focused
+ * control - so a dialog that press opens can grow out of the exact spot (see
+ * "Opening an overlay" below, and "Opening" in style.css).
  *
  * Capture phase, so it runs before the handler that opens the dialog. Pointer
  * and keyboard both, because a control reached by Tab and pressed with Enter
@@ -107,13 +107,13 @@ function setupCategoryDuplicateCheck(inputEl, getCats, opts) {
  * grow the dialog out of wherever the mouse happened to be left.
  *
  * Nothing here knows which dialog is about to open, or whether one is. It only
- * keeps the answer ready for the stylesheet.
+ * keeps the answer ready.
  */
+var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
+
 (function () {
     function remember(x, y) {
-        var root = document.documentElement;
-        root.style.setProperty("--open-x", Math.round(x) + "px");
-        root.style.setProperty("--open-y", Math.round(y) + "px");
+        modalPress = { x: x, y: y, at: Date.now() };
     }
 
     document.addEventListener("pointerdown", function (event) {
@@ -191,10 +191,59 @@ function setupCategoryDuplicateCheck(inputEl, getCats, opts) {
         el.addEventListener("animationend", finish);
     }
 
+    // Opening an overlay. One opened by a press - within PRESS_WINDOW_MS of
+    // it, which leaves room for a fetch in between - grows out of the very
+    // spot that was pressed, from almost nothing (2026-10-31). One that
+    // opens by itself - on load, from a timer, after a sync - has no press
+    // behind it and keeps the quiet grow from its centre. A press opens one
+    // dialog this way at most.
+    //
+    // This runs as the overlay's display changes, before the browser paints
+    // it, so the dialog's position can be measured and the origin set exactly
+    // in its own pixels - a tall dialog that starts at the top of the screen
+    // included. offsetLeft/offsetTop rather than getBoundingClientRect: the
+    // latter includes the animation's own transform, which has begun by now.
+    var PRESS_WINDOW_MS = 2000;
+    var DIALOGS = ".modal-content, .modal-content-center, .alert-modal-content, .center-modal-content, .modal-content-setup-profile, .modal-content-category-recommendations, .footer-modal-content, .dashboard-d-modal-content, .category-edit-modal-content, .add-credit-account-modal-content, .change-password-modal-content, .test-purchase-modal-content";
+
+    function boxWithin(el, sheet) {
+        var x = 0, y = 0, n = el;
+        while (n && n !== sheet) {
+            x += n.offsetLeft;
+            y += n.offsetTop;
+            n = n.offsetParent;
+        }
+        if (n !== sheet) { return null; }
+        var r = sheet.getBoundingClientRect();
+        return {
+            left: r.left + sheet.clientLeft + x - sheet.scrollLeft,
+            top: r.top + sheet.clientTop + y - sheet.scrollTop
+        };
+    }
+
+    function opened(sheet) {
+        sheet.classList.remove("modal-from-press");
+        var press = modalPress;
+        if (!press || Date.now() - press.at > PRESS_WINDOW_MS) { return; }
+        if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) { return; }
+        var dialog = sheet.querySelector(DIALOGS);
+        var box = dialog && boxWithin(dialog, sheet);
+        if (!box) { return; }
+        modalPress = null;
+        dialog.style.setProperty("--press-x", Math.round(press.x - box.left) + "px");
+        dialog.style.setProperty("--press-y", Math.round(press.y - box.top) + "px");
+        sheet.classList.add("modal-from-press");
+    }
+
     function inspect(el) {
         if (!el || el.__modalPhase) { return; }
         var display = getComputedStyle(el).display;
-        if (display !== "none") { el.__modalShown = display; return; }
+        if (display !== "none") {
+            var wasShown = el.__modalShown;
+            el.__modalShown = display;
+            if (!wasShown) { opened(el); }
+            return;
+        }
         if (!el.__modalShown) { return; }   // never seen open; nothing to play
 
         // A dialog that animates its own exit opts out, because playOut works
