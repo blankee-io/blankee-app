@@ -19087,36 +19087,25 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
    on where the dialog happens to be. Everything about how it moves - the
    duration, the easing, how small it gets - is here. The 420ms matches
    BUCKET_MINIMISE_MS in script.js; change one and change the other, or the
-   bubble pops before the dialog has finished arriving. */
-/* No shared grow-in. This dialog animates its own entry - it comes out of the
-   corner bubble over 420ms - and the two cannot both run.
+   bubble pops before the dialog has finished arriving.
 
-   A CSS animation beats a transform for as long as it plays, so modal-grow-in
-   simply won: the dialog faded in at FULL SIZE for its 160ms, then snapped to
-   the corner the instant the animation ended, and only then grew out of it.
-   On, off, then the animation - which is exactly how it looked.
-
-   Only the content. The sheet keeps modal-sheet-in, because the backdrop
-   fading up behind is right either way and nothing here is fighting it. */
+   Only the leaving. It arrives the way every dialog does - out of the press
+   that opened it, or from its centre when it opens by itself ("Opening"
+   above) - which on 2026-10-31 replaced its own flight out of the corner. */
 .bucket-prompt-modal .modal-content {
-    animation: none;
     transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1),
                 opacity 420ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Both directions share one collapsed state: shrunk to nothing at the corner
-   where the bubble sits. Closing transitions into it, opening out of it, so
-   the two cannot drift apart. */
-.bucket-prompt-modal.bucket-prompt-minimising .modal-content,
-.bucket-prompt-modal.bucket-prompt-expanding .modal-content {
+/* Shrunk to nothing at the corner where the bubble sits. */
+.bucket-prompt-modal.bucket-prompt-minimising .modal-content {
     transform: translate(var(--bucket-fly-x, 0), var(--bucket-fly-y, 0)) scale(0.08);
     opacity: 0;
 }
 
 /* The backdrop fades with it, rather than snapping away and leaving the
    dialog travelling across a page that has already brightened. */
-.bucket-prompt-modal.bucket-prompt-minimising,
-.bucket-prompt-modal.bucket-prompt-expanding {
+.bucket-prompt-modal.bucket-prompt-minimising {
     backdrop-filter: blur(0);
     -webkit-backdrop-filter: blur(0);
     transition: backdrop-filter 420ms ease, -webkit-backdrop-filter 420ms ease;
@@ -19141,8 +19130,7 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
    journey - the bubble simply appears. */
 @media (prefers-reduced-motion: reduce) {
     .bucket-prompt-modal .modal-content,
-    .bucket-prompt-modal.bucket-prompt-minimising,
-    .bucket-prompt-modal.bucket-prompt-expanding {
+    .bucket-prompt-modal.bucket-prompt-minimising {
         transition: none;
     }
 
@@ -19343,14 +19331,6 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 #generic-confirm-message:empty,
 #generic-confirm-message:empty {
     display: none;
-}
-
-/* Applied for a single frame so a starting position can be set without the
-   element animating into it. Without this the dialog transitions to its
-   collapsed state and the real animation cancels it a few frames later,
-   which looks like nothing happening at all. */
-.bucket-prompt-instant {
-    transition: none !important;
 }
 
 /* The bubble handing over. It swells first - acknowledging the click - then

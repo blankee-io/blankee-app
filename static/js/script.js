@@ -3114,17 +3114,10 @@ function showBucketPrompt(opts) {
                 modalClass: "bucket-prompt-modal",
                 // It leaves by flying into the corner - see
                 // minimiseBucketPrompt - so the shared fade must not follow it.
+                // It arrives the way every dialog does (2026-10-31): out of
+                // the press that opened it, or from its centre when it opens
+                // by itself - "Opening an overlay", near the top of this file.
                 selfExit: true,
-                // And it arrives the same way, so the first frame has to be
-                // the collapsed one. With no fly offsets set yet this is
-                // scale(0.08) and opacity 0 at the centre - invisible, which
-                // is all that is needed until prepareBucketExpand measures
-                // where the corner actually is.
-                beforeShow: function (modalEl, contentEl) {
-                    if (!contentEl) { return; }
-                    contentEl.classList.add("bucket-prompt-instant");
-                    modalEl.classList.add("bucket-prompt-expanding");
-                },
                 // Forwarded, not swallowed. Leaving this out was why the
                 // dialog vanished instead of shrinking into the corner: the
                 // hook existed and nothing ever handed it to the helper.
@@ -3147,10 +3140,10 @@ function showBucketPrompt(opts) {
                 // the ways out, and the X and escape still work.
                 hideCancel: true,
                 onReady: function (bodyEl, close) {
-                    // The bubble bounces, then the dialog grows out of it. Run
-                    // here rather than before the fetch, so the bubble survives
+                    // The bubble bounces away as the dialog opens. Run here
+                    // rather than before the fetch, so the bubble survives
                     // until the dialog is genuinely ready to take over.
-                    startBucketOpenSequence();
+                    bounceBucketLauncherOut();
                     // After the rows exist, before anyone reads them.
                     fitBucketTitles(bodyEl);
                     // Back from making a recurring category for a row: that
@@ -3396,9 +3389,9 @@ function bucketLauncher() {
             // several presses used to start several openings.
             if (bucketPromptIsOpen()) { return; }
             // The bounce at once, the moment it is pressed - not after the
-            // list has come back. The dialog grows out of where the bubble
-            // was as soon as the list is in hand (startBucketOpenSequence
-            // finds the bubble already on its way and does not wait again).
+            // list has come back. The dialog grows out of the press, so out
+            // of the bubble, as soon as the list is in hand (the bounce in
+            // onReady finds the bubble already on its way).
             var count = el.querySelector(".bucket-launcher-count");
             var before = count ? count.textContent : "";
             bounceBucketLauncherOut();
@@ -3700,106 +3693,6 @@ function bounceBucketLauncherOut() {
     return BUCKET_BOUNCE_MS;
 }
 
-function prepareBucketExpand() {
-    // Collapse the dialog onto the bubble immediately, with transitions off.
-    //
-    // Two reasons it has to happen now rather than when the growth starts.
-    // The dialog is already on screen by the time this runs, so anything later
-    // shows it full size first and then snaps small. And reading
-    // getBoundingClientRect below flushes styles, which makes the browser
-    // record the full-size box as the state to animate from - so the class
-    // must be applied while transitions are suppressed, or the dialog
-    // animates INTO the corner instead of out of it.
-    var modal = document.getElementById("generic-confirm-modal");
-    var content = modal && modal.querySelector(".modal-content");
-    var launcher = bucketLauncher();
-    if (!content) { return null; }
-
-    // Every path out of here that does NOT animate has to leave the dialog
-    // uncollapsed, because beforeShow has already collapsed it. Returning
-    // null with the class still on is a dialog that opens invisible and
-    // stays that way - reduced motion would have made it happen every time.
-    function giveUp() {
-        modal.classList.remove("bucket-prompt-expanding");
-        content.classList.remove("bucket-prompt-instant");
-        return null;
-    }
-
-    var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (still) { return giveUp(); }
-
-    var wasHidden = launcher.classList.contains("bucket-prompt-hidden");
-    if (wasHidden) { launcher.classList.remove("bucket-prompt-hidden"); }
-    var to = launcher.getBoundingClientRect();
-    if (wasHidden) { launcher.classList.add("bucket-prompt-hidden"); }
-
-    // Transitions off before anything is measured or moved, so none of the
-    // shuffling below animates.
-    content.classList.add("bucket-prompt-instant");
-
-    // beforeShow has usually collapsed it already, and a collapsed box
-    // measures 8% of the size the fly offsets have to be computed from. Taken
-    // off to measure and put straight back, the way the launcher is above -
-    // no paint happens in between, because none of this yields.
-    var collapsed = modal.classList.contains("bucket-prompt-expanding");
-    if (collapsed) { modal.classList.remove("bucket-prompt-expanding"); }
-    var from = content.getBoundingClientRect();
-    if (!from.width || !to.width) { return giveUp(); }
-
-    content.style.setProperty("--bucket-fly-x",
-        ((to.left + to.width / 2) - (from.left + from.width / 2)) + "px");
-    content.style.setProperty("--bucket-fly-y",
-        ((to.top + to.height / 2) - (from.top + from.height / 2)) + "px");
-
-    modal.classList.add("bucket-prompt-expanding");
-    void content.offsetWidth;          // compute it while transitions are off
-    content.classList.remove("bucket-prompt-instant");
-
-    return { modal: modal, content: content };
-}
-
-function releaseBucketExpand(prepared) {
-    if (!prepared) { return; }
-
-    // A frame is the right moment to start the growth - the collapsed state
-    // has to be painted once for there to be anything to grow FROM - but it
-    // must not be the only way this ever runs. requestAnimationFrame does not
-    // fire in a background tab, and this is reached from a timer that can
-    // easily land while the tab is hidden. The collapsed state is now applied
-    // before the dialog is first painted, so a frame that never comes is not
-    // a missed animation: it is a dialog that stays scaled to 8% at opacity 0
-    // and never appears at all.
-    var released = false;
-    function go() {
-        if (released) { return; }
-        released = true;
-        prepared.modal.classList.remove("bucket-prompt-expanding");
-        setTimeout(function () {
-            prepared.content.style.removeProperty("--bucket-fly-x");
-            prepared.content.style.removeProperty("--bucket-fly-y");
-        }, BUCKET_MINIMISE_MS);
-    }
-    requestAnimationFrame(go);
-    setTimeout(go, 80);
-}
-
-function startBucketOpenSequence() {
-    // One beat, not two: the bubble bounces away and the dialog grows out of
-    // where it is, together. They used to take turns - the bounce, then the
-    // growth - and the second waited on the first for the better part of a
-    // second.
-    var prepared = prepareBucketExpand();
-    if (!prepared) {
-        // No animation to play. prepareBucketExpand has already undone the
-        // collapse; this is belt and braces for any future path that has not.
-        var m = document.getElementById("generic-confirm-modal");
-        if (m) { m.classList.remove("bucket-prompt-expanding"); }
-        bounceBucketLauncherOut();
-        return;
-    }
-    bounceBucketLauncherOut();
-    releaseBucketExpand(prepared);
-}
 function minimiseBucketPrompt(remaining) {
     // Shrink the dialog into the bubble it is becoming, so the count in the
     // corner is visibly the same thing that was just on screen rather than a
