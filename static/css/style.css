@@ -22295,3 +22295,9 @@ label.loaf-holiday {
     pointer-events: none;
     box-sizing: border-box;
 }
+
+/* The real page while its copy slides away and the browser loads the next
+   one (pageTurnTo) - Bundles' previous and next. */
+.main-container.page-turn-gone {
+    visibility: hidden;
+}

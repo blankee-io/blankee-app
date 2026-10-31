@@ -322,20 +322,26 @@
                 return bundleIds.indexOf(currentBundleId);
             }
 
-            function goToBundle(index) {
+            // The bundle on show when the page loaded, for which way a pick
+            // from the list turns.
+            const shownBundleIndex = getCurrentBundleIndex();
+
+            // direction is the way the old bundle leaves: 'left' for the
+            // next, 'right' for the previous.
+            function goToBundle(index, direction) {
                 const bundleIds = getBundleIds();
                 // Cycle through (wrap around)
                 const newIndex = (index + bundleIds.length) % bundleIds.length;
                 const newBundleId = bundleIds[newIndex];
                 budsTitle.setAttribute('data-bundle-id', newBundleId);
-                window.location.href = window.location.pathname + '?bundle_id=' + newBundleId;
+                pageTurnTo(window.location.pathname + '?bundle_id=' + newBundleId, direction);
             }
 
             if (previousNavBtn && bundleSelect) {
                 previousNavBtn.addEventListener('click', function(e) {
                     e.preventDefault();
                     const currentIndex = getCurrentBundleIndex();
-                    goToBundle(currentIndex - 1);
+                    goToBundle(currentIndex - 1, 'right');
                 });
             }
 
@@ -343,15 +349,14 @@
                 nextNavBtn.addEventListener('click', function(e) {
                     e.preventDefault();
                     const currentIndex = getCurrentBundleIndex();
-                    goToBundle(currentIndex + 1);
+                    goToBundle(currentIndex + 1, 'left');
                 });
             }
 
             if (bundleSelect && budsTitle) {
                 bundleSelect.addEventListener('change', function() {
-                    const selectedBundleId = bundleSelect.value;
-                    budsTitle.setAttribute('data-bundle-id', selectedBundleId);
-                    window.location.href = window.location.pathname + '?bundle_id=' + selectedBundleId;
+                    const picked = getCurrentBundleIndex();
+                    goToBundle(picked, picked < shownBundleIndex ? 'right' : 'left');
                 });
             }
 

@@ -5461,9 +5461,13 @@ function pageTurnGhost(container, direction) {
     var viewport = window.innerWidth || document.documentElement.clientWidth;
     if (rect.width === 0 || (viewport && (rect.right <= 0 || rect.left >= viewport))) { return; }
 
+    // The copy keeps its ids: the dashboards' layout is written against them
+    // (#table-container, #categories-container, ...), and a copy without
+    // them draws half a page. It is appended after the real page, so
+    // getElementById still finds the real element first. Names go, so a
+    // copied radio cannot take the checked state from its original.
     var ghost = container.cloneNode(true);
-    ghost.removeAttribute('id');
-    ghost.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+    ghost.querySelectorAll('[name]').forEach(function (el) { el.removeAttribute('name'); });
     ghost.classList.remove('slide-left', 'slide-right', 'slide-up', 'slide-down', 'slide-left-slow', 'slide-right-slow');
     ghost.classList.add('page-turn-ghost');
     ghost.setAttribute('aria-hidden', 'true');
@@ -5495,3 +5499,45 @@ function pageTurnGhost(container, direction) {
     anim.onfinish = function () { ghost.remove(); };
     anim.oncancel = function () { ghost.remove(); };
 }
+
+// A page that turns by loading another page - Bundles' previous and next.
+// The browser cannot show the old page and the new one at once, so the turn
+// comes in two halves: the old page slides all the way away, then the
+// browser goes, and the page that arrives slides in from the far side
+// (pageTurnArrive). The arrival is keyed to the address it was meant for, so
+// a turn that never lands cannot slide some later page in.
+function pageTurnTo(href, direction) {
+    var container = document.getElementById('main-container');
+    if (container) { pageTurnGhost(container, direction); }
+    if (!container || !document.querySelector('.page-turn-ghost')) {
+        window.location.href = href;
+        return;
+    }
+    try {
+        var to = new URL(href, window.location.href);
+        sessionStorage.setItem('blankee-page-turn',
+            JSON.stringify({ to: to.pathname + to.search, direction: direction }));
+    } catch (e) { /* no storage: the new page just appears */ }
+    container.classList.add('page-turn-gone');
+    setTimeout(function () { window.location.href = href; }, PAGE_TURN_MS);
+}
+
+(function pageTurnArrive() {
+    var turn = null;
+    try {
+        turn = JSON.parse(sessionStorage.getItem('blankee-page-turn') || 'null');
+        sessionStorage.removeItem('blankee-page-turn');
+    } catch (e) { return; }
+    if (turn && turn.to === window.location.pathname + window.location.search) {
+        document.addEventListener('DOMContentLoaded', function () {
+            var container = document.getElementById('main-container');
+            if (container) { container.classList.add(turn.direction === 'right' ? 'slide-right' : 'slide-left'); }
+        });
+    }
+    // Back to a page that was turned away from: the browser may hand it back
+    // exactly as it was left, hidden.
+    window.addEventListener('pageshow', function () {
+        var container = document.getElementById('main-container');
+        if (container) { container.classList.remove('page-turn-gone'); }
+    });
+})();
