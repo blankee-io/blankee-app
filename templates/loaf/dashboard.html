@@ -11,7 +11,7 @@
     <script src="{{ url_for('static', filename='js/loaf_basket_modal.js') }}" defer></script>
     {% include '_head_icons.html' %}
 </head>
-<body id="loaf-page" data-app="loaf">
+<body id="loaf-page" data-app="loaf"{% if shelf and not basket %} class="loaf-no-baskets"{% endif %}>
     {% include 'nav.html' %}
     {% include 'alert_modals.html' %}
 
@@ -30,7 +30,7 @@
                     </div>
                 </div>
             </div>
-            {% if basket %}
+            {% if shelf %}
             <div class="calendarnavbuttons">
                 <a id="loaf-prev" class="nav-button" href="javascript:void(0);">
                     <i class="fa-solid fa-left"></i>
@@ -50,7 +50,7 @@
     </div>
 
     <div class="main-container" id="main-container">
-    {% if not basket %}
+    {% if not shelf %}
         <div class="recurring-income-empty-info">
             <h2>Nothing to show yet</h2>
             <p>
@@ -110,6 +110,19 @@
            in script, the same division the grid itself makes. #}
         <div id="loaf-pools" class="loaf-pools"></div>
 
+        {# A job with no baskets yet (2026-10-31): the banner in place of the
+           calendar, with the switcher above still there to move to another
+           job. Shown by body.loaf-no-baskets, which the page sets as it loads
+           such a job and the script sets and clears as jobs are switched. #}
+        <div id="loaf-job-empty" class="recurring-income-empty-info">
+            <h2>Nothing to show yet</h2>
+            <p>
+                Loaf needs a <strong>basket</strong> before it can forecast anything -
+                a pool of hours, with a working week to measure time off against.
+            </p>
+            <p><a href="#" id="loaf-empty-add-basket">Add your first basket</a>.</p>
+        </div>
+
         <div class="dashboard-m-calendar-container">
             <table id="loaf-calendar">
                 <thead id="loaf-calendar-head"></thead>
@@ -126,7 +139,7 @@
        that element, so a modal inside it slides away with the calendar
        behind it. This is the only place time off is entered - a day click
        opens it with that date already filled in. #}
-    {% if basket %}
+    {% if shelf %}
     <div id="loaf-entry-modal" class="modal">
         <div class="income-form-container">
             <h2 id="loaf-entry-title">Book Time Off</h2>
@@ -350,12 +363,12 @@
        switcher for a shelf, one on the chips for a basket. The script
        builds a modal only when its markup is here, so leaving the shelf
        form out made loafShelfModal null and the button throw. #}
-    {% if basket %}{% include 'loaf/_basket_modal.html' %}{% endif %}
-    {% if basket %}{% include 'loaf/_shelf_modal.html' %}{% endif %}
+    {% if shelf %}{% include 'loaf/_basket_modal.html' %}{% endif %}
+    {% if shelf %}{% include 'loaf/_shelf_modal.html' %}{% endif %}
 
     {% include 'loading_modals.html' %}
 
-{% if basket %}
+{% if shelf %}
 <script>
 // ---------------------------------------------------------------------------
 // Loaf's month view. The grid is fetched and drawn here rather than rendered
@@ -382,11 +395,11 @@
         // COUNTED.
         shelfId: {{ shelf.id if shelf else 'null' }},
         shelfName: {{ (shelf.name if shelf else '') | tojson }},
-        basketId: {{ basket.id }},
+        basketId: {{ basket.id if basket else 'null' }},
         pools: [],
         year: {{ today.year }},
         month: {{ today.month }},
-        threshold: {{ basket.low_balance_hours if basket.low_balance_hours is not none else 'null' }}
+        threshold: {{ basket.low_balance_hours if basket and basket.low_balance_hours is not none else 'null' }}
     };
 
     function el(id) { return document.getElementById(id); }
@@ -656,6 +669,12 @@
         });
     }
 
+    // A job with no baskets: the banner where the calendar was, and the
+    // month controls and pool chips away - see #loaf-job-empty.
+    function showJobEmpty(on) {
+        document.body.classList.toggle('loaf-no-baskets', on);
+    }
+
     // Returns the request, so a page turn can wait for the month to arrive.
     function load() {
         return $.ajax({
@@ -663,10 +682,19 @@
             data: {shelf_id: state.shelfId, basket_id: state.basketId,
                    year: state.year, month: state.month},
             success: function (response) {
+                // A job with no baskets on it: its banner, and the switcher
+                // still there to move on. Not an error.
+                if (response.status === 'empty') {
+                    state.basketId = null;
+                    if (response.shelf) { state.shelfName = response.shelf.name || ''; }
+                    showJobEmpty(true);
+                    return;
+                }
                 if (response.status !== 'success') {
                     showToast(response.message || 'Could not load that month.', 'error');
                     return;
                 }
+                showJobEmpty(false);
                 state.threshold = response.basket.low_balance_hours;
                 state.basketId = response.basket.id;
                 if (response.shelf) {
@@ -706,6 +734,8 @@
     // the turn waits for the new month to arrive so it is the new month that
     // slides in.
     function shiftMonth(by) {
+        // An empty job has no months to turn through.
+        if (document.body.classList.contains('loaf-no-baskets')) { return; }
         pageTurn(by > 0 ? 'left' : 'right', function () {
             var loading = el('loading-screen');
             if (loading) { loading.style.display = 'none'; }
@@ -1298,6 +1328,13 @@
     // The chips' own plus: a basket joins the shelf on show, which is the one
     // its pools are sitting in a row under.
     $(document).on('click', '#loaf-add-pool', function () {
+        loafBasketModal.openAdd({shelf_id: state.shelfId,
+                                 shelf_name: state.shelfName});
+    });
+
+    // The empty job's banner: its first basket, on the job on show.
+    $('#loaf-empty-add-basket').on('click', function (e) {
+        e.preventDefault();
         loafBasketModal.openAdd({shelf_id: state.shelfId,
                                  shelf_name: state.shelfName});
     });

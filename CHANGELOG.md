@@ -25,6 +25,14 @@ this file; the admin console links to it, it does not read it.
 - **Add Bundle looks like the other Add dialogs** - the same field and the
   same Cancel and Create buttons as adding a category or a group.
 - **Editing a category no longer drops its Group row as the dialog closes.**
+- **Loaf: a job with no baskets yet** shows the "Nothing to show yet"
+  banner, with a link to add its first basket, and the job switcher stays
+  there to move to another job - it used to answer with an error.
+
+### Removed
+
+- The Paid and Unpaid (Received and Pending, for income) items in the
+  recurring pages' legend.
 
 ## 1.69.0 — 2026-10-31
 

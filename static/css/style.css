@@ -11516,6 +11516,24 @@ form button[type="submit"] {
     text-align: center;
 }
 
+/* Loaf's month view on a job with no baskets yet: the banner instead of the
+   calendar, the pool chips and the month controls - the job switcher above
+   stays (body.loaf-no-baskets, set by the page and its script). */
+#loaf-job-empty {
+    display: none;
+}
+
+body.loaf-no-baskets #loaf-job-empty {
+    display: block;
+}
+
+body.loaf-no-baskets #loaf-pools,
+body.loaf-no-baskets .dashboard-m-calendar-container,
+body.loaf-no-baskets .loaf-period-pair,
+body.loaf-no-baskets .calendarnavbuttons {
+    display: none;
+}
+
 .recurring-income-empty-info h2 {
     margin-bottom: 18px;
     color: var(--accent);

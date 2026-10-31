@@ -225,13 +225,23 @@ def dashboard():
     """
     today = _today()
     basket = _focus_basket(request.args.get('shelf'), request.args.get('basket'))
-    shelf = loaf_data.shelf_of(current_user.id, basket) if basket else None
+    shelves = loaf_data.get_shelves(current_user.id)
+    if basket:
+        shelf = loaf_data.shelf_of(current_user.id, basket)
+    else:
+        # A job with no baskets yet is still a job: the page shows it, with
+        # the switcher to move to another and the banner offering a basket,
+        # rather than nothing at all (2026-10-31). The one named, or the first.
+        named = request.args.get('shelf')
+        shelf = (loaf_data.get_shelf(current_user.id, named)
+                 if named and str(named).isdigit() else None) \
+            or (shelves[0] if shelves else None)
     return render_template(
         'loaf/dashboard.html',
         baskets=loaf_data.get_baskets(current_user.id, include_hidden=False),
         basket=basket,
         shelf=shelf,
-        shelves=loaf_data.get_shelves(current_user.id),
+        shelves=shelves,
         pools=loaf_data.baskets_on(current_user.id, shelf['id'],
                                    include_hidden=False) if shelf else [],
         today=today,
@@ -880,9 +890,16 @@ def _month_payload(user_id, basket, year, month, today):
 @login_required
 def api_month():
     today = _today()
-    basket = _focus_basket(request.args.get('shelf_id'),
-                           request.args.get('basket_id'))
+    shelf_id = request.args.get('shelf_id')
+    basket = _focus_basket(shelf_id, request.args.get('basket_id'))
     if basket is None:
+        # A real job with no baskets on it: not an error, an empty job. The
+        # page shows its banner for it and keeps the switcher.
+        shelf = (loaf_data.get_shelf(current_user.id, shelf_id)
+                 if shelf_id and str(shelf_id).isdigit() else None)
+        if shelf is not None:
+            return jsonify({'status': 'empty',
+                            'shelf': {'id': shelf['id'], 'name': shelf.get('name') or ''}})
         return jsonify({'status': 'error', 'message': 'No such basket.'}), 404
 
     try:
