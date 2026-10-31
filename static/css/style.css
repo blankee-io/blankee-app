@@ -22317,7 +22317,10 @@ label.loaf-holiday {
     view-transition-name: page-turn-calendar;
 }
 
-:root[data-page-turn] #sideMenuBackdrop {
+/* The backdrops only while open: closed, each is still a full-page layer
+   with an 8px blur, invisible at opacity 0 - pulled into the turn, it
+   blurred the whole page as it slid. */
+:root[data-page-turn] #sideMenuBackdrop.open {
     view-transition-name: page-turn-menu-backdrop;
 }
 
@@ -22325,7 +22328,7 @@ label.loaf-holiday {
     view-transition-name: page-turn-menu;
 }
 
-:root[data-page-turn] #profileBackdrop {
+:root[data-page-turn] #profileBackdrop.open {
     view-transition-name: page-turn-profile-backdrop;
 }
 
@@ -22343,6 +22346,15 @@ label.loaf-holiday {
 
 :root[data-page-turn]::view-transition {
     pointer-events: none;
+}
+
+/* No fades inside the page while it turns. Every cell carries the blanket
+   `transition: all`, and a cell the arrow keys passed through while the
+   new page was still sliding in kept its dark editing fill frozen part of
+   the way out. Snapped, there is nothing in progress to freeze. */
+:root[data-page-turn] .main-container,
+:root[data-page-turn] .main-container * {
+    transition: none !important;
 }
 
 :root[data-page-turn]::view-transition-old(root),
