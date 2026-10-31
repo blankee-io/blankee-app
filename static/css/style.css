@@ -10433,7 +10433,11 @@ transform: scale(1.2);
 .category-edit-modal-content,
 .add-credit-account-modal-content,
 .change-password-modal-content,
-.test-purchase-modal-content {
+.test-purchase-modal-content,
+.income-form-container,
+.expense-form-container,
+.ca-form-container,
+.convert-recurring-form-container {
     animation: modal-grow-in 0.16s ease-out;
 }
 
@@ -10475,7 +10479,11 @@ transform: scale(1.2);
 .modal-from-press .category-edit-modal-content,
 .modal-from-press .add-credit-account-modal-content,
 .modal-from-press .change-password-modal-content,
-.modal-from-press .test-purchase-modal-content {
+.modal-from-press .test-purchase-modal-content,
+.modal-from-press .income-form-container,
+.modal-from-press .expense-form-container,
+.modal-from-press .ca-form-container,
+.modal-from-press .convert-recurring-form-container {
     transform-origin: var(--press-x, 50%) var(--press-y, 50%);
     animation: modal-press-in 420ms cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -10522,7 +10530,11 @@ transform: scale(1.2);
 .modal-closing .category-edit-modal-content,
 .modal-closing .add-credit-account-modal-content,
 .modal-closing .change-password-modal-content,
-.modal-closing .test-purchase-modal-content {
+.modal-closing .test-purchase-modal-content,
+.modal-closing .income-form-container,
+.modal-closing .expense-form-container,
+.modal-closing .ca-form-container,
+.modal-closing .convert-recurring-form-container {
     animation: modal-grow-out 0.16s ease-in forwards;
 }
 
@@ -10555,7 +10567,11 @@ transform: scale(1.2);
 .modal-from-press.modal-closing .category-edit-modal-content,
 .modal-from-press.modal-closing .add-credit-account-modal-content,
 .modal-from-press.modal-closing .change-password-modal-content,
-.modal-from-press.modal-closing .test-purchase-modal-content {
+.modal-from-press.modal-closing .test-purchase-modal-content,
+.modal-from-press.modal-closing .income-form-container,
+.modal-from-press.modal-closing .expense-form-container,
+.modal-from-press.modal-closing .ca-form-container,
+.modal-from-press.modal-closing .convert-recurring-form-container {
     animation: modal-press-out 420ms cubic-bezier(0.8, 0, 0.6, 1) forwards;
 }
 
@@ -10585,6 +10601,10 @@ transform: scale(1.2);
     .add-credit-account-modal-content,
     .change-password-modal-content,
     .test-purchase-modal-content,
+    .income-form-container,
+    .expense-form-container,
+    .ca-form-container,
+    .convert-recurring-form-container,
     .modal-closing {
         animation: none;
     }

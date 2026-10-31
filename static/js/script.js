@@ -214,7 +214,7 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
     // included. offsetLeft/offsetTop rather than getBoundingClientRect: the
     // latter includes the animation's own transform, which has begun by now.
     var PRESS_WINDOW_MS = 2000;
-    var DIALOGS = ".modal-content, .modal-content-center, .alert-modal-content, .center-modal-content, .modal-content-setup-profile, .modal-content-category-recommendations, .footer-modal-content, .dashboard-d-modal-content, .category-edit-modal-content, .add-credit-account-modal-content, .change-password-modal-content, .test-purchase-modal-content";
+    var DIALOGS = ".modal-content, .modal-content-center, .alert-modal-content, .center-modal-content, .modal-content-setup-profile, .modal-content-category-recommendations, .footer-modal-content, .dashboard-d-modal-content, .category-edit-modal-content, .add-credit-account-modal-content, .change-password-modal-content, .test-purchase-modal-content, .income-form-container, .expense-form-container, .ca-form-container, .convert-recurring-form-container";
 
     function boxWithin(el, sheet) {
         var x = 0, y = 0, n = el;
