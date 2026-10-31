@@ -5405,6 +5405,129 @@ var pageTurnSlideUntil = 0;
 // belongs. The arrow keys use it: a press during the slide belongs to no
 // page yet, and acting on it started the person two or three cells into the
 // month they turned to.
+// ── Turning with the finger ─────────────────────────────────────────────────
+//
+// A swipe held and moved slowly shows the next page coming in under the
+// finger, the old one going with it (2026-10-31). The moment a sideways drag
+// is recognised the page turns as the arrows turn it - the browser's picture
+// of the old page, the new one drawn underneath - but the two animations are
+// paused and set from how far the finger has gone, so both follow it. Let go
+// past a fifth of the way and the turn plays on from there; short of that it
+// plays back, the page is quietly turned back to where it was, and the turn
+// ends with nothing changed.
+//
+// The pages call pageTurnDragFollow from their touchmove with the distance
+// dragged and their own next and previous, and pageTurnDragRelease from their
+// touchend when pageTurnDragHeld. Anywhere the browser cannot take the
+// picture, pageTurnDragFollow says no and the page drags itself as before.
+var pageTurnDrag = null;      // the turn a finger is holding
+var pageTurnStarting = null;  // set while a drag starts its turn - see pageTurn
+var pageTurnQuiet = false;    // set while a drag let go short puts its page back
+
+function pageTurnDragFollow(dx, width, next, previous) {
+    if (pageTurnDrag && pageTurnDrag.manual) { return false; }   // see pageTurnDragSteer
+    if (!pageTurnDrag) {
+        if (!dx || !pageTurnCarriesSwipe()) { return false; }
+        var forward = dx < 0;
+        var drag = {
+            direction: forward ? 'left' : 'right',
+            back: forward ? previous : next,
+            width: width || window.innerWidth,
+            progress: 0, turn: null, anims: null, released: null
+        };
+        pageTurnStarting = drag;
+        try { (forward ? next : previous)(); } finally { pageTurnStarting = null; }
+        // Nowhere to turn to - the last year there is, say: the page drags
+        // itself and springs back, as it always has.
+        if (!drag.turn) { return false; }
+        pageTurnDrag = drag;
+    }
+    var sign = pageTurnDrag.direction === 'left' ? -1 : 1;
+    pageTurnDrag.progress = Math.max(0, Math.min(1, sign * dx / pageTurnDrag.width));
+    pageTurnDragShow(pageTurnDrag);
+    return true;
+}
+
+function pageTurnDragHeld() {
+    // One the browser would not let us steer is the page's own drag again:
+    // its touchend handles it, and this is the end of it here.
+    if (pageTurnDrag && pageTurnDrag.manual) { pageTurnDrag = null; return false; }
+    return !!pageTurnDrag;
+}
+
+function pageTurnDragRelease() {
+    var drag = pageTurnDrag;
+    if (!drag) { return; }
+    pageTurnDrag = null;
+    drag.released = drag.progress > 0.2 ? 'go' : 'back';
+    if (drag.anims) { pageTurnDragFinish(drag); }   // else when they exist - pageTurnDragSteer
+}
+
+// Once the browser has built the turn: its two animations, paused and made
+// to move evenly, so the pages stay under the finger rather than running
+// ahead of it on the ease-out curve.
+function pageTurnDragSteer(drag) {
+    var anims = document.documentElement.getAnimations({ subtree: true }).filter(function (a) {
+        var pe = a.effect && a.effect.pseudoElement;
+        return pe && /page-turn-(out|in)\)/.test(pe);
+    });
+    // A browser that runs the turn but will not hand over its animations
+    // would play it out on its own the moment the drag began. Turned back at
+    // once instead, and the rest of this drag is the page's own, as before.
+    if (!anims.length) {
+        pageTurnQuiet = true;
+        try { drag.back(); } finally { pageTurnQuiet = false; }
+        try { drag.turn.skipTransition(); } catch (e) { /* already over */ }
+        if (pageTurnDrag === drag) { drag.manual = true; }
+        return;
+    }
+    var away = drag.direction === 'left' ? '-100%' : '100%';
+    var from = drag.direction === 'left' ? '100%' : '-100%';
+    anims.forEach(function (a) {
+        a.pause();
+        var leaving = /-old\(/.test(a.effect.pseudoElement);
+        try {
+            a.effect.setKeyframes(leaving
+                ? [{ transform: 'translateX(0)' }, { transform: 'translateX(' + away + ')' }]
+                : [{ transform: 'translateX(' + from + ')' }, { transform: 'translateX(0)' }]);
+        } catch (e) { /* the shared keyframes, eased - still follows */ }
+    });
+    drag.anims = anims;
+    if (drag.released) { pageTurnDragFinish(drag); } else { pageTurnDragShow(drag); }
+}
+
+function pageTurnDragShow(drag) {
+    if (!drag.anims) { return; }
+    drag.anims.forEach(function (a) { a.currentTime = drag.progress * PAGE_TURN_MS; });
+}
+
+function pageTurnDragFinish(drag) {
+    var anims = drag.anims;
+    if (drag.released === 'go') {
+        anims.forEach(function (a) { a.playbackRate = 1; a.play(); });
+        return;
+    }
+    // Back the way it came, then the page itself put back under the picture
+    // - out of sight, the new page being off the screen by then - and the
+    // turn ended on the page that was there all along.
+    function putBack() {
+        pageTurnQuiet = true;
+        try { drag.back(); } finally { pageTurnQuiet = false; }
+        try { drag.turn.skipTransition(); } catch (e) { /* already over */ }
+    }
+    anims.forEach(function (a) { a.playbackRate = -1; a.play(); });
+    anims[0].finished.then(putBack, putBack);
+}
+
+// The system can take a touch away mid-drag - a call, a gesture of its own -
+// with no touchend; the page goes back as it would for a short drag.
+document.addEventListener('touchcancel', function () {
+    if (pageTurnDrag) {
+        pageTurnDrag.progress = 0;
+        pageTurnDragRelease();
+    }
+});
+
 // Whether a swipe should hand its page straight to pageTurn as the finger
 // lets go, rather than fling it off the screen by hand first. Wherever the
 // browser can take the picture, yes: the turn carries on from the drag.
@@ -5421,7 +5544,11 @@ function pageTurn(direction, update) {
     var root = document.documentElement;
     var container = document.getElementById('main-container');
     var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!container || still) { return Promise.resolve(update()); }
+    // A drag let go short puts its page back without a turn of its own
+    // (pageTurnDragRelease).
+    if (!container || still || pageTurnQuiet) { return Promise.resolve(update()); }
+    // A drag starting its turn: the finger steers it (pageTurnDragFollow).
+    var drag = pageTurnStarting;
 
     if (!document.startViewTransition) {
         var slide = PAGE_TURN_SLIDE_IN[direction] || 'slide-left';
@@ -5440,7 +5567,7 @@ function pageTurn(direction, update) {
     // How far a swipe had dragged the page when it let go - nothing for the
     // arrows. The page puts itself back straight after this, before the
     // picture is taken, so the offset travels as a number instead.
-    var dragged = /translateX\((-?[\d.]+)px\)/.exec(container.style.transform || '');
+    var dragged = drag ? null : /translateX\((-?[\d.]+)px\)/.exec(container.style.transform || '');
     root.style.setProperty('--page-turn-from', (dragged ? parseFloat(dragged[1]) : 0) + 'px');
     root.setAttribute('data-page-turn', direction);
     container.classList.remove('page-turn-in');
@@ -5455,12 +5582,21 @@ function pageTurn(direction, update) {
         }
         var done = new Promise(function (resolve) { resolve(update()); });
         done.then(drawnDone, drawnDone);
-        var enough = new Promise(function (resolve) { setTimeout(resolve, PAGE_TURN_WAIT_MS); });
+        // Under a finger nothing waits: the page is held still until this
+        // settles, and a drag that froze while the month was fetched would
+        // not be following the finger. What arrives fills in on the way.
+        var enough = new Promise(function (resolve) {
+            setTimeout(resolve, drag ? 0 : PAGE_TURN_WAIT_MS);
+        });
         return Promise.race([done, enough]).catch(function (e) { console.error(e); });
     });
     // A turn taken during this one cuts it short; the browser's own
     // complaint about that is not an error.
     turn.ready.catch(function () {});
+    if (drag) {
+        drag.turn = turn;
+        turn.ready.then(function () { pageTurnDragSteer(drag); }, function () {});
+    }
     turn.finished.catch(function () {}).then(function () {
         if (pageTurnCurrent !== token) { return; }   // a newer turn owns the names now
         pageTurnCurrent = null;

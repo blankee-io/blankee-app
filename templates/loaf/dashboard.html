@@ -1558,12 +1558,26 @@
         if (Math.abs(swipeDistanceX) > Math.abs(swipeDistanceY)) {
             isHorizontalSwipe = true;
             event.preventDefault();
+            // The next month comes in under the finger where the browser
+            // can draw it (pageTurnDragFollow, script.js).
+            if (pageTurnDragFollow(swipeDistanceX, containerWidth,
+                    function () { shiftMonth(1); }, function () { shiftMonth(-1); })) { return; }
             mainContainer.style.transform = 'translateX(' + swipeDistanceX + 'px)';
         }
     }
 
     function handleTouchEnd() {
         if (!touchStartX || !isHorizontalSwipe) { return; }
+
+        // A drag the page turn was following: let go, it finishes or goes
+        // back (pageTurnDragRelease, script.js).
+        if (pageTurnDragHeld()) {
+            pageTurnDragRelease();
+            touchStartX = null;
+            touchCurrentX = null;
+            isHorizontalSwipe = false;
+            return;
+        }
 
         var swipeDistanceX = touchCurrentX - touchStartX;
         var swipePercentage = Math.abs(swipeDistanceX) / containerWidth;

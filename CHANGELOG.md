@@ -12,11 +12,12 @@ this file; the admin console links to it, it does not read it.
 
 ### Fixed
 
-- **A swipe turns the page the way the arrows do.** Swiping to the next or
-  previous week, month or year flung the old page off by hand and slid the
-  new one in after it, so the old page never travelled with the new. The
-  turn now carries on from where the finger lets go, the two pages edge to
-  edge - in the iOS app as in the browser.
+- **A swipe turns the page under the finger.** Swiping to the next or
+  previous week, month or year flung the old page off and slid the new one
+  in after it, so the old page never travelled with the new. Now the next
+  page comes in as the finger moves, the old one going with it, however
+  slowly: let go past a fifth of the way and it finishes the turn, short of
+  that and it slides back - in the iOS app as in the browser.
 
 ## 1.70.0 — 2026-10-31
 

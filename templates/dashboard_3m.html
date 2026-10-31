@@ -839,6 +839,10 @@
                 event.preventDefault(); // Prevent scrolling on horizontal swipes
 
                 // Move the main-container based on swipe distance
+                // The next page comes in under the finger where the browser
+                // can draw it (pageTurnDragFollow, script.js); else the page
+                // is dragged on its own, as before.
+                if (pageTurnDragFollow(swipeDistanceX, containerWidth, nextCluster, previousCluster)) { return; }
                 mainContainer.style.transform = `translateX(${swipeDistanceX}px)`;
             }
         }
@@ -846,6 +850,15 @@
         // Function to handle the end of a touch event
         function handleTouchEnd() {
             if (!touchStartX || !isHorizontalSwipe || isCategorySortActive) return; // Ignore if not a horizontal swipe
+            // A drag the page turn was following: let go, it finishes or
+            // goes back (pageTurnDragRelease, script.js).
+            if (pageTurnDragHeld()) {
+                pageTurnDragRelease();
+                touchStartX = null;
+                touchCurrentX = null;
+                isHorizontalSwipe = false;
+                return;
+            }
 
             const swipeDistanceX = touchCurrentX - touchStartX;
             const swipePercentage = Math.abs(swipeDistanceX) / containerWidth;
