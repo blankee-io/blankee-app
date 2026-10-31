@@ -10439,12 +10439,29 @@ transform: scale(1.2);
 
 /* Opened by a press (script.js, "Opening an overlay"): out of the pressed
    spot, which script.js measures into --press-x/--press-y in the dialog's
-   own pixels as it opens. A short fade at the start so the first frames are
-   not a hard dot. Before "Closing", so .modal-closing wins on a tie. */
+   own pixels as it opens. The same motion as the pending transactions
+   dialog coming out of its corner bubble (.bucket-prompt-modal) - 420ms,
+   the same easing, from 8% and fading in all the way, with the backdrop's
+   blur rising alongside - only from the press rather than the corner
+   (asked for on 2026-10-31: the first version, 260ms from 5% and opaque a
+   third of the way in, was too quick to read). Before "Closing", so
+   .modal-closing wins on a tie. */
 @keyframes modal-press-in {
-    0%   { opacity: 0; transform: scale(0.05); }
-    35%  { opacity: 1; }
-    100% { opacity: 1; transform: scale(1); }
+    from { opacity: 0; transform: scale(0.08); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+/* Only a from: the blur and the fade rise to whatever the sheet has. */
+@keyframes modal-press-sheet-in {
+    from {
+        opacity: 0;
+        backdrop-filter: blur(0);
+        -webkit-backdrop-filter: blur(0);
+    }
+}
+
+.modal-from-press {
+    animation: modal-press-sheet-in 420ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .modal-from-press .modal-content,
@@ -10460,7 +10477,7 @@ transform: scale(1.2);
 .modal-from-press .change-password-modal-content,
 .modal-from-press .test-purchase-modal-content {
     transform-origin: var(--press-x, 50%) var(--press-y, 50%);
-    animation: modal-press-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1);
+    animation: modal-press-in 420ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Closing ---------------------------------------------------------------------
