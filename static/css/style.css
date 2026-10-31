@@ -22305,7 +22305,8 @@ label.loaf-holiday {
     view-transition-name: page-turn-out;
 }
 
-.main-container.page-turn-in {
+.main-container.page-turn-in,
+:root[data-page-turn-arrive] .main-container {
     view-transition-name: page-turn-in;
 }
 
@@ -22456,8 +22457,8 @@ label.loaf-holiday {
     }
 }
 
-/* Bundles, where each bundle is a page of its own (pageTurnTo): the page
-   itself slides away while the browser loads the next one. */
+/* Bundles in a browser without cross-document transitions (pageTurnTo):
+   the page itself slides away while the browser loads the next one. */
 .main-container.page-turn-away-left {
     animation: pageTurnOutLeft 0.3s ease-out forwards;
 }

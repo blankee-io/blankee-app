@@ -19,9 +19,9 @@ this file; the admin console links to it, it does not read it.
   arrows and a swipe and up or down when Day view is scrolled past the end
   of a week. Neither fades any more.
 - **Bundles turn too.** Previous, next and picking a bundle from the list
-  slide the old bundle away and the new one in from the other side. Each
-  bundle is its own page, so here the old one leaves first and the new one
-  follows as it loads.
+  turn the page the same way, the old bundle sliding away as the new one
+  slides in. (In a browser without cross-page transitions, Firefox for now,
+  the old one leaves first and the new one follows as it loads.)
 
 ## 1.68.1 — 2026-10-31
 
