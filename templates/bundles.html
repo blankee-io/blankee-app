@@ -6,34 +6,6 @@
     <title>Blankee - Bundles</title>
     <!-- Link to the external stylesheet for styling the page -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <script>
-        // Arriving from the previous or next bundle (pageTurnTo in
-        // script.js): this page opts into the turn and names itself for it
-        // before it first draws, which is too early for script.js at the foot
-        // of the page. Only a turn meant for this address takes part.
-        (function () {
-            var turn = null;
-            try { turn = JSON.parse(sessionStorage.getItem('blankee-page-turn') || 'null'); } catch (e) { return; }
-            if (!turn || !turn.across) { return; }
-            try { sessionStorage.removeItem('blankee-page-turn'); } catch (e) { /* ignore */ }
-            if (turn.to !== location.pathname + location.search || !window.PageRevealEvent
-                    || Date.now() - (turn.at || 0) > 10000) { return; }   // PAGE_TURN_LAPSE_MS
-            var optIn = document.createElement('style');
-            optIn.textContent = '@view-transition { navigation: auto; }';
-            document.head.appendChild(optIn);
-            window.addEventListener('pagereveal', function (e) {
-                if (!e.viewTransition) { optIn.remove(); return; }
-                var root = document.documentElement;
-                root.setAttribute('data-page-turn', turn.direction);
-                root.setAttribute('data-page-turn-arrive', '');
-                e.viewTransition.finished.catch(function () {}).then(function () {
-                    optIn.remove();
-                    root.removeAttribute('data-page-turn');
-                    root.removeAttribute('data-page-turn-arrive');
-                });
-            }, { once: true });
-        })();
-    </script>
     <!-- Link to Font Awesome for icons -->
     {% include '_fontawesome.html' %}
     <!-- Link to jQuery library for JavaScript functionality -->
@@ -260,7 +232,6 @@
 
         document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('loading-screen').style.display = 'none';
-            const addBundleBtn = document.getElementById('add-bundle-btn');
             const bundleInputOverlay = document.getElementById('bundle-input-overlay');
             const confirmAddBundleBtn = document.getElementById('confirm-add-bundle-btn');
             const newBundleInput = document.getElementById('new-bundle');
@@ -277,7 +248,11 @@
                 bundleInputOverlay.style.display = 'none';
             }
 
-            addBundleBtn.addEventListener('click', function() {
+            // Everything inside #main-container is bound through document:
+            // turning to another bundle swaps that content for the next
+            // bundle's, and a handler bound to the old elements would go
+            // with them.
+            $(document).on('click', '#add-bundle-btn', function() {
                 bundleInputOverlay.style.display = 'flex';
                 newBundleInput.value = '';
                 newBundleInput.focus();
@@ -335,7 +310,6 @@
 
             // Bundle select dropdown logic
             const bundleSelect = document.getElementById('current-nav-select');
-            const budsTitle = document.querySelector('.bundles-title');
             const previousNavBtn = document.getElementById('previous-nav-btn');
             const nextNavBtn = document.getElementById('next-nav-btn');
 
@@ -350,10 +324,16 @@
                 return bundleIds.indexOf(currentBundleId);
             }
 
-            // The bundle on show when the page loaded, for which way a pick
-            // from the list turns.
-            const shownBundleIndex = getCurrentBundleIndex();
+            // The bundle on show, for which way a pick from the list turns.
+            let shownBundleIndex = getCurrentBundleIndex();
 
+            // Turning to another bundle works as the dashboards do: no new
+            // page. The next bundle's page is fetched and only its
+            // #main-container content is put in place of this one's, inside
+            // pageTurn (script.js) - the old bundle's picture slides away as
+            // the new one slides in, and nothing else on the page so much as
+            // blinks. The address follows, so a reload stays on the bundle.
+            //
             // direction is the way the old bundle leaves: 'left' for the
             // next, 'right' for the previous.
             function goToBundle(index, direction) {
@@ -361,8 +341,22 @@
                 // Cycle through (wrap around)
                 const newIndex = (index + bundleIds.length) % bundleIds.length;
                 const newBundleId = bundleIds[newIndex];
-                budsTitle.setAttribute('data-bundle-id', newBundleId);
-                pageTurnTo(window.location.pathname + '?bundle_id=' + newBundleId, direction);
+                const url = window.location.pathname + '?bundle_id=' + newBundleId;
+                // At once, so a second click carries on from here.
+                bundleSelect.value = String(newBundleId);
+                shownBundleIndex = newIndex;
+                pageTurn(direction, function () {
+                    return fetch(url, { credentials: 'same-origin' })
+                        .then(function (response) { return response.text(); })
+                        .then(function (html) {
+                            const fresh = new DOMParser().parseFromString(html, 'text/html')
+                                .getElementById('main-container');
+                            if (!fresh) { window.location.href = url; return; }   // signed out
+                            document.getElementById('main-container').innerHTML = fresh.innerHTML;
+                            history.replaceState(history.state, '', url);
+                        })
+                        .catch(function () { window.location.href = url; });
+                });
             }
 
             if (previousNavBtn && bundleSelect) {
@@ -381,59 +375,54 @@
                 });
             }
 
-            if (bundleSelect && budsTitle) {
+            if (bundleSelect) {
                 bundleSelect.addEventListener('change', function() {
                     const picked = getCurrentBundleIndex();
                     goToBundle(picked, picked < shownBundleIndex ? 'right' : 'left');
                 });
             }
 
-            const bundleActiveToggle = document.querySelector('.bundle-active-toggle');
-            if (bundleActiveToggle) {
-                bundleActiveToggle.addEventListener('click', function() {
-                    const bundleId = bundleActiveToggle.getAttribute('data-bundle-id');
-                    const isActive = bundleActiveToggle.getAttribute('aria-pressed') === '1';
+            $(document).on('click', '.bundle-active-toggle', function() {
+                const bundleActiveToggle = this;
+                const bundleId = bundleActiveToggle.getAttribute('data-bundle-id');
+                const isActive = bundleActiveToggle.getAttribute('aria-pressed') === '1';
 
-                    bundleActiveToggle.setAttribute('aria-pressed', isActive ? '0' : '1');
-                    bundleActiveToggle.querySelector('.bundle-toggle-on').classList.toggle('bundle-toggle-hidden', isActive);
-                    bundleActiveToggle.querySelector('.bundle-toggle-off').classList.toggle('bundle-toggle-hidden', !isActive);
-                    
-                    // Toggle status text
-                    const statusText = document.querySelector('.bundle-status-text');
-                    if (statusText) {
-                        statusText.querySelector('.bundle-status-active').classList.toggle('bundle-toggle-hidden', isActive);
-                        statusText.querySelector('.bundle-status-inactive').classList.toggle('bundle-toggle-hidden', !isActive);
-                    }
-                    
-                    document.getElementById('loading-screen').style.display = 'flex';
-                    fetch('/toggle-bundle-active', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ bundle_id: bundleId, active: isActive ? 0 : 1 })
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.status === 'success') {
-                            // Refresh notification badge before reloading
-                            if (typeof refreshNotificationBadge === 'function') {
-                                refreshNotificationBadge();
-                            }
-                            saveDailyTotalsAndRemainders();
-                            location.reload();
-                        } else {
-                            showToast(data.message || 'Error updating bundle status.', 'error');
+                bundleActiveToggle.setAttribute('aria-pressed', isActive ? '0' : '1');
+                bundleActiveToggle.querySelector('.bundle-toggle-on').classList.toggle('bundle-toggle-hidden', isActive);
+                bundleActiveToggle.querySelector('.bundle-toggle-off').classList.toggle('bundle-toggle-hidden', !isActive);
+                
+                // Toggle status text
+                const statusText = document.querySelector('.bundle-status-text');
+                if (statusText) {
+                    statusText.querySelector('.bundle-status-active').classList.toggle('bundle-toggle-hidden', isActive);
+                    statusText.querySelector('.bundle-status-inactive').classList.toggle('bundle-toggle-hidden', !isActive);
+                }
+                
+                document.getElementById('loading-screen').style.display = 'flex';
+                fetch('/toggle-bundle-active', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bundle_id: bundleId, active: isActive ? 0 : 1 })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        // Refresh notification badge before reloading
+                        if (typeof refreshNotificationBadge === 'function') {
+                            refreshNotificationBadge();
                         }
-                    });
+                        saveDailyTotalsAndRemainders();
+                        location.reload();
+                    } else {
+                        showToast(data.message || 'Error updating bundle status.', 'error');
+                    }
                 });
-            }
+            });
         });
 
         $(function() {
-            const $addBundleItemsLink = $('.add-bundle-items a');
-            const $budsContainer = $('.bundles-container');
-
             // Show modal when Add new item link is clicked
-            $addBundleItemsLink.on('click', function(e) {
+            $(document).on('click', '.add-bundle-items a', function(e) {
                 e.preventDefault();
                 // display:flex, not .show() - see .footer-modal in style.css.
                 $('#add-bundle-item-modal').css('display', 'flex');
@@ -469,6 +458,8 @@
                     return;
                 }
                 
+                // The bundle on show now - a turn may have swapped it.
+                const $budsContainer = $('.bundles-container');
                 const bundleId = $budsContainer.data('bundle-id');
                 const bundleActive = $budsContainer.data('bundle-active') === 1 ? 1 : 0;
                 
@@ -503,10 +494,7 @@
                 });
         });
     });        $(function() {
-            const $bundleTableBody = $('.bundle-table tbody');
-            const $budsContainer = $('.bundles-container');
-
-            $bundleTableBody.on('click', 'td', function() {
+            $(document).on('click', '.bundle-table tbody td', function() {
                 const $td = $(this);
                 const $tr = $td.closest('tr');
                 const itemId = $tr.find('.delete-bundle-item-btn').data('item-id');
@@ -574,8 +562,7 @@
                         $td.text(inputValue);
                         return;
                     }
-                    const bundleId = $budsContainer.data('bundle-id');
-                    const bundleActive = $budsContainer.data('bundle-active') === 1 ? 1 : 0;
+                    const bundleActive = $('.bundles-container').data('bundle-active') === 1 ? 1 : 0;
                     document.getElementById('loading-screen').style.display = 'flex';
                     $.ajax({
                         url: '/update-bundle-item',
@@ -616,10 +603,8 @@
         });
 
         $(function() {
-            const $bundleTableBody = $('.bundle-table tbody');
-
             // Delete bundle item with confirmation
-            $bundleTableBody.on('click', '.delete-bundle-item-btn', async function(e) {
+            $(document).on('click', '.delete-bundle-item-btn', async function(e) {
                 e.preventDefault();
                 const itemId = $(this).data('item-id');
                 if (!itemId) return;
@@ -685,11 +670,8 @@
         }
 
         $(function() {
-            const $budsContainer = $('.bundles-container');
-            const $deleteBundleBtn = $('#delete-bundle-btn');
-
             // Delete bundle with confirmation
-            $deleteBundleBtn.on('click', async function(e) {
+            $(document).on('click', '#delete-bundle-btn', async function(e) {
                 e.preventDefault();
                 const confirmed = await showConfirmModal({
                     title: 'Delete Bundle',
@@ -700,7 +682,7 @@
                 });
                 if (!confirmed) return;
 
-                const bundleId = $budsContainer.data('bundle-id');
+                const bundleId = $('.bundles-container').data('bundle-id');
                 document.getElementById('loading-screen').style.display = 'flex';
                 $.ajax({
                     url: '/delete-bundle',

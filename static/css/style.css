@@ -22305,8 +22305,7 @@ label.loaf-holiday {
     view-transition-name: page-turn-out;
 }
 
-.main-container.page-turn-in,
-:root[data-page-turn-arrive] .main-container {
+.main-container.page-turn-in {
     view-transition-name: page-turn-in;
 }
 
@@ -22455,14 +22454,4 @@ label.loaf-holiday {
     to {
         transform: translateY(100vh);
     }
-}
-
-/* Bundles in a browser without cross-document transitions (pageTurnTo):
-   the page itself slides away while the browser loads the next one. */
-.main-container.page-turn-away-left {
-    animation: pageTurnOutLeft 0.3s ease-out forwards;
-}
-
-.main-container.page-turn-away-right {
-    animation: pageTurnOutRight 0.3s ease-out forwards;
 }
