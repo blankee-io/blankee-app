@@ -10482,8 +10482,13 @@ transform: scale(1.2);
 
 /* Closing ---------------------------------------------------------------------
 
-   The mirror of the above, played while script.js holds the overlay open past
-   the moment it was told to hide - see "Closing an overlay" there.
+   The opening played backwards, held on screen by script.js past the moment
+   the overlay was told to hide - see "Closing an overlay" there. Every
+   dialog closes this way. A dialog that came out of a press goes back into
+   that spot over the same 420ms, its easing reversed (reversing
+   cubic-bezier(a, b, c, d) gives (1 - c, 1 - d, 1 - a, 1 - b)); one that
+   opened by itself shrinks a little into its centre over the 160ms it took
+   to arrive, ease-out reversed to ease-in.
 
    .modal-closing sits on the sheet, so one list of dialog classes covers every
    sheet rather than needing a rule per pairing. Both selectors are a class
@@ -10503,7 +10508,7 @@ transform: scale(1.2);
 }
 
 .modal-closing {
-    animation: modal-sheet-out 0.14s ease-in forwards;
+    animation: modal-sheet-out 0.16s ease-in forwards;
 }
 
 .modal-closing .modal-content,
@@ -10518,7 +10523,40 @@ transform: scale(1.2);
 .modal-closing .add-credit-account-modal-content,
 .modal-closing .change-password-modal-content,
 .modal-closing .test-purchase-modal-content {
-    animation: modal-grow-out 0.14s ease-in forwards;
+    animation: modal-grow-out 0.16s ease-in forwards;
+}
+
+/* Back into the press. Only a to: they leave from wherever they are. A class
+   deeper than the plain closing rules, so these win while they run. */
+@keyframes modal-press-out {
+    to { opacity: 0; transform: scale(0.08); }
+}
+
+@keyframes modal-press-sheet-out {
+    to {
+        opacity: 0;
+        backdrop-filter: blur(0);
+        -webkit-backdrop-filter: blur(0);
+    }
+}
+
+.modal-from-press.modal-closing {
+    animation: modal-press-sheet-out 420ms cubic-bezier(0.8, 0, 0.6, 1) forwards;
+}
+
+.modal-from-press.modal-closing .modal-content,
+.modal-from-press.modal-closing .modal-content-center,
+.modal-from-press.modal-closing .alert-modal-content,
+.modal-from-press.modal-closing .center-modal-content,
+.modal-from-press.modal-closing .modal-content-setup-profile,
+.modal-from-press.modal-closing .modal-content-category-recommendations,
+.modal-from-press.modal-closing .footer-modal-content,
+.modal-from-press.modal-closing .dashboard-d-modal-content,
+.modal-from-press.modal-closing .category-edit-modal-content,
+.modal-from-press.modal-closing .add-credit-account-modal-content,
+.modal-from-press.modal-closing .change-password-modal-content,
+.modal-from-press.modal-closing .test-purchase-modal-content {
+    animation: modal-press-out 420ms cubic-bezier(0.8, 0, 0.6, 1) forwards;
 }
 
 /* The profile dropdown is the exception: it grows taller rather than scaling,
@@ -19078,41 +19116,7 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 
 
 
-/* Closing the prompt with entries still unanswered does not simply hide it -
-   it shrinks into the corner bubble it becomes, so the count that appears
-   down there is visibly the same thing that was on screen a moment ago and
-   not a new object arriving from nowhere.
-
-   The distance is two custom properties set from script, because it depends
-   on where the dialog happens to be. Everything about how it moves - the
-   duration, the easing, how small it gets - is here. The 420ms matches
-   BUCKET_MINIMISE_MS in script.js; change one and change the other, or the
-   bubble pops before the dialog has finished arriving.
-
-   Only the leaving. It arrives the way every dialog does - out of the press
-   that opened it, or from its centre when it opens by itself ("Opening"
-   above) - which on 2026-10-31 replaced its own flight out of the corner. */
-.bucket-prompt-modal .modal-content {
-    transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 420ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Shrunk to nothing at the corner where the bubble sits. */
-.bucket-prompt-modal.bucket-prompt-minimising .modal-content {
-    transform: translate(var(--bucket-fly-x, 0), var(--bucket-fly-y, 0)) scale(0.08);
-    opacity: 0;
-}
-
-/* The backdrop fades with it, rather than snapping away and leaving the
-   dialog travelling across a page that has already brightened. */
-.bucket-prompt-modal.bucket-prompt-minimising {
-    backdrop-filter: blur(0);
-    -webkit-backdrop-filter: blur(0);
-    transition: backdrop-filter 420ms ease, -webkit-backdrop-filter 420ms ease;
-}
-
-/* The bubble catching it. */
-/* The bubble arriving. The opacity ramp matters as much as the scale: without
+/* The bubble arriving, as the dialog closes with entries still unanswered. The opacity ramp matters as much as the scale: without
    it the element snaps from display:none to fully opaque and the overshoot
    reads as a blink rather than a bounce. */
 @keyframes bucket-launcher-pop {
@@ -19129,11 +19133,6 @@ body:has(#bmc-iframe[style*="scale(1)"]) #bmc-close-btn {
 /* Anyone who has asked for less motion gets the destination without the
    journey - the bubble simply appears. */
 @media (prefers-reduced-motion: reduce) {
-    .bucket-prompt-modal .modal-content,
-    .bucket-prompt-modal.bucket-prompt-minimising {
-        transition: none;
-    }
-
     .bucket-launcher-pop {
         animation: none;
     }

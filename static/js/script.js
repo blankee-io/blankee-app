@@ -143,14 +143,19 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
  * and after covers all three, and nothing that closes an overlay had to learn
  * a new way to do it.
  *
+ * It is the opening played backwards (2026-10-31): a dialog that grew out of
+ * a press shrinks back into that same spot over the same 420ms, and one that
+ * opened by itself shrinks a little into its centre over the same 160ms it
+ * took to arrive. Every dialog closes this way; none animates its own exit.
+ *
  * Two things worth knowing:
  *
- * For the 140ms the animation runs, the element is still display:flex. Eight
+ * For the moment the animation runs, the element is still display:flex. Eight
  * places in the app read that back, all of them asking "is this open?" before
  * an Escape or an outside click closes it. The worst that happens is a second
  * close arriving during the first, which the phase guard below ignores.
  *
- * Re-opening an overlay inside those same 140ms is not detected, and it will
+ * Re-opening an overlay inside those same moments is not detected, and it will
  * finish closing. It is a rare thing to do and the outcome is the one the code
  * asked for; catching it would mean telling our own writes apart from everyone
  * else's on the same attribute, for a case nobody hits.
@@ -159,7 +164,8 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
     var SHEETS = ".modal, .footer-modal, .dashboard-d-modal, .modal-setup-profile," +
                  ".category-edit-modal, .center-modal-overlay, .test-purchase-modal," +
                  ".bundle-input-overlay, .category-input-overlay";
-    var DURATION = 140;
+    var CLOSE_MS = 160;          // modal-sheet-out in style.css
+    var PRESS_CLOSE_MS = 420;    // modal-press-sheet-out
 
     function playOut(el) {
         // Exactly what the closing code left inline, so it can be put back
@@ -170,6 +176,10 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
 
         el.__modalPhase = "closing";
         el.style.display = shown;
+        // Back to the press it came from, measured again where the dialog
+        // is now - it may have grown or moved while it was open.
+        var fromPress = el.classList.contains("modal-from-press") && el.__press;
+        if (fromPress) { aimAtPress(el, el.__press); }
         el.classList.add("modal-closing");
 
         var timer = null;
@@ -187,7 +197,7 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
         }
         // Never leave an overlay stuck open because an animation did not fire -
         // reduced motion removes it entirely, and then nothing ever ends.
-        timer = setTimeout(finish, DURATION + 260);
+        timer = setTimeout(finish, (fromPress ? PRESS_CLOSE_MS : CLOSE_MS) + 260);
         el.addEventListener("animationend", finish);
     }
 
@@ -221,17 +231,27 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
         };
     }
 
+    // Points the dialog's transform at the press, in its own pixels. Used on
+    // the way in and again on the way out (playOut), so the dialog goes back
+    // to the very spot it came from.
+    function aimAtPress(sheet, press) {
+        var dialog = sheet.querySelector(DIALOGS);
+        var box = dialog && boxWithin(dialog, sheet);
+        if (!box) { return false; }
+        dialog.style.setProperty("--press-x", Math.round(press.x - box.left) + "px");
+        dialog.style.setProperty("--press-y", Math.round(press.y - box.top) + "px");
+        return true;
+    }
+
     function opened(sheet) {
         sheet.classList.remove("modal-from-press");
+        sheet.__press = null;
         var press = modalPress;
         if (!press || Date.now() - press.at > PRESS_WINDOW_MS) { return; }
         if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) { return; }
-        var dialog = sheet.querySelector(DIALOGS);
-        var box = dialog && boxWithin(dialog, sheet);
-        if (!box) { return; }
+        if (!aimAtPress(sheet, press)) { return; }
         modalPress = null;
-        dialog.style.setProperty("--press-x", Math.round(press.x - box.left) + "px");
-        dialog.style.setProperty("--press-y", Math.round(press.y - box.top) + "px");
+        sheet.__press = { x: press.x, y: press.y };
         sheet.classList.add("modal-from-press");
     }
 
@@ -245,15 +265,6 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
             return;
         }
         if (!el.__modalShown) { return; }   // never seen open; nothing to play
-
-        // A dialog that animates its own exit opts out, because playOut works
-        // by putting the element BACK on screen for the length of the fade.
-        // For anything that has already animated itself away that is not a
-        // fade, it is a reappearance: the bucket prompt flies into the corner
-        // over 420ms, is hidden at the end of it, and was then shown again at
-        // full size for up to another 400ms - which is seen as the dialog
-        // blinking back after it has gone.
-        if (el.dataset.selfExit === "1") { el.__modalShown = null; return; }
 
         playOut(el);
     }
@@ -623,8 +634,6 @@ function showConfirmModal(opts) {
         // Cleared every time for the same reason the modifier is: the element
         // is shared, and a dialog that does not animate its own exit must not
         // inherit the opt-out from one that does.
-        if (opts.selfExit) { modal.dataset.selfExit = "1"; }
-        else { delete modal.dataset.selfExit; }
 
         if (opts.danger) {
             confirmBtn.classList.add('danger');
@@ -696,8 +705,10 @@ function showConfirmModal(opts) {
             var at = _openConfirmModals.indexOf(modal);
             if (at !== -1) { _openConfirmModals.splice(at, 1); }
             resolve(result);
-            // A stacked copy is not kept: the next one is built afresh.
-            if (stacked) { modal.remove(); }
+            // A stacked copy is not kept: the next one is built afresh. Taken
+            // out once its closing animation has played - removed at once, it
+            // vanished without one.
+            if (stacked) { setTimeout(function () { modal.remove(); }, 700); }
         }
         function persistCheckbox(outcome) {
             // persistOn says which outcomes record the preference. 'confirm' is
@@ -3112,12 +3123,10 @@ function showBucketPrompt(opts) {
             return showConfirmModal({
                 title: "Did these come through?",
                 modalClass: "bucket-prompt-modal",
-                // It leaves by flying into the corner - see
-                // minimiseBucketPrompt - so the shared fade must not follow it.
-                // It arrives the way every dialog does (2026-10-31): out of
-                // the press that opened it, or from its centre when it opens
-                // by itself - "Opening an overlay", near the top of this file.
-                selfExit: true,
+                // It comes and goes the way every dialog does (2026-10-31):
+                // out of the press that opened it and back into it, or from
+                // and to its centre when it opens by itself - "Opening an
+                // overlay" and "Closing an overlay" near the top of this file.
                 // Forwarded, not swallowed. Leaving this out was why the
                 // dialog vanished instead of shrinking into the corner: the
                 // hook existed and nothing ever handed it to the helper.
@@ -3471,10 +3480,6 @@ function syncMoneyLaunchers() {
         .catch(function () { /* leave the nav as it was */ });
 }
 
-// How long the dialog takes to fly to the corner. Must match the transition
-// declared for .bucket-prompt-minimising in style.css.
-var BUCKET_MINIMISE_MS = 420;
-
 // Set by any answer that actually changed something. The page behind the
 // prompt is showing figures those answers have just invalidated, so it has to
 // be re-rendered - but only if something really did change, or closing the
@@ -3693,69 +3698,15 @@ function bounceBucketLauncherOut() {
     return BUCKET_BOUNCE_MS;
 }
 
-function minimiseBucketPrompt(remaining) {
-    // Shrink the dialog into the bubble it is becoming, so the count in the
-    // corner is visibly the same thing that was just on screen rather than a
-    // new object that appeared from nowhere.
-    return new Promise(function (resolve) {
-        var modal = document.getElementById("generic-confirm-modal");
-        var content = modal && modal.querySelector(".modal-content");
-        if (!content || !remaining) { resolve(); return; }
-
-        // Someone who has asked for less motion gets the destination without
-        // the journey.
-        var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        if (still) { resolve(); return; }
-
-        // The bubble has to exist and be laid out before it can be measured,
-        // so it is revealed for the measuring and hidden again; it arrives
-        // with its pop as the dialog flies into it, below. (It once waited
-        // until the dialog had gone, so the two were never on screen at once;
-        // that doubled the time the close took, and catching the dialog reads
-        // well enough.)
-        var launcher = bucketLauncher();
-        var wasHidden = launcher.classList.contains("bucket-prompt-hidden");
-        if (wasHidden) { launcher.classList.remove("bucket-prompt-hidden"); }
-        var from = content.getBoundingClientRect();
-        var to = launcher.getBoundingClientRect();
-        if (wasHidden) { launcher.classList.add("bucket-prompt-hidden"); }
-        if (!from.width || !to.width) { resolve(); return; }
-
-        // Two numbers into CSS custom properties; the transition, easing and
-        // final scale all live in the stylesheet where they belong. The values
-        // cannot: they depend on where the dialog happens to be on screen.
-        content.style.setProperty("--bucket-fly-x",
-            ((to.left + to.width / 2) - (from.left + from.width / 2)) + "px");
-        content.style.setProperty("--bucket-fly-y",
-            ((to.top + to.height / 2) - (from.top + from.height / 2)) + "px");
-
-        modal.classList.add("bucket-prompt-minimising");
-
-        // The bubble pops in as the dialog flies into it - catching it - rather
-        // than waiting for the dialog to be gone and then arriving on its own,
-        // which doubled the time the whole thing took.
-        setBucketLauncher(remaining);
-        launcher.classList.add("bucket-launcher-pop");
-        setTimeout(function () {
-            launcher.classList.remove("bucket-launcher-pop");
-        }, 400);
-
-        // transitionend would be tidier, but it never fires if the element is
-        // hidden mid-flight or the transition is interrupted, and that would
-        // leave the dialog open for good. The timer always fires.
-        setTimeout(function () {
-            // Resolve FIRST, so the shared helper hides the dialog while it is
-            // still shrunk. Clearing the class before that let the content snap
-            // back to full size for one frame before disappearing, which read as
-            // a blink rather than a fade - that was the bug.
-            resolve();
-            setTimeout(function () {
-                modal.classList.remove("bucket-prompt-minimising");
-                content.style.removeProperty("--bucket-fly-x");
-                content.style.removeProperty("--bucket-fly-y");
-            }, 40);
-        }, BUCKET_MINIMISE_MS);
-    });
+function catchInBucketLauncher(remaining) {
+    // The corner bubble pops in with what is left as the dialog closes.
+    var launcher = bucketLauncher();
+    setBucketLauncher(remaining);
+    if (!launcher) { return; }
+    launcher.classList.add("bucket-launcher-pop");
+    setTimeout(function () {
+        launcher.classList.remove("bucket-launcher-pop");
+    }, 400);
 }
 
 // One prompt at a time. Several clicks on the bubble in a row used to start
@@ -3783,8 +3734,8 @@ function openBucketPrompt(opts) {
     var prompt = {
         announceEmpty: !!opts.announceEmpty,
         // Runs while the dialog is still on screen. Counts what is left, and
-        // if anything is, flies the dialog into the corner bubble before the
-        // shared helper dismantles it.
+        // if anything is, the corner bubble pops in with it as the dialog
+        // closes - the shared close, back to where it was opened from.
         //
         // Counted here, not asked for: the rows still in the dialog (an
         // answered row is removed; one whose answer is on its way does not
@@ -3796,7 +3747,8 @@ function openBucketPrompt(opts) {
             var modal = document.getElementById("generic-confirm-modal");
             var shown = modal ? modal.querySelectorAll(".bucket-prompt-item:not(.bucket-prompt-busy)").length : 0;
             var left = shown + (prompt.beyond || 0);
-            return left ? minimiseBucketPrompt(left) : null;
+            if (left) { catchInBucketLauncher(left); }
+            return null;
         }
     };
 

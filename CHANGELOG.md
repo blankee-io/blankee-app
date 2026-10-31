@@ -12,10 +12,12 @@ this file; the admin console links to it, it does not read it.
 
 ### Changed
 
-- **Dialogs grow out of what opened them.** A dialog opened by a click, a
-  tap, or Enter on a button now grows out of the exact spot that was
-  pressed. A dialog that opens by itself - on load, after a sync - still
-  eases in from its centre.
+- **Dialogs grow out of what opened them, and go back into it.** A dialog
+  opened by a click, a tap, or Enter on a button grows out of the exact spot
+  that was pressed, and closing plays the same thing backwards, into that
+  spot. A dialog that opens by itself - on load, after a sync - eases in
+  from its centre and back. Every dialog does this, the pending transactions
+  one included, which no longer flies in and out of the corner on its own.
 
 ## 1.69.0 — 2026-10-31
 
