@@ -5450,10 +5450,23 @@ function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences,
 // the arrow keys focusing the cell they arrive at. Focusing on a guessed
 // delay instead landed mid-turn, while the browser holds the old picture and
 // paints nothing, and left that cell's dark editing fill stuck behind.
-var PAGE_TURN_MS = 300;
+//
+// 0.2s, down from 0.3s so paging through weeks keeps up with the person
+// (2026-10-31). The same figure is in style.css, on every .slide-* class and
+// the turn's own animations - change them together.
+var PAGE_TURN_MS = 200;
 var PAGE_TURN_WAIT_MS = 1500;
 var PAGE_TURN_SLIDE_IN = { left: 'slide-left', right: 'slide-right', up: 'slide-up', down: 'slide-down' };
 var pageTurnCurrent = null;
+var pageTurnSlideUntil = 0;
+
+// True from the moment a turn starts until the new page has settled where it
+// belongs. The arrow keys use it: a press during the slide belongs to no
+// page yet, and acting on it started the person two or three cells into the
+// month they turned to.
+function pageTurnBusy() {
+    return pageTurnCurrent !== null || Date.now() < pageTurnSlideUntil;
+}
 
 function pageTurn(direction, update) {
     var root = document.documentElement;
@@ -5468,6 +5481,7 @@ function pageTurn(direction, update) {
         void container.offsetWidth;   // so the same slide twice running restarts
         container.classList.add(slide);
         setTimeout(function () { container.classList.remove(slide); }, PAGE_TURN_MS);
+        pageTurnSlideUntil = Date.now() + PAGE_TURN_MS;
         return Promise.resolve(update());
     }
 

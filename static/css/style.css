@@ -4337,11 +4337,11 @@ transform: scale(1.2);
 }
 
 .main-container.slide-left {
-    animation: slideLeft 0.3s ease-out;
+    animation: slideLeft 0.2s ease-out;
 }
 
 .main-container.slide-right {
-    animation: slideRight 0.3s ease-out;
+    animation: slideRight 0.2s ease-out;
 }
 
 .main-container.slide-left-slow {
@@ -4392,11 +4392,11 @@ transform: scale(1.2);
    screen height, the same as the old week travels on its way out
    (pageTurn in script.js), so the two move as one. */
 .main-container.slide-up {
-    animation: slideUp 0.3s ease-out;
+    animation: slideUp 0.2s ease-out;
 }
 
 .main-container.slide-down {
-    animation: slideDown 0.3s ease-out;
+    animation: slideDown 0.2s ease-out;
 }
 
 @keyframes slideUp {
@@ -22418,7 +22418,7 @@ label.loaf-holiday {
 
 :root[data-page-turn]::view-transition-old(page-turn-out),
 :root[data-page-turn]::view-transition-new(page-turn-in) {
-    animation-duration: 0.3s;
+    animation-duration: 0.2s;   /* PAGE_TURN_MS in script.js */
     animation-timing-function: ease-out;
     animation-fill-mode: both;
 }
@@ -22459,9 +22459,9 @@ label.loaf-holiday {
 /* Bundles, where each bundle is a page of its own (pageTurnTo): the page
    itself slides away while the browser loads the next one. */
 .main-container.page-turn-away-left {
-    animation: pageTurnOutLeft 0.3s ease-out forwards;
+    animation: pageTurnOutLeft 0.2s ease-out forwards;
 }
 
 .main-container.page-turn-away-right {
-    animation: pageTurnOutRight 0.3s ease-out forwards;
+    animation: pageTurnOutRight 0.2s ease-out forwards;
 }

@@ -4069,6 +4069,12 @@
         }
 
         function handleInputKeyNavigation(event, input) {
+            // Not while the page is turning: the press belongs to no page yet
+            // (pageTurnBusy in script.js).
+            if (event.key.startsWith('Arrow') && typeof pageTurnBusy === 'function' && pageTurnBusy()) {
+                event.preventDefault();
+                return;
+            }
             const td = input.parentElement;
             const row = td.parentElement;
             const currentCellIndex = Array.from(row.children).indexOf(td);

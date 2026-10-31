@@ -1941,13 +1941,13 @@
                 pull = 0;
                 // Put there as the new week is drawn - inside the turn, so the
                 // old week's picture is taken where it was left - and again
-                // once its slide (300ms) is over: the cards are rebuilt in
+                // once its slide (200ms) is over: the cards are rebuilt in
                 // between and the page height moves with them.
                 const land = direction > 0
                     ? () => { scroller().scrollTop = 0; }
                     : () => { const s = scroller(); s.scrollTop = s.scrollHeight; };
                 if (direction > 0) { nextWeek(true, land); } else { previousWeek(true, land); }
-                setTimeout(land, 360);
+                setTimeout(land, 260);
             }
 
             window.addEventListener('wheel', function (e) {
