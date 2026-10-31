@@ -5380,8 +5380,11 @@ function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences,
 // slides in live, so figures that arrive during the slide appear in place,
 // and waiting on them made every turn a round trip slower.
 //
-// A browser without view transitions, and a page a swipe has already carried
-// off the screen by hand, get the slide-in alone - the old behaviour.
+// A swipe hands over mid-drag (pageTurnCarriesSwipe): the old page's picture
+// carries on from where the finger let go and the new page follows edge to
+// edge - --page-turn-from in style.css. A browser without view transitions
+// gets the slide-in alone - the old behaviour, which its swipe still flings
+// the page off for by hand.
 //
 // Returns a promise that settles once the new page has drawn and the browser
 // is painting again, for a caller with something to do on the new page -
@@ -5402,6 +5405,14 @@ var pageTurnSlideUntil = 0;
 // belongs. The arrow keys use it: a press during the slide belongs to no
 // page yet, and acting on it started the person two or three cells into the
 // month they turned to.
+// Whether a swipe should hand its page straight to pageTurn as the finger
+// lets go, rather than fling it off the screen by hand first. Wherever the
+// browser can take the picture, yes: the turn carries on from the drag.
+function pageTurnCarriesSwipe() {
+    var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return !!document.startViewTransition && !still;
+}
+
 function pageTurnBusy() {
     return pageTurnCurrent !== null || Date.now() < pageTurnSlideUntil;
 }
@@ -5412,8 +5423,7 @@ function pageTurn(direction, update) {
     var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (!container || still) { return Promise.resolve(update()); }
 
-    var swiped = container.style.transform && !/^(none|translateX\(0(px)?\))$/.test(container.style.transform);
-    if (!document.startViewTransition || swiped) {
+    if (!document.startViewTransition) {
         var slide = PAGE_TURN_SLIDE_IN[direction] || 'slide-left';
         container.classList.remove('slide-left', 'slide-right', 'slide-up', 'slide-down');
         void container.offsetWidth;   // so the same slide twice running restarts
@@ -5427,6 +5437,11 @@ function pageTurn(direction, update) {
     // style.css), swapped once the picture is taken.
     var token = {};
     pageTurnCurrent = token;
+    // How far a swipe had dragged the page when it let go - nothing for the
+    // arrows. The page puts itself back straight after this, before the
+    // picture is taken, so the offset travels as a number instead.
+    var dragged = /translateX\((-?[\d.]+)px\)/.exec(container.style.transform || '');
+    root.style.setProperty('--page-turn-from', (dragged ? parseFloat(dragged[1]) : 0) + 'px');
     root.setAttribute('data-page-turn', direction);
     container.classList.remove('page-turn-in');
     container.classList.add('page-turn-out');

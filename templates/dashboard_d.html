@@ -388,6 +388,15 @@
 
         // Function to animate the slide effect
         function slideWithAnimation(direction) {
+            // Where the browser can turn the page itself, the turn carries on
+            // from where the finger let go (pageTurnCarriesSwipe, script.js).
+            if (pageTurnCarriesSwipe()) {
+                if (direction === 'left') { nextWeek(); } else { previousWeek(); }
+                mainContainer.style.transition = 'none';
+                mainContainer.style.transform = 'translateX(0)';
+                return;
+            }
+
             isAnimating = true;
 
             if (direction === 'left') {

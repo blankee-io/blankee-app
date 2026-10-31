@@ -861,6 +861,15 @@
 
         // Function to handle sliding with animation
         function slideWithAnimation(direction) {
+            // Where the browser can turn the page itself, the turn carries on
+            // from where the finger let go (pageTurnCarriesSwipe, script.js).
+            if (pageTurnCarriesSwipe()) {
+                if (direction === 'left') { nextMonth(); } else { previousMonth(); }
+                mainContainer.style.transition = 'none';
+                mainContainer.style.transform = '';
+                return;
+            }
+
             isAnimating = true;
 
             if (direction === 'left') {

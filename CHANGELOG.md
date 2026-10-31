@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.70.1 — 2026-10-31
+
+### Fixed
+
+- **A swipe turns the page the way the arrows do.** Swiping to the next or
+  previous week, month or year flung the old page off by hand and slid the
+  new one in after it, so the old page never travelled with the new. The
+  turn now carries on from where the finger lets go, the two pages edge to
+  edge - in the iOS app as in the browser.
+
 ## 1.70.0 — 2026-10-31
 
 ### Changed

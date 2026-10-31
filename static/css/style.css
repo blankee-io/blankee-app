@@ -22421,20 +22421,51 @@ label.loaf-holiday {
 :root[data-page-turn="right"]::view-transition-old(page-turn-out) { animation-name: pageTurnOutRight; }
 :root[data-page-turn="up"]::view-transition-old(page-turn-out) { animation-name: pageTurnOutUp; }
 :root[data-page-turn="down"]::view-transition-old(page-turn-out) { animation-name: pageTurnOutDown; }
-:root[data-page-turn="left"]::view-transition-new(page-turn-in) { animation-name: slideLeft; }
-:root[data-page-turn="right"]::view-transition-new(page-turn-in) { animation-name: slideRight; }
+:root[data-page-turn="left"]::view-transition-new(page-turn-in) { animation-name: pageTurnInLeft; }
+:root[data-page-turn="right"]::view-transition-new(page-turn-in) { animation-name: pageTurnInRight; }
 :root[data-page-turn="up"]::view-transition-new(page-turn-in) { animation-name: slideUp; }
 :root[data-page-turn="down"]::view-transition-new(page-turn-in) { animation-name: slideDown; }
 
+/* Sideways, from wherever a swipe had dragged the page (--page-turn-from,
+   set by pageTurn; 0 from the arrows). The new page starts that same
+   distance in, so the two stay edge to edge all the way. */
 @keyframes pageTurnOutLeft {
+    from {
+        transform: translateX(var(--page-turn-from, 0px));
+    }
+
     to {
         transform: translateX(-100%);
     }
 }
 
 @keyframes pageTurnOutRight {
+    from {
+        transform: translateX(var(--page-turn-from, 0px));
+    }
+
     to {
         transform: translateX(100%);
+    }
+}
+
+@keyframes pageTurnInLeft {
+    from {
+        transform: translateX(calc(100% + var(--page-turn-from, 0px)));
+    }
+
+    to {
+        transform: translateX(0);
+    }
+}
+
+@keyframes pageTurnInRight {
+    from {
+        transform: translateX(calc(-100% + var(--page-turn-from, 0px)));
+    }
+
+    to {
+        transform: translateX(0);
     }
 }
 

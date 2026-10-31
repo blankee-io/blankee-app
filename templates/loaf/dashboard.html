@@ -1580,6 +1580,15 @@
     }
 
     function slideWithAnimation(direction) {
+        // Where the browser can turn the page itself, the turn carries on
+        // from where the finger let go (pageTurnCarriesSwipe, script.js).
+        if (pageTurnCarriesSwipe()) {
+            shiftMonth(direction === 'left' ? 1 : -1);
+            mainContainer.style.transition = 'none';
+            mainContainer.style.transform = 'translateX(0)';
+            return;
+        }
+
         isAnimating = true;
         mainContainer.style.transition = 'transform 0.3s ease';
         mainContainer.style.transform = 'translateX('
