@@ -5423,6 +5423,46 @@ var pageTurnSlideUntil = 0;
 var pageTurnDrag = null;      // the turn a finger is holding
 var pageTurnStarting = null;  // set while a drag starts its turn - see pageTurn
 var pageTurnQuiet = false;    // set while a drag let go short puts its page back
+var pageTurnTouch = null;     // where the current touch began, and on what
+
+// Every touch, before the page's own handlers see it. A touch's events all go
+// to the element it began on, even once that element has left the page -
+// and turning the page redraws the grid the finger is on, so the cell it
+// began on is thrown away and its events stop reaching the page's handlers,
+// which are on the page. The drag then stopped dead wherever the finger was,
+// paused for good. The turn listens on that element itself (pageTurnHoldTouch),
+// which still hears its own events.
+//
+// And a touch that begins while a turn is still held - the last one's end
+// somehow lost - lets that turn go first, rather than leaving it stuck.
+document.addEventListener('touchstart', function (e) {
+    if (pageTurnDrag) { pageTurnDragRelease(); }
+    var t = e.touches && e.touches[0];
+    pageTurnTouch = t ? { target: e.target, x: t.screenX } : null;
+}, { capture: true, passive: true });
+
+function pageTurnHoldTouch(drag) {
+    var touch = pageTurnTouch;
+    var el = touch && touch.target;
+    if (!el || !el.addEventListener) { return; }
+    function move(e) {
+        var t = e.touches && e.touches[0];
+        if (pageTurnDrag !== drag || !t) { return; }
+        if (e.cancelable) { e.preventDefault(); }   // no scrolling under a turn
+        var sign = drag.direction === 'left' ? -1 : 1;
+        drag.progress = Math.max(0, Math.min(1, sign * (t.screenX - touch.x) / drag.width));
+        pageTurnDragShow(drag);
+    }
+    function end() {
+        el.removeEventListener('touchmove', move);
+        el.removeEventListener('touchend', end);
+        el.removeEventListener('touchcancel', end);
+        if (pageTurnDrag === drag) { pageTurnDragRelease(); }
+    }
+    el.addEventListener('touchmove', move, { passive: false });
+    el.addEventListener('touchend', end);
+    el.addEventListener('touchcancel', end);
+}
 
 function pageTurnDragFollow(dx, width, next, previous) {
     if (pageTurnDrag && pageTurnDrag.manual) { return false; }   // see pageTurnDragSteer
@@ -5441,6 +5481,7 @@ function pageTurnDragFollow(dx, width, next, previous) {
         // itself and springs back, as it always has.
         if (!drag.turn) { return false; }
         pageTurnDrag = drag;
+        pageTurnHoldTouch(drag);
     }
     var sign = pageTurnDrag.direction === 'left' ? -1 : 1;
     pageTurnDrag.progress = Math.max(0, Math.min(1, sign * dx / pageTurnDrag.width));
