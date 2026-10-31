@@ -8,6 +8,13 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.70.3 — 2026-10-31
+
+### Fixed
+
+- **The nav and calendar bars stay on screen while a page turns.** In the
+  iOS app, scrolled down, they vanished for the length of the turn.
+
 ## 1.70.2 — 2026-10-31
 
 ### Fixed

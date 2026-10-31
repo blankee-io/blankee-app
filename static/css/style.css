@@ -22303,14 +22303,6 @@ label.loaf-holiday {
     view-transition-name: page-turn-in;
 }
 
-:root[data-page-turn-live] .nav-bar {
-    view-transition-name: page-turn-nav;
-}
-
-:root[data-page-turn-live] .calendarnav {
-    view-transition-name: page-turn-calendar;
-}
-
 /* The backdrops only while open: closed, each is still a full-page layer
    with an 8px blur, invisible at opacity 0 - pulled into the turn, it
    blurred the whole page as it slid. */
@@ -22352,8 +22344,6 @@ label.loaf-holiday {
 }
 
 :root[data-page-turn]::view-transition-old(root),
-:root[data-page-turn]::view-transition-old(page-turn-nav),
-:root[data-page-turn]::view-transition-old(page-turn-calendar),
 :root[data-page-turn]::view-transition-old(page-turn-menu-backdrop),
 :root[data-page-turn]::view-transition-old(page-turn-menu),
 :root[data-page-turn]::view-transition-old(page-turn-profile-backdrop),
@@ -22364,16 +22354,12 @@ label.loaf-holiday {
 }
 
 :root[data-page-turn]::view-transition-new(root),
-:root[data-page-turn]::view-transition-new(page-turn-nav),
-:root[data-page-turn]::view-transition-new(page-turn-calendar),
 :root[data-page-turn]::view-transition-new(page-turn-menu-backdrop),
 :root[data-page-turn]::view-transition-new(page-turn-menu),
 :root[data-page-turn]::view-transition-new(page-turn-profile-backdrop),
 :root[data-page-turn]::view-transition-new(page-turn-profile),
 :root[data-page-turn]::view-transition-new(page-turn-notifications),
 :root[data-page-turn]::view-transition-new(page-turn-toasts),
-:root[data-page-turn]::view-transition-group(page-turn-nav),
-:root[data-page-turn]::view-transition-group(page-turn-calendar),
 :root[data-page-turn]::view-transition-group(page-turn-menu-backdrop),
 :root[data-page-turn]::view-transition-group(page-turn-menu),
 :root[data-page-turn]::view-transition-group(page-turn-profile-backdrop),
@@ -22383,13 +22369,8 @@ label.loaf-holiday {
     animation: none;
 }
 
-/* Stacked as the page stacks them: the bars, then the backdrops, then the
-   menu and panels over them, then the toasts over everything. */
-:root[data-page-turn]::view-transition-group(page-turn-nav),
-:root[data-page-turn]::view-transition-group(page-turn-calendar) {
-    z-index: 2;
-}
-
+/* Stacked as the page stacks them: the backdrops, then the menu and panels
+   over them, then the toasts over everything. */
 :root[data-page-turn]::view-transition-group(page-turn-menu-backdrop),
 :root[data-page-turn]::view-transition-group(page-turn-profile-backdrop) {
     z-index: 3;
@@ -22414,14 +22395,19 @@ label.loaf-holiday {
    picture is the whole page, which scrolled down is mostly above the screen,
    and the browser draws a name the new page alone has after every other -
    so iOS, which goes by that order rather than z-index, slid both pages over
-   the nav and calendar bars (2026-10-31). Two things keep them under:
+   the nav and calendar bars (2026-10-31).
 
-   The bars and the rest above the page are named only once the new page is
-   in place (data-page-turn-live, set by pageTurn), which puts them after the
+   So each picture is cut off at the foot of the calendar bar - and of the
+   strip it covers under itself on the dashboards (--calnav-gap) - and
+   however far up the page reaches, none of it is drawn over the bars. The
+   bars are not named for the turn at all: given pictures of their own, iOS
+   drew those where a sticky bar would sit unscrolled, off the top of the
+   screen, and the bars vanished for the turn. Left in the root, they are
+   drawn exactly where they are.
+
+   The menu, the panels and the toasts are named once the new page is in
+   place (data-page-turn-live, set by pageTurn), which puts them after the
    arriving page in that order too.
-
-   And each picture is cut off at the foot of the calendar bar, so however
-   far up the page reaches, none of it is drawn over the bars.
    --page-turn-clip-out/-in are that line in each picture's own pixels, from
    pageTurn; polygon() rather than inset() so the sides can reach well past
    the picture, which slides out beyond its own box. */

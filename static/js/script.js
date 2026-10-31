@@ -5587,7 +5587,10 @@ function pageTurnBusy() {
 function pageTurnClipLine(container) {
     var bar = document.querySelector('.calendarnav') || document.querySelector('.nav-bar');
     if (!bar) { return 0; }
-    var line = bar.getBoundingClientRect().bottom - container.getBoundingClientRect().top;
+    // With the strip the bar covers under itself on the dashboards, above
+    // their frozen headers.
+    var gap = parseFloat(getComputedStyle(bar).getPropertyValue('--calnav-gap')) || 0;
+    var line = bar.getBoundingClientRect().bottom + gap - container.getBoundingClientRect().top;
     return Math.max(0, Math.round(line));
 }
 
@@ -5632,7 +5635,7 @@ function pageTurn(direction, update) {
         if (pageTurnCurrent === token) {
             container.classList.remove('page-turn-out');
             container.classList.add('page-turn-in');
-            // The bars and the rest above the page, named now so they come
+            // The menu, the panels and the toasts, named now so they come
             // after the arriving page - see "THE PAGE TURNING" in style.css.
             root.setAttribute('data-page-turn-live', '');
         }
