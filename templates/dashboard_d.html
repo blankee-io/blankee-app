@@ -1664,11 +1664,15 @@
             });
         }
 
-        function previousWeek() {
+        // vertical: arriving by scrolling past the week's edge, so the week
+        // slides in up or down - the way the page was moving - rather than
+        // sideways, as it does from the buttons and a swipe.
+        function previousWeek(vertical) {
             const mainContainer = document.getElementById('main-container');
-            mainContainer.classList.remove('slide-left', 'slide-right');
-            mainContainer.classList.add('slide-right');
-            setTimeout(() => mainContainer.classList.remove('slide-right'), 300);
+            const slide = vertical ? 'slide-down' : 'slide-right';
+            mainContainer.classList.remove('slide-left', 'slide-right', 'slide-up', 'slide-down');
+            mainContainer.classList.add(slide);
+            setTimeout(() => mainContainer.classList.remove(slide), 300);
 
             document.getElementById('loading-screen').style.display = 'none';
             selectedDate.setUTCDate(selectedDate.getUTCDate() - 7);
@@ -1684,11 +1688,12 @@
             setTimeout(updateTodayBanner, 100);
         }
 
-        function nextWeek() {
+        function nextWeek(vertical) {
             const mainContainer = document.getElementById('main-container');
-            mainContainer.classList.remove('slide-left', 'slide-right');
-            mainContainer.classList.add('slide-left');
-            setTimeout(() => mainContainer.classList.remove('slide-left'), 300);
+            const slide = vertical ? 'slide-up' : 'slide-left';
+            mainContainer.classList.remove('slide-left', 'slide-right', 'slide-up', 'slide-down');
+            mainContainer.classList.add(slide);
+            setTimeout(() => mainContainer.classList.remove(slide), 300);
 
             document.getElementById('loading-screen').style.display = 'none';
             selectedDate.setUTCDate(selectedDate.getUTCDate() + 7);
@@ -1958,7 +1963,7 @@
                 const land = direction > 0
                     ? () => { scroller().scrollTop = 0; }
                     : () => { const s = scroller(); s.scrollTop = s.scrollHeight; };
-                if (direction > 0) { nextWeek(); } else { previousWeek(); }
+                if (direction > 0) { nextWeek(true); } else { previousWeek(true); }
                 land();
                 setTimeout(land, 60);
                 setTimeout(land, 360);

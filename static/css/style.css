@@ -4391,6 +4391,42 @@ transform: scale(1.2);
     }
 }
 
+/* Day view's week arriving by scrolling past the edge of the last one: up
+   from below for the next week, down from above for the one before. A
+   partial distance rather than a whole height - the week is far taller than
+   the screen, and travelling all of it would be a long blur. */
+.main-container.slide-up {
+    animation: slideUp 0.3s ease-out;
+}
+
+.main-container.slide-down {
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(40vh);
+        opacity: 0.5;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideDown {
+    from {
+        transform: translateY(-40vh);
+        opacity: 0.5;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
 #table-container {
     display: flex;
     align-items: flex-start;

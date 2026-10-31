@@ -18,6 +18,8 @@ this file; the admin console links to it, it does not read it.
   deliberate pull past the edge - a hint says what is about to happen as it
   builds - and one gesture never skips two weeks. On a phone, dragging on
   past the end does the same.
+  The week slides in up or down, the way the page was moving, rather than
+  sideways as it does from the arrows.
 
 ## 1.67.2 — 2026-10-24
 
