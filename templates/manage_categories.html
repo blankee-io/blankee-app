@@ -1092,14 +1092,12 @@
             editCategoryModal.addEventListener('mousedown', function(e) {
                 if (e.target === editCategoryModal) {
                     editCategoryModal.style.display = 'none';
-                    editCategoryGroupRow.style.display = 'none';
                     isModalOpen = false;
                 }
             });
             document.addEventListener('keydown', function(e) {
                 if (isModalOpen && e.key === 'Escape') {
                     editCategoryModal.style.display = 'none';
-                    editCategoryGroupRow.style.display = 'none';
                     document.getElementById('editGroupModal').style.display = 'none';
                     closeAddCategoryModal();
                     closeAddGroupModal();

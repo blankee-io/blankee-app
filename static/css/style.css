@@ -5155,10 +5155,16 @@ transform: scale(1.2);
     vertical-align: middle;
 }
 
+/* The small "Add ..." dialogs: one field, Cancel and Create - adding a
+   category or group (Week, Month, Categories) and a bundle. Written against
+   the classes, so every dialog of this shape looks the same; it was written
+   against the ids of the first six, and Add Bundle, built on the same
+   classes, came out as a bare input and two browser buttons. The
+   .modal / .modal-content in each selector keeps them above the general
+   rules for those, as the ids did. */
+
 /* Overlay for modal background */
-#category-input-overlay,
-#addCategoryModal.category-input-overlay,
-#addGroupModal.category-input-overlay {
+.modal.category-input-overlay {
     position: fixed;
     top: 0;
     left: 0;
@@ -5180,17 +5186,12 @@ transform: scale(1.2);
 }
 
 /* Modal popup for category input */
-#income-category-input-container,
-#expense-category-input-container,
-#ca-category-input-container,
-#add-category-input-container,
-#add-group-input-container,
-#group-input-container {
+.modal-content.floating-input-container {
     position: relative;
     top: auto;
     left: auto;
     z-index: auto;
-    display: none; 
+    display: flex;
     flex-direction: column;
     align-items: stretch;
     width: 400px;
@@ -5204,6 +5205,18 @@ transform: scale(1.2);
     transform: none;
     gap: 12px;
     box-sizing: border-box;
+}
+
+/* Several of these share one sheet on Week and Month, and Categories keeps
+   two, each shown by script when its button is pressed - so those start
+   hidden. Add Bundle has its sheet to itself and shows with it. */
+#income-category-input-container,
+#expense-category-input-container,
+#ca-category-input-container,
+#add-category-input-container,
+#add-group-input-container,
+#group-input-container {
+    display: none;
 }
 
 .floating-input-title {
@@ -5226,12 +5239,7 @@ transform: scale(1.2);
 }
 
 /* Input field styling inside the modal */
-#income-category-input-container input,
-#expense-category-input-container input,
-#ca-category-input-container input,
-#add-category-input-container input,
-#add-group-input-container input,
-#group-input-container input {
+.modal-content.floating-input-container input {
     width: 100%;
     height: 44px;
     padding: 12px 14px;
@@ -5241,17 +5249,10 @@ transform: scale(1.2);
     font-size: 14px;
     transition: all 0.2s ease;
     appearance: none;
-    appearance: none;
-    appearance: none;
     box-sizing: border-box;
 }
 
-#income-category-input-container input:focus,
-#expense-category-input-container input:focus,
-#ca-category-input-container input:focus,
-#add-category-input-container input:focus,
-#add-group-input-container input:focus,
-#group-input-container input:focus {
+.modal-content.floating-input-container input:focus {
     background-color: var(--text-light);
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-lighter);
@@ -5259,18 +5260,8 @@ transform: scale(1.2);
 }
 
 /* Button styling inside the modal */
-#income-category-input-container .floating-input-confirm-btn,
-#expense-category-input-container .floating-input-confirm-btn,
-#ca-category-input-container .floating-input-confirm-btn,
-#add-category-input-container .floating-input-confirm-btn,
-#add-group-input-container .floating-input-confirm-btn,
-#group-input-container .floating-input-confirm-btn,
-#income-category-input-container .floating-input-cancel-btn,
-#expense-category-input-container .floating-input-cancel-btn,
-#ca-category-input-container .floating-input-cancel-btn,
-#add-category-input-container .floating-input-cancel-btn,
-#add-group-input-container .floating-input-cancel-btn,
-#group-input-container .floating-input-cancel-btn {
+.modal-content.floating-input-container .floating-input-confirm-btn,
+.modal-content.floating-input-container .floating-input-cancel-btn {
     min-width: 0;
     flex: 1 1 0;
     min-height: 44px;
@@ -5283,74 +5274,38 @@ transform: scale(1.2);
     box-shadow: 0 2px 12px var(--shadow-lg);
 }
 
-#income-category-input-container .floating-input-confirm-btn,
-#expense-category-input-container .floating-input-confirm-btn,
-#ca-category-input-container .floating-input-confirm-btn,
-#add-category-input-container .floating-input-confirm-btn,
-#add-group-input-container .floating-input-confirm-btn,
-#group-input-container .floating-input-confirm-btn {
+.modal-content.floating-input-container .floating-input-confirm-btn {
     background: var(--primary);
     color: var(--text-light);
 }
 
-#expense-category-input-container.expense-theme .floating-input-confirm-btn,
-#add-category-input-container.expense-theme .floating-input-confirm-btn,
-#add-group-input-container.expense-theme .floating-input-confirm-btn,
-#group-input-container.expense-theme .floating-input-confirm-btn {
+.modal-content.floating-input-container.expense-theme .floating-input-confirm-btn {
     background: var(--accent);
 }
 
-#income-category-input-container .floating-input-cancel-btn,
-#expense-category-input-container .floating-input-cancel-btn,
-#ca-category-input-container .floating-input-cancel-btn,
-#add-category-input-container .floating-input-cancel-btn,
-#add-group-input-container .floating-input-cancel-btn,
-#group-input-container .floating-input-cancel-btn {
+.modal-content.floating-input-container .floating-input-cancel-btn {
     background: var(--secondary);
     color: var(--text-light);
 }
 
-#income-category-input-container .floating-input-confirm-btn:hover,
-#expense-category-input-container .floating-input-confirm-btn:hover,
-#ca-category-input-container .floating-input-confirm-btn:hover,
-#add-category-input-container .floating-input-confirm-btn:hover,
-#add-group-input-container .floating-input-confirm-btn:hover,
-#group-input-container .floating-input-confirm-btn:hover {
+.modal-content.floating-input-container .floating-input-confirm-btn:hover {
     background: var(--primary-hover);
     transform: translateY(-1px);
     box-shadow: 0 4px 16px var(--shadow-lg);
 }
 
-#expense-category-input-container.expense-theme .floating-input-confirm-btn:hover,
-#add-category-input-container.expense-theme .floating-input-confirm-btn:hover,
-#add-group-input-container.expense-theme .floating-input-confirm-btn:hover,
-#group-input-container.expense-theme .floating-input-confirm-btn:hover {
+.modal-content.floating-input-container.expense-theme .floating-input-confirm-btn:hover {
     background: var(--accent-hover);
 }
 
-#income-category-input-container .floating-input-cancel-btn:hover,
-#expense-category-input-container .floating-input-cancel-btn:hover,
-#ca-category-input-container .floating-input-cancel-btn:hover,
-#add-category-input-container .floating-input-cancel-btn:hover,
-#add-group-input-container .floating-input-cancel-btn:hover,
-#group-input-container .floating-input-cancel-btn:hover {
+.modal-content.floating-input-container .floating-input-cancel-btn:hover {
     background: var(--secondary-hover);
     transform: translateY(-1px);
     box-shadow: 0 4px 16px var(--shadow-lg);
 }
 
-#income-category-input-container .floating-input-confirm-btn:disabled,
-#expense-category-input-container .floating-input-confirm-btn:disabled,
-#ca-category-input-container .floating-input-confirm-btn:disabled,
-#add-category-input-container .floating-input-confirm-btn:disabled,
-#add-group-input-container .floating-input-confirm-btn:disabled,
-#group-input-container .floating-input-confirm-btn:disabled,
-#income-category-input-container .floating-input-cancel-btn:disabled,
-#expense-category-input-container .floating-input-cancel-btn:disabled,
-#ca-category-input-container .floating-input-cancel-btn:disabled,
-#add-category-input-container .floating-input-cancel-btn:disabled,
-#add-group-input-container .floating-input-cancel-btn:disabled,
-#group-input-container .floating-input-cancel-btn:disabled {
+.modal-content.floating-input-container .floating-input-confirm-btn:disabled,
+.modal-content.floating-input-container .floating-input-cancel-btn:disabled {
     background: var(--secondary-hover);
     cursor: not-allowed;
 }
@@ -10417,7 +10372,6 @@ transform: scale(1.2);
 .category-edit-modal,
 .center-modal-overlay,
 .test-purchase-modal,
-.bundle-input-overlay,
 .category-input-overlay {
     animation: modal-sheet-in 0.16s ease-out;
 }
@@ -10587,7 +10541,6 @@ transform: scale(1.2);
     .category-edit-modal,
     .center-modal-overlay,
     .test-purchase-modal,
-    .bundle-input-overlay,
     .category-input-overlay,
     .modal-content,
     .modal-content-center,
@@ -10632,8 +10585,8 @@ transform: scale(1.2);
 /* ---------------------------------------------------------------------------
    The canonical sheet. Every overlay in the app - .footer-modal,
    .dashboard-d-modal, .modal-setup-profile, .category-edit-modal,
-   .center-modal-overlay, .test-purchase-modal, .bundle-input-overlay, the
-   category input overlay and .loading-screen - is built to these three rules,
+   .center-modal-overlay, .test-purchase-modal, the category input overlay
+   and .loading-screen - is built to these three rules,
    and each of them points back here rather than restating them:
 
    1. align-items: flex-start, and the dialog centres itself with margin:auto.
@@ -12838,67 +12791,6 @@ form button[type="submit"] {
 
 .bundle-table tfoot tr {
     background-color: var(--secondary);
-}
-
-/* Overlay for modal background */
-.bundle-input-overlay {
-    position: fixed;
-    top: 0; left: 0;
-    z-index: 9998;
-    display: none;
-    justify-content: center;
-
-    /* flex-start + scrolling sheet + dvh - see .modal, which explains why. */
-    align-items: flex-start;
-    width: 100vw;
-    height: 100vh;
-    height: 100dvh;
-    padding: 20px 5px;
-    overflow-y: auto;
-    background: var(--shadow-xl);
-}
-
-.bundle-input-container {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 10px;
-    height: 85px;
-    max-width: 100%;
-    margin: auto;
-    /* Fits the screen and scrolls itself - see .modal-content. */
-    max-height: 100%;
-    overflow-y: auto;
-    padding: 24px 16px;
-    background: var(--text-light);
-    border-radius: 8px;
-    box-shadow: 0 0 6px var(--shadow-xxl);
-}
-
-.bundle-input-container input {
-    flex: 1;
-    padding: 8px;
-    border: 1px solid var(--secondary-hover);
-    border-radius: 4px;
-    font-size: 1rem;
-}
-
-.bundle-input-container button {
-    width: 35px;
-    height: 35px;
-    margin-left: 8px;
-    padding: 8px;
-    background: var(--primary);
-    border: none;
-    border-radius: 50%;
-    color: var(--text-light);
-    font-size: 1rem;
-    cursor: pointer;
-}
-
-.bundle-input-container button:hover {
-    background: var(--primary-hover);
-    transform: scale(1.2);
 }
 
 /* No flex here. display:flex on a <td> stops it being a table cell: it no
@@ -18300,17 +18192,38 @@ tr[data-collapsed] {
    animates open with transform scale(0) -> scale(1), so a translate here would
    be overwritten on open and fight the animation on close. inset:0 with
    margin:auto centres a fixed element of known size and leaves transform alone -
-   only its origin needs moving, so it grows from the middle rather than from a
-   corner that is no longer there. */
+   only its origin needs moving.
+
+   It opens and closes as the app's own dialogs do (2026-10-31): out of the
+   coffee button that was pressed and back into it, over the same 420ms, the
+   easing reversed on the way out and a fade alongside - see "Opening" and
+   "Closing" further on. The widget still drives it, by switching its inline
+   transform between scale(0) and scale(1); the timing, the origin and the
+   fade are ours. footer.html measures the press into --press-x/--press-y,
+   and without one it grows from its middle. */
 #bmc-iframe {
     inset: 0 !important;
     margin: auto !important;
-    transform-origin: center center !important;
+    transform-origin: var(--press-x, 50%) var(--press-y, 50%) !important;
+    transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 420ms cubic-bezier(0.4, 0, 0.2, 1) !important;
     /* The widget asks for window.innerHeight - 120px, which overflows once any
        browser chrome is taller than it assumed. Capping here is what makes it
        fit vertically on a short window. */
     max-height: calc(100vh - 48px) !important;
     max-width: calc(100vw - 32px) !important;
+}
+
+/* Closed, or closing: faded with the scale, and the easing reversed. */
+#bmc-iframe[style*="scale(0)"] {
+    opacity: 0 !important;
+    transition-timing-function: cubic-bezier(0.8, 0, 0.6, 1) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #bmc-iframe {
+        transition: none !important;
+    }
 }
 
 /* Its close button is created hidden and only revealed on narrow screens,

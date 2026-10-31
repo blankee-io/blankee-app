@@ -163,7 +163,7 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
 (function () {
     var SHEETS = ".modal, .footer-modal, .dashboard-d-modal, .modal-setup-profile," +
                  ".category-edit-modal, .center-modal-overlay, .test-purchase-modal," +
-                 ".bundle-input-overlay, .category-input-overlay";
+                 ".category-input-overlay";
     var CLOSE_MS = 160;          // modal-sheet-out in style.css
     var PRESS_CLOSE_MS = 420;    // modal-press-sheet-out
 
@@ -176,6 +176,19 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
 
         el.__modalPhase = "closing";
         el.style.display = shown;
+
+        // The dialog that was showing, held on screen with its sheet. Week,
+        // Month and Categories keep several dialogs in one sheet and hide the
+        // one that was showing along with it, so with only the sheet put back
+        // there was nothing to see close.
+        var dialog = el.__dialog, dialogInline = null, dialogHeld = false;
+        if (dialog && el.__dialogDisplay && el.contains(dialog)
+                && getComputedStyle(dialog).display === "none") {
+            dialogInline = dialog.style.display;
+            dialog.style.display = el.__dialogDisplay;
+            dialogHeld = true;
+        }
+
         // Back to the press it came from, measured again where the dialog
         // is now - it may have grown or moved while it was open.
         var fromPress = el.classList.contains("modal-from-press") && el.__press;
@@ -191,6 +204,7 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
             el.__modalPhase = "finishing";
             el.classList.remove("modal-closing");
             el.style.display = priorInline;
+            if (dialogHeld) { dialog.style.display = dialogInline; }
             el.__modalShown = null;
             // Both writes above land as mutations; clear the guard after them.
             setTimeout(function () { el.__modalPhase = null; }, 0);
@@ -231,11 +245,22 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
         };
     }
 
+    // The dialog a sheet is showing: the first one in it that is not hidden.
+    // Not simply the first one - Week and Month keep four in one sheet and
+    // show one at a time, and the first, hidden, has no position to measure.
+    function shownDialog(sheet) {
+        var all = sheet.querySelectorAll(DIALOGS);
+        for (var i = 0; i < all.length; i++) {
+            if (getComputedStyle(all[i]).display !== "none") { return all[i]; }
+        }
+        return null;
+    }
+
     // Points the dialog's transform at the press, in its own pixels. Used on
     // the way in and again on the way out (playOut), so the dialog goes back
     // to the very spot it came from.
     function aimAtPress(sheet, press) {
-        var dialog = sheet.querySelector(DIALOGS);
+        var dialog = sheet.__dialog || shownDialog(sheet);
         var box = dialog && boxWithin(dialog, sheet);
         if (!box) { return false; }
         dialog.style.setProperty("--press-x", Math.round(press.x - box.left) + "px");
@@ -244,6 +269,9 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
     }
 
     function opened(sheet) {
+        // Which dialog is showing, for playOut to hold on screen as it closes.
+        sheet.__dialog = shownDialog(sheet);
+        sheet.__dialogDisplay = sheet.__dialog ? getComputedStyle(sheet.__dialog).display : null;
         sheet.classList.remove("modal-from-press");
         sheet.__press = null;
         var press = modalPress;
@@ -269,11 +297,24 @@ var modalPress = null;   // { x, y, at } in viewport pixels and Date.now()
         playOut(el);
     }
 
+    // A sheet that stays open while the dialog in it changes - Week and
+    // Month switching from one "Add" dialog to another - follows along.
+    function dialogChanged(dialog) {
+        var sheet = dialog.closest(SHEETS);
+        if (!sheet || !sheet.__modalShown || sheet.__modalPhase) { return; }
+        var display = getComputedStyle(dialog).display;
+        if (display === "none") { return; }
+        sheet.__dialog = dialog;
+        sheet.__dialogDisplay = display;
+    }
+
     if (!window.MutationObserver) { return; }
     new MutationObserver(function (records) {
         for (var i = 0; i < records.length; i++) {
             var el = records[i].target;
-            if (el.nodeType === 1 && el.matches && el.matches(SHEETS)) { inspect(el); }
+            if (el.nodeType !== 1 || !el.matches) { continue; }
+            if (el.matches(SHEETS)) { inspect(el); }
+            else if (el.matches(DIALOGS)) { dialogChanged(el); }
         }
     }).observe(document.documentElement, {
         attributes: true,

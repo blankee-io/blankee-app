@@ -17,7 +17,14 @@ this file; the admin console links to it, it does not read it.
   that was pressed, and closing plays the same thing backwards, into that
   spot. A dialog that opens by itself - on load, after a sync - eases in
   from its centre and back. Every dialog does this, the pending transactions
-  one included, which no longer flies in and out of the corner on its own.
+  one included, which no longer flies in and out of the corner on its own,
+  and the Buy me a coffee window.
+
+### Fixed
+
+- **Add Bundle looks like the other Add dialogs** - the same field and the
+  same Cancel and Create buttons as adding a category or a group.
+- **Editing a category no longer drops its Group row as the dialog closes.**
 
 ## 1.69.0 — 2026-10-31
 

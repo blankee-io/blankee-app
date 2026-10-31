@@ -87,7 +87,19 @@
             // or the vendor changed that id - go to the page instead of doing
             // nothing at all.
             var widget = document.getElementById('bmc-wbtn');
-            if (widget) { widget.click(); return; }
+            if (widget) {
+                widget.click();
+                // Grow out of the press and shrink back into it, as the
+                // app's own dialogs do - see #bmc-iframe in style.css. In the
+                // iframe's own pixels: offsetLeft/Top leave its scale out.
+                var frame = document.getElementById('bmc-iframe');
+                var press = window.modalPress;
+                if (frame && press) {
+                    frame.style.setProperty('--press-x', Math.round(press.x - frame.offsetLeft) + 'px');
+                    frame.style.setProperty('--press-y', Math.round(press.y - frame.offsetTop) + 'px');
+                }
+                return;
+            }
             window.open('https://www.buymeacoffee.com/blankee', '_blank', 'noopener');
         });
     })();
