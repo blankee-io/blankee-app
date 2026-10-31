@@ -5581,6 +5581,16 @@ function pageTurnBusy() {
     return pageTurnCurrent !== null || Date.now() < pageTurnSlideUntil;
 }
 
+// The foot of the calendar bar, in the page's own pixels: how much of the top
+// of the page's picture is cut off as it slides, so none of it is drawn over
+// the bars. Nothing when the page starts below the bar - scrolled to the top.
+function pageTurnClipLine(container) {
+    var bar = document.querySelector('.calendarnav') || document.querySelector('.nav-bar');
+    if (!bar) { return 0; }
+    var line = bar.getBoundingClientRect().bottom - container.getBoundingClientRect().top;
+    return Math.max(0, Math.round(line));
+}
+
 function pageTurn(direction, update) {
     var root = document.documentElement;
     var container = document.getElementById('main-container');
@@ -5611,8 +5621,10 @@ function pageTurn(direction, update) {
     var dragged = drag ? null : /translateX\((-?[\d.]+)px\)/.exec(container.style.transform || '');
     root.style.setProperty('--page-turn-from', (dragged ? parseFloat(dragged[1]) : 0) + 'px');
     root.setAttribute('data-page-turn', direction);
+    root.removeAttribute('data-page-turn-live');
     container.classList.remove('page-turn-in');
     container.classList.add('page-turn-out');
+    root.style.setProperty('--page-turn-clip-out', pageTurnClipLine(container) + 'px');
 
     var drawnDone;
     var drawn = new Promise(function (resolve) { drawnDone = resolve; });
@@ -5620,8 +5632,16 @@ function pageTurn(direction, update) {
         if (pageTurnCurrent === token) {
             container.classList.remove('page-turn-out');
             container.classList.add('page-turn-in');
+            // The bars and the rest above the page, named now so they come
+            // after the arriving page - see "THE PAGE TURNING" in style.css.
+            root.setAttribute('data-page-turn-live', '');
         }
         var done = new Promise(function (resolve) { resolve(update()); });
+        // Where the new page is cut off, measured once it is drawn - Day
+        // view's turn into the next week has moved the scroll by then.
+        if (pageTurnCurrent === token) {
+            root.style.setProperty('--page-turn-clip-in', pageTurnClipLine(container) + 'px');
+        }
         done.then(drawnDone, drawnDone);
         // Under a finger nothing waits: the page is held still until this
         // settles, and a drag that froze while the month was fetched would
@@ -5642,6 +5662,7 @@ function pageTurn(direction, update) {
         if (pageTurnCurrent !== token) { return; }   // a newer turn owns the names now
         pageTurnCurrent = null;
         root.removeAttribute('data-page-turn');
+        root.removeAttribute('data-page-turn-live');
         container.classList.remove('page-turn-out', 'page-turn-in');
     });
     return Promise.all([drawn, turn.updateCallbackDone.catch(function () {})])

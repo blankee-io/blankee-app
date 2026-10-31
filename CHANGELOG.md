@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.70.2 — 2026-10-31
+
+### Fixed
+
+- **Turning a page scrolled down no longer slides it over the bars.** In
+  the iOS app the old and new pages were drawn over the nav bar and the
+  calendar bar while they slid. They now pass under both, as they do at
+  the top of the page.
+
 ## 1.70.1 — 2026-10-31
 
 ### Fixed
