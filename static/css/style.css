@@ -18226,11 +18226,14 @@ tr[data-collapsed] {
     transform-origin: var(--press-x, 50%) var(--press-y, 50%) !important;
     transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1),
                 opacity 420ms cubic-bezier(0.4, 0, 0.2, 1) !important;
-    /* The widget asks for window.innerHeight - 120px: on a tall screen a
-       column of empty white under a form that needs about 420px, plus the
-       link at its foot. 540px fits the two; anything more scrolls inside it.
-       Capped by the screen too, which is what makes it fit on a short one. */
+    /* The widget asks for window.innerHeight - 120px - as a min-height, which
+       outranks any height, and as 100% on a phone: a column of empty white
+       under a form that needs about 420px, plus the link at its foot. 540px
+       fits the two; anything more scrolls inside it. The min-height has to
+       go for the height to count. Capped by the screen too, which is what
+       makes it fit on a short one. */
     height: 540px !important;
+    min-height: 0 !important;
     max-height: calc(100vh - 48px) !important;
     max-width: calc(100vw - 32px) !important;
 }
@@ -18241,8 +18244,34 @@ tr[data-collapsed] {
     transition-timing-function: cubic-bezier(0.8, 0, 0.6, 1) !important;
 }
 
+/* Its backdrop: the bare <div> the widget puts the iframe in, which it grows
+   to the screen on open and collapses to nothing on close - and a click on
+   which closes it. Blurred as a dialog's sheet is (.modal), the blur rising
+   and falling with the window over the same 420ms. So it stays the size of
+   the screen even closed, where the collapse would cut the fade short, and
+   lets clicks through while it is. */
+body > div:has(> #bmc-iframe) {
+    width: 100% !important;
+    height: 100% !important;
+    backdrop-filter: blur(0);
+    -webkit-backdrop-filter: blur(0);
+    transition: backdrop-filter 420ms cubic-bezier(0.4, 0, 0.2, 1),
+                -webkit-backdrop-filter 420ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+body > div:has(> #bmc-iframe[style*="scale(1)"]) {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+body > div:has(> #bmc-iframe[style*="scale(0)"]) {
+    pointer-events: none;
+    transition-timing-function: cubic-bezier(0.8, 0, 0.6, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
-    #bmc-iframe {
+    #bmc-iframe,
+    body > div:has(> #bmc-iframe) {
         transition: none !important;
     }
 }
