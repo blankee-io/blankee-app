@@ -8,6 +8,13 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.70.4 — 2026-10-31
+
+### Fixed
+
+- **A swipe turns one page, once.** Letting go of a swipe could start the
+  slide over from the beginning, or jump on a page past the one dragged in.
+
 ## 1.70.3 — 2026-10-31
 
 ### Fixed

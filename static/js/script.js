@@ -5424,6 +5424,7 @@ var pageTurnDrag = null;      // the turn a finger is holding
 var pageTurnStarting = null;  // set while a drag starts its turn - see pageTurn
 var pageTurnQuiet = false;    // set while a drag let go short puts its page back
 var pageTurnTouch = null;     // where the current touch began, and on what
+var pageTurnEndTaken = false; // the turn has just had this touch's end - see pageTurnHoldTouch
 
 // Every touch, before the page's own handlers see it. A touch's events all go
 // to the element it began on, even once that element has left the page -
@@ -5457,7 +5458,16 @@ function pageTurnHoldTouch(drag) {
         el.removeEventListener('touchmove', move);
         el.removeEventListener('touchend', end);
         el.removeEventListener('touchcancel', end);
-        if (pageTurnDrag === drag) { pageTurnDragRelease(); }
+        if (pageTurnDrag !== drag) { return; }
+        pageTurnDragRelease();
+        // This listener hears the touch end first; the page's own handler
+        // hears it next, as it bubbles. Finding no turn held, the page took
+        // it for an ordinary swipe and started a second turn of its own - the
+        // first cut off, the page jumping on or the slide starting over. So
+        // for the rest of this event the turn still counts as held, and the
+        // page lets it be.
+        pageTurnEndTaken = true;
+        setTimeout(function () { pageTurnEndTaken = false; }, 0);
     }
     el.addEventListener('touchmove', move, { passive: false });
     el.addEventListener('touchend', end);
@@ -5490,6 +5500,7 @@ function pageTurnDragFollow(dx, width, next, previous) {
 }
 
 function pageTurnDragHeld() {
+    if (pageTurnEndTaken) { return true; }   // already let go - see pageTurnHoldTouch
     // One the browser would not let us steer is the page's own drag again:
     // its touchend handles it, and this is the end of it here.
     if (pageTurnDrag && pageTurnDrag.manual) { pageTurnDrag = null; return false; }
