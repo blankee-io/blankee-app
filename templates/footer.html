@@ -88,11 +88,16 @@
             // nothing at all.
             var widget = document.getElementById('bmc-wbtn');
             if (widget) {
+                // No scrolling inside it: sized to its form (#bmc-iframe in
+                // style.css), the page in it has nothing to scroll to. Before
+                // the click, because that is what loads the page, and the
+                // attribute is read as it loads.
+                var frame = document.getElementById('bmc-iframe');
+                if (frame) { frame.setAttribute('scrolling', 'no'); }
                 widget.click();
                 // Grow out of the press and shrink back into it, as the
                 // app's own dialogs do - see #bmc-iframe in style.css. In the
                 // iframe's own pixels: offsetLeft/Top leave its scale out.
-                var frame = document.getElementById('bmc-iframe');
                 var press = window.modalPress;
                 if (frame && press) {
                     frame.style.setProperty('--press-x', Math.round(press.x - frame.offsetLeft) + 'px');
