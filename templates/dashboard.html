@@ -891,7 +891,9 @@
                 clearBatchCache();
                 document.getElementById('loading-screen').style.display = 'flex';
                 currentMonthIndex++;
-                return updateView();
+                // Not returned: the grid is built before updateView's first
+                // await, and the totals it fetches fill in during the slide.
+                updateView();
             });
         }
 
@@ -935,9 +937,10 @@
                 clearBatchCache();
                 document.getElementById('loading-screen').style.display = 'flex';
                 currentMonthIndex--;
-                const drawn = updateView();
+                // Not returned: the grid is built before updateView's first
+                // await, and the totals it fetches fill in during the slide.
+                updateView();
                 nextMonthBtn.style.display = 'inline-block';
-                return drawn;
             });
         }
 

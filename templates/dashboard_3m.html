@@ -914,14 +914,14 @@
                     // Move to the first month of the next cluster
                     monthIndex = clusterIndex * 3;
                     currentMonthIndex = (year - baseYear) * 12 + monthIndex;
-                    return updateView();
+                    updateView();   // not returned: the totals fill in during the slide
                 } else if (year < maxYear) {
                     // Move to the first cluster of the next year
                     year++;
                     clusterIndex = 0;
                     monthIndex = 0;
                     currentMonthIndex = (year - baseYear) * 12 + monthIndex;
-                    return updateView();
+                    updateView();   // not returned: the totals fill in during the slide
                 }
             });
         }
@@ -961,14 +961,14 @@
                     // Move to the first month of the previous cluster
                     monthIndex = clusterIndex * 3;
                     currentMonthIndex = (year - baseYear) * 12 + monthIndex;
-                    return updateView();
+                    updateView();   // not returned: the totals fill in during the slide
                 } else if (year > baseYear) {
                     // Move to the last cluster of the previous year
                     year--;
                     clusterIndex = 3;
                     monthIndex = clusterIndex * 3;
                     currentMonthIndex = (year - baseYear) * 12 + monthIndex;
-                    return updateView();
+                    updateView();   // not returned: the totals fill in during the slide
                 }
             });
         }

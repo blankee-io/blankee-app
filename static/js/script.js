@@ -5441,6 +5441,9 @@ function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences,
 // week. update is the page's redraw; when it returns a promise (a fetch),
 // the old picture stays until the new page has drawn - up to
 // PAGE_TURN_WAIT_MS, after which the new page slides in as far as it got.
+// Return one only when there is nothing to show without it: the new page
+// slides in live, so figures that arrive during the slide appear in place,
+// and waiting on them made every turn a round trip slower.
 //
 // A browser without view transitions, and a page a swipe has already carried
 // off the screen by hand, get the slide-in alone - the old behaviour.
@@ -5451,10 +5454,10 @@ function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences,
 // delay instead landed mid-turn, while the browser holds the old picture and
 // paints nothing, and left that cell's dark editing fill stuck behind.
 //
-// 0.2s, down from 0.3s so paging through weeks keeps up with the person
-// (2026-10-31). The same figure is in style.css, on every .slide-* class and
-// the turn's own animations - change them together.
-var PAGE_TURN_MS = 200;
+// The same 0.3s is in style.css, on every .slide-* class and the turn's own
+// animations - change them together. (0.2s was tried on 2026-10-31: no
+// quicker to the eye, and it glitched.)
+var PAGE_TURN_MS = 300;
 var PAGE_TURN_WAIT_MS = 1500;
 var PAGE_TURN_SLIDE_IN = { left: 'slide-left', right: 'slide-right', up: 'slide-up', down: 'slide-down' };
 var pageTurnCurrent = null;
