@@ -523,50 +523,26 @@
 
         // Navigate to previous year
         function previousYear() {
-            const mainContainer = document.getElementById('main-container');
-            mainContainer.classList.remove('slide-left', 'slide-right');
-            pageTurnGhost(mainContainer, 'right');   // the old page leaves too
-            mainContainer.classList.add('slide-right');
-
             document.getElementById('loading-screen').style.display = 'none';
-            if (selectedYear > minYear) {
+            if (selectedYear <= minYear) { return; }   // nowhere to turn to
+            pageTurn('right', () => {
                 selectedYear--;
-                
-                // Class removed on its own timer, matching the 0.3s the keyframes run
-                // for - and the redraw happens now rather than inside it, so the new
-                // content is what slides in. Removing the class at 50ms cancelled the
-                // animation a sixth of the way through, which is what made this feel
-                // too quick. dashboard_3m has always done it this way.
-                setTimeout(() => mainContainer.classList.remove('slide-right'), 300);
                 populateYearDropdown(selectedYear);
                 generateCalendar(selectedYear);
                 storeLatestViewedYear(selectedYear); // Store the latest viewed year
-            } else {
-            }
+            });
         }
     
         // Navigate to next year
         function nextYear() {
-            const mainContainer = document.getElementById('main-container');
-            mainContainer.classList.remove('slide-left', 'slide-right');
-            pageTurnGhost(mainContainer, 'left');   // the old page leaves too
-            mainContainer.classList.add('slide-left');
-
             document.getElementById('loading-screen').style.display = 'none';
-            if (selectedYear < maxYear) {
+            if (selectedYear >= maxYear) { return; }   // nowhere to turn to
+            pageTurn('left', () => {
                 selectedYear++;
-                
-                // Class removed on its own timer, matching the 0.3s the keyframes run
-                // for - and the redraw happens now rather than inside it, so the new
-                // content is what slides in. Removing the class at 50ms cancelled the
-                // animation a sixth of the way through, which is what made this feel
-                // too quick. dashboard_3m has always done it this way.
-                setTimeout(() => mainContainer.classList.remove('slide-left'), 300);
                 populateYearDropdown(selectedYear);
                 generateCalendar(selectedYear);
                 storeLatestViewedYear(selectedYear); // Store the latest viewed year
-            } else {
-            }
+            });
         }
     
         // Go to current year

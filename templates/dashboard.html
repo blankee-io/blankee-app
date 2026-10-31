@@ -887,20 +887,12 @@
 
         // Function to go to the next month
         function nextMonth() {
-            clearBatchCache();
-            const mainContainer = document.getElementById('main-container');
-            mainContainer.classList.remove('slide-left', 'slide-right');
-            pageTurnGhost(mainContainer, 'left');   // the old page leaves too
-            mainContainer.classList.add('slide-left');
-            setTimeout(() => mainContainer.classList.remove('slide-left'), 300);
-
-            document.getElementById('loading-screen').style.display = 'flex';
-            const totalMonths = (currentYear - baseYear) * 12 + currentMonthIndex + 1;
-            let nextYear = Math.floor(totalMonths / 12);
-            let nextMonthIndex = totalMonths % 12;
-
-            currentMonthIndex++;
-            updateView();
+            return pageTurn('left', () => {
+                clearBatchCache();
+                document.getElementById('loading-screen').style.display = 'flex';
+                currentMonthIndex++;
+                return updateView();
+            });
         }
 
         function goToCurrentMonth() {
@@ -939,18 +931,14 @@
 
         // Function to go to the previous month
         function previousMonth() {
-            clearBatchCache();
-            const mainContainer = document.getElementById('main-container');
-            mainContainer.classList.remove('slide-left', 'slide-right');
-            pageTurnGhost(mainContainer, 'right');   // the old page leaves too
-            mainContainer.classList.add('slide-right');
-            setTimeout(() => mainContainer.classList.remove('slide-right'), 300);
-
-            document.getElementById('loading-screen').style.display = 'flex';
-            currentMonthIndex--;
-            updateView();
-            nextMonthBtn.style.display = 'inline-block';
-
+            return pageTurn('right', () => {
+                clearBatchCache();
+                document.getElementById('loading-screen').style.display = 'flex';
+                currentMonthIndex--;
+                const drawn = updateView();
+                nextMonthBtn.style.display = 'inline-block';
+                return drawn;
+            });
         }
 
         async function updateView(sections = ["all"]) {
@@ -4154,16 +4142,19 @@
                 }
 
                 // Move month
+                let turned;
                 if (direction === 1 && typeof nextMonth === 'function') {
-                    nextMonth();
+                    turned = nextMonth();
                 } else if (direction === -1 && typeof previousMonth === 'function') {
-                    previousMonth();
+                    turned = previousMonth();
                 } else {
                     return;
                 }
 
-                // Wait for the DOM to update (updateView is async)
-                setTimeout(() => {
+                // Once the new month has drawn and the turn is painting again -
+                // not on a guessed delay, which landed mid-turn and left the
+                // cell's dark editing fill stuck (see pageTurn in script.js).
+                Promise.resolve(turned).then(() => {
                     // Find the same row in the new month
                     const newRow = document.querySelector(`${bodySelector} tr[data-category-id="${categoryId}"]`);
                     if (newRow) {
@@ -4183,7 +4174,7 @@
                             }
                         }
                     }
-                }, 250); // Delay may need tuning depending on your updateView speed
+                });
             }
 
             if (event.key === 'ArrowUp') {

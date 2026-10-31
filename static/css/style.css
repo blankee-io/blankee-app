@@ -4390,7 +4390,7 @@ transform: scale(1.2);
 /* Day view's week arriving by scrolling past the edge of the last one: up
    from below for the next week, down from above for the one before - a full
    screen height, the same as the old week travels on its way out
-   (pageTurnGhost in script.js), so the two move as one. */
+   (pageTurn in script.js), so the two move as one. */
 .main-container.slide-up {
     animation: slideUp 0.3s ease-out;
 }
@@ -22284,20 +22284,172 @@ label.loaf-holiday {
     max-width: 120px;
 }
 
-/* The old page leaving as a dashboard turns to the next or previous one
-   (pageTurnGhost in script.js): a copy of it, fixed where it was, sliding
-   away while the new one slides in underneath. Never clickable, and under
-   the calendar bar (98) and nav bar (100) so they stay put above it. */
-.page-turn-ghost {
-    position: fixed;
-    z-index: 50;
-    margin: 0;
-    pointer-events: none;
-    box-sizing: border-box;
+/* THE PAGE TURNING - turning a dashboard to the next or previous week,
+   month, quarter or year (pageTurn in script.js). The browser takes a
+   picture of the page as it was (a view transition) and the redraw happens
+   underneath; the picture slides away while the live new page slides in,
+   together, at the same speed and with no fade.
+
+   The leaving picture and the arriving page carry different names, so each
+   moves from where it really is - the picture from where the old page sat,
+   the new page from where it lands - even when the scroll moves between the
+   two, as it does in Day view's turn into the next week. Everything that
+   sits above the page - the nav and calendar bars, the side menu and the
+   profile and notification panels with their backdrops, the toasts - is
+   named for the turn too and kept above both pages, or the pictures would
+   slide over it; those and everything else change at once rather than
+   cross-fading. Clicks
+   go through to the page during a turn, so a quick second click turns again
+   rather than being lost. */
+.main-container.page-turn-out {
+    view-transition-name: page-turn-out;
 }
 
-/* The real page while its copy slides away and the browser loads the next
-   one (pageTurnTo) - Bundles' previous and next. */
-.main-container.page-turn-gone {
-    visibility: hidden;
+.main-container.page-turn-in {
+    view-transition-name: page-turn-in;
+}
+
+:root[data-page-turn] .nav-bar {
+    view-transition-name: page-turn-nav;
+}
+
+:root[data-page-turn] .calendarnav {
+    view-transition-name: page-turn-calendar;
+}
+
+:root[data-page-turn] #sideMenuBackdrop {
+    view-transition-name: page-turn-menu-backdrop;
+}
+
+:root[data-page-turn] #sideMenu {
+    view-transition-name: page-turn-menu;
+}
+
+:root[data-page-turn] #profileBackdrop {
+    view-transition-name: page-turn-profile-backdrop;
+}
+
+:root[data-page-turn] #profileDropdown {
+    view-transition-name: page-turn-profile;
+}
+
+:root[data-page-turn] #notificationsDropdown {
+    view-transition-name: page-turn-notifications;
+}
+
+:root[data-page-turn] #toast-container {
+    view-transition-name: page-turn-toasts;
+}
+
+:root[data-page-turn]::view-transition {
+    pointer-events: none;
+}
+
+:root[data-page-turn]::view-transition-old(root),
+:root[data-page-turn]::view-transition-old(page-turn-nav),
+:root[data-page-turn]::view-transition-old(page-turn-calendar),
+:root[data-page-turn]::view-transition-old(page-turn-menu-backdrop),
+:root[data-page-turn]::view-transition-old(page-turn-menu),
+:root[data-page-turn]::view-transition-old(page-turn-profile-backdrop),
+:root[data-page-turn]::view-transition-old(page-turn-profile),
+:root[data-page-turn]::view-transition-old(page-turn-notifications),
+:root[data-page-turn]::view-transition-old(page-turn-toasts) {
+    display: none;
+}
+
+:root[data-page-turn]::view-transition-new(root),
+:root[data-page-turn]::view-transition-new(page-turn-nav),
+:root[data-page-turn]::view-transition-new(page-turn-calendar),
+:root[data-page-turn]::view-transition-new(page-turn-menu-backdrop),
+:root[data-page-turn]::view-transition-new(page-turn-menu),
+:root[data-page-turn]::view-transition-new(page-turn-profile-backdrop),
+:root[data-page-turn]::view-transition-new(page-turn-profile),
+:root[data-page-turn]::view-transition-new(page-turn-notifications),
+:root[data-page-turn]::view-transition-new(page-turn-toasts),
+:root[data-page-turn]::view-transition-group(page-turn-nav),
+:root[data-page-turn]::view-transition-group(page-turn-calendar),
+:root[data-page-turn]::view-transition-group(page-turn-menu-backdrop),
+:root[data-page-turn]::view-transition-group(page-turn-menu),
+:root[data-page-turn]::view-transition-group(page-turn-profile-backdrop),
+:root[data-page-turn]::view-transition-group(page-turn-profile),
+:root[data-page-turn]::view-transition-group(page-turn-notifications),
+:root[data-page-turn]::view-transition-group(page-turn-toasts) {
+    animation: none;
+}
+
+/* Stacked as the page stacks them: the bars, then the backdrops, then the
+   menu and panels over them, then the toasts over everything. */
+:root[data-page-turn]::view-transition-group(page-turn-nav),
+:root[data-page-turn]::view-transition-group(page-turn-calendar) {
+    z-index: 2;
+}
+
+:root[data-page-turn]::view-transition-group(page-turn-menu-backdrop),
+:root[data-page-turn]::view-transition-group(page-turn-profile-backdrop) {
+    z-index: 3;
+}
+
+:root[data-page-turn]::view-transition-group(page-turn-menu),
+:root[data-page-turn]::view-transition-group(page-turn-profile),
+:root[data-page-turn]::view-transition-group(page-turn-notifications) {
+    z-index: 4;
+}
+
+:root[data-page-turn]::view-transition-group(page-turn-toasts) {
+    z-index: 5;
+}
+
+:root[data-page-turn]::view-transition-group(page-turn-out),
+:root[data-page-turn]::view-transition-group(page-turn-in) {
+    z-index: 1;
+}
+
+:root[data-page-turn]::view-transition-old(page-turn-out),
+:root[data-page-turn]::view-transition-new(page-turn-in) {
+    animation-duration: 0.3s;
+    animation-timing-function: ease-out;
+    animation-fill-mode: both;
+}
+
+:root[data-page-turn="left"]::view-transition-old(page-turn-out) { animation-name: pageTurnOutLeft; }
+:root[data-page-turn="right"]::view-transition-old(page-turn-out) { animation-name: pageTurnOutRight; }
+:root[data-page-turn="up"]::view-transition-old(page-turn-out) { animation-name: pageTurnOutUp; }
+:root[data-page-turn="down"]::view-transition-old(page-turn-out) { animation-name: pageTurnOutDown; }
+:root[data-page-turn="left"]::view-transition-new(page-turn-in) { animation-name: slideLeft; }
+:root[data-page-turn="right"]::view-transition-new(page-turn-in) { animation-name: slideRight; }
+:root[data-page-turn="up"]::view-transition-new(page-turn-in) { animation-name: slideUp; }
+:root[data-page-turn="down"]::view-transition-new(page-turn-in) { animation-name: slideDown; }
+
+@keyframes pageTurnOutLeft {
+    to {
+        transform: translateX(-100%);
+    }
+}
+
+@keyframes pageTurnOutRight {
+    to {
+        transform: translateX(100%);
+    }
+}
+
+@keyframes pageTurnOutUp {
+    to {
+        transform: translateY(-100vh);
+    }
+}
+
+@keyframes pageTurnOutDown {
+    to {
+        transform: translateY(100vh);
+    }
+}
+
+/* Bundles, where each bundle is a page of its own (pageTurnTo): the page
+   itself slides away while the browser loads the next one. */
+.main-container.page-turn-away-left {
+    animation: pageTurnOutLeft 0.3s ease-out forwards;
+}
+
+.main-container.page-turn-away-right {
+    animation: pageTurnOutRight 0.3s ease-out forwards;
 }

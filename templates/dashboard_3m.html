@@ -900,33 +900,30 @@
 
         // Function to go to the next month
         function nextCluster() {
-            clearBatchCache();
-            const mainContainer = document.getElementById('main-container');
-            mainContainer.classList.remove('slide-left', 'slide-right');
-            pageTurnGhost(mainContainer, 'left');   // the old page leaves too
-            mainContainer.classList.add('slide-left');
-            setTimeout(() => mainContainer.classList.remove('slide-left'), 300);
+            return pageTurn('left', () => {
+                clearBatchCache();
 
-            // Calculate current year and month
-            const totalMonths = baseYear * 12 + currentMonthIndex;
-            let year = Math.floor(totalMonths / 12);
-            let monthIndex = totalMonths % 12;
-            let clusterIndex = Math.floor(monthIndex / 3);
+                // Calculate current year and month
+                const totalMonths = baseYear * 12 + currentMonthIndex;
+                let year = Math.floor(totalMonths / 12);
+                let monthIndex = totalMonths % 12;
+                let clusterIndex = Math.floor(monthIndex / 3);
 
-            if (clusterIndex < 3) {
-                clusterIndex++;
-                // Move to the first month of the next cluster
-                monthIndex = clusterIndex * 3;
-                currentMonthIndex = (year - baseYear) * 12 + monthIndex;
-                updateView();
-            } else if (year < maxYear) {
-                // Move to the first cluster of the next year
-                year++;
-                clusterIndex = 0;
-                monthIndex = 0;
-                currentMonthIndex = (year - baseYear) * 12 + monthIndex;
-                updateView();
-            }
+                if (clusterIndex < 3) {
+                    clusterIndex++;
+                    // Move to the first month of the next cluster
+                    monthIndex = clusterIndex * 3;
+                    currentMonthIndex = (year - baseYear) * 12 + monthIndex;
+                    return updateView();
+                } else if (year < maxYear) {
+                    // Move to the first cluster of the next year
+                    year++;
+                    clusterIndex = 0;
+                    monthIndex = 0;
+                    currentMonthIndex = (year - baseYear) * 12 + monthIndex;
+                    return updateView();
+                }
+            });
         }
 
         function goToCurrentCluster() {
@@ -950,33 +947,30 @@
 
         // Function to go to the previous month
         function previousCluster() {
-            clearBatchCache();
-            const mainContainer = document.getElementById('main-container');
-            mainContainer.classList.remove('slide-left', 'slide-right');
-            pageTurnGhost(mainContainer, 'right');   // the old page leaves too
-            mainContainer.classList.add('slide-right');
-            setTimeout(() => mainContainer.classList.remove('slide-right'), 300);
+            return pageTurn('right', () => {
+                clearBatchCache();
 
-            // Calculate current year and month
-            const totalMonths = baseYear * 12 + currentMonthIndex;
-            let year = Math.floor(totalMonths / 12);
-            let monthIndex = totalMonths % 12;
-            let clusterIndex = Math.floor(monthIndex / 3);
+                // Calculate current year and month
+                const totalMonths = baseYear * 12 + currentMonthIndex;
+                let year = Math.floor(totalMonths / 12);
+                let monthIndex = totalMonths % 12;
+                let clusterIndex = Math.floor(monthIndex / 3);
 
-            if (clusterIndex > 0) {
-                clusterIndex--;
-                // Move to the first month of the previous cluster
-                monthIndex = clusterIndex * 3;
-                currentMonthIndex = (year - baseYear) * 12 + monthIndex;
-                updateView();
-            } else if (year > baseYear) {
-                // Move to the last cluster of the previous year
-                year--;
-                clusterIndex = 3;
-                monthIndex = clusterIndex * 3;
-                currentMonthIndex = (year - baseYear) * 12 + monthIndex;
-                updateView();
-            }
+                if (clusterIndex > 0) {
+                    clusterIndex--;
+                    // Move to the first month of the previous cluster
+                    monthIndex = clusterIndex * 3;
+                    currentMonthIndex = (year - baseYear) * 12 + monthIndex;
+                    return updateView();
+                } else if (year > baseYear) {
+                    // Move to the last cluster of the previous year
+                    year--;
+                    clusterIndex = 3;
+                    monthIndex = clusterIndex * 3;
+                    currentMonthIndex = (year - baseYear) * 12 + monthIndex;
+                    return updateView();
+                }
+            });
         }
 
         async function updateView(sections = ["all"]) {
@@ -4085,16 +4079,19 @@
                 }
 
                 // Move month
+                let turned;
                 if (direction === 1) {
-                    nextCluster();
+                    turned = nextCluster();
                 } else if (direction === -1) {
-                    previousCluster();
+                    turned = previousCluster();
                 } else {
                     return;
                 }
 
-                // Wait for the DOM to update (updateView is async)
-                setTimeout(() => {
+                // Once the new months have drawn and the turn is painting
+                // again - not on a guessed delay, which landed mid-turn and left
+                // the cell's dark editing fill stuck (see pageTurn in script.js).
+                Promise.resolve(turned).then(() => {
                     // Find the same row in the new month
                     const newRow = document.querySelector(`${bodySelector} tr[data-category-id="${categoryId}"]`);
                     if (newRow) {
@@ -4114,7 +4111,7 @@
                             }
                         }
                     }
-                }, 300); // Increased delay to ensure DOM updates completely
+                });
             }
 
             if (event.key === 'ArrowUp') {

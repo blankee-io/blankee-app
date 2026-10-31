@@ -656,8 +656,9 @@
         });
     }
 
+    // Returns the request, so a page turn can wait for the month to arrive.
     function load() {
-        $.ajax({
+        return $.ajax({
             url: '/loaf/api/month',
             data: {shelf_id: state.shelfId, basket_id: state.basketId,
                    year: state.year, month: state.month},
@@ -700,31 +701,17 @@
         resyncSelects();
     }
 
-    // The arrow path, copied from dashboard_m's previousMonth/nextMonth: add
-    // the slide class, move the month, and after a short delay drop the class
-    // and redraw. slideLeft and slideRight are Blankee's own keyframes on
-    // .main-container, which this page already is - so the animation needs no
-    // CSS of its own.
-    //
-    // The class comes off on its own 300ms timer, matching the keyframes, and
-    // the redraw happens now - so the new month is what slides in rather than
-    // the old one sliding for a sixth of a second and then being replaced.
-    // dashboard_m and dashboard_y took the 50ms route and have been changed to
-    // this too; dashboard_3m always did it this way.
+    // The arrow path: the month turns like Blankee's dashboards (pageTurn in
+    // script.js), the old month sliding away as the new one slides in, and
+    // the turn waits for the new month to arrive so it is the new month that
+    // slides in.
     function shiftMonth(by) {
-        mainContainer.classList.remove('slide-left', 'slide-right');
-        pageTurnGhost(mainContainer, by > 0 ? 'left' : 'right');   // the old month leaves too
-        mainContainer.classList.add(by > 0 ? 'slide-left' : 'slide-right');
-
-        var loading = el('loading-screen');
-        if (loading) { loading.style.display = 'none'; }
-
-        setTimeout(function () {
-            mainContainer.classList.remove('slide-left', 'slide-right');
-        }, 300);
-
-        stepMonth(by);
-        load();
+        pageTurn(by > 0 ? 'left' : 'right', function () {
+            var loading = el('loading-screen');
+            if (loading) { loading.style.display = 'none'; }
+            stepMonth(by);
+            return load();
+        });
     }
 
     // ------------------------------------------------------------ booking ----

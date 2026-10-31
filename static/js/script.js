@@ -5428,88 +5428,92 @@ function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences,
 // ═══════════════════════════════════════════════════════════════
 // Moving a dashboard to the next or previous week, month, quarter or year
 // slid the new content in while the old one simply vanished. Now the old one
-// goes too: pageTurnGhost copies what is on the screen into a fixed overlay
-// exactly where it sits, and slides that away - left or right, up or down,
-// the way the person is going - while the real page redraws underneath and
-// slides in from the other side as it always has. A copy rather than holding
-// the real page back, so no page's redraw - some synchronous, some fetched -
-// has to change to make room for it.
+// goes too. pageTurn runs the page's redraw inside a view transition: the
+// browser takes a picture of the page as it stands, the redraw happens
+// underneath, and the picture slides away while the live new page slides in
+// from the other side - together, at the same speed, neither fading (asked
+// for on 2026-10-31). The picture is the browser's own, taken on the
+// graphics card, so a turn costs the same on the thousandth click as on the
+// first. The motion itself is in style.css ("THE PAGE TURNING").
 //
 // direction is the way the OLD page leaves: 'left' for next, 'right' for
 // previous, 'up' and 'down' for Day view's scroll into the next or last
-// week. Called by each page just before it redraws.
+// week. update is the page's redraw; when it returns a promise (a fetch),
+// the old picture stays until the new page has drawn - up to
+// PAGE_TURN_WAIT_MS, after which the new page slides in as far as it got.
 //
-// The two move as one strip: the old page travels exactly as far and as
-// fast as the new one (a full width, or a full screen height, in the same
-// 0.3s ease-out as the .slide-* keyframes), and neither fades (asked for on
-// 2026-10-31).
+// A browser without view transitions, and a page a swipe has already carried
+// off the screen by hand, get the slide-in alone - the old behaviour.
+//
+// Returns a promise that settles once the new page has drawn and the browser
+// is painting again, for a caller with something to do on the new page -
+// the arrow keys focusing the cell they arrive at. Focusing on a guessed
+// delay instead landed mid-turn, while the browser holds the old picture and
+// paints nothing, and left that cell's dark editing fill stuck behind.
 var PAGE_TURN_MS = 300;
+var PAGE_TURN_WAIT_MS = 1500;
+var PAGE_TURN_SLIDE_IN = { left: 'slide-left', right: 'slide-right', up: 'slide-up', down: 'slide-down' };
+var pageTurnCurrent = null;
 
-function pageTurnGhost(container, direction) {
-    if (!container || !container.getBoundingClientRect) { return; }
-    // One at a time: a turn taken mid-turn takes the old ghost away at once.
-    document.querySelectorAll('.page-turn-ghost').forEach(function (g) { g.remove(); });
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { return; }
+function pageTurn(direction, update) {
+    var root = document.documentElement;
+    var container = document.getElementById('main-container');
+    var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!container || still) { return Promise.resolve(update()); }
 
-    // A turn taken while the last one is still sliding in: that slide is
-    // finished first, so the page is copied from where it now rests.
-    if (container.getAnimations) {
-        container.getAnimations().forEach(function (a) { try { a.finish(); } catch (e) { a.cancel(); } });
+    var swiped = container.style.transform && !/^(none|translateX\(0(px)?\))$/.test(container.style.transform);
+    if (!document.startViewTransition || swiped) {
+        var slide = PAGE_TURN_SLIDE_IN[direction] || 'slide-left';
+        container.classList.remove('slide-left', 'slide-right', 'slide-up', 'slide-down');
+        void container.offsetWidth;   // so the same slide twice running restarts
+        container.classList.add(slide);
+        setTimeout(function () { container.classList.remove(slide); }, PAGE_TURN_MS);
+        return Promise.resolve(update());
     }
-    var rect = container.getBoundingClientRect();
-    // Off the screen already - a swipe has carried the page away itself.
-    var viewport = window.innerWidth || document.documentElement.clientWidth;
-    if (rect.width === 0 || (viewport && (rect.right <= 0 || rect.left >= viewport))) { return; }
 
-    // The copy keeps its ids: the dashboards' layout is written against them
-    // (#table-container, #categories-container, ...), and a copy without
-    // them draws half a page. It is appended after the real page, so
-    // getElementById still finds the real element first. Names go, so a
-    // copied radio cannot take the checked state from its original.
-    var ghost = container.cloneNode(true);
-    ghost.querySelectorAll('[name]').forEach(function (el) { el.removeAttribute('name'); });
-    ghost.classList.remove('slide-left', 'slide-right', 'slide-up', 'slide-down', 'slide-left-slow', 'slide-right-slow');
-    ghost.classList.add('page-turn-ghost');
-    ghost.setAttribute('aria-hidden', 'true');
-    ghost.style.top = rect.top + 'px';
-    ghost.style.left = rect.left + 'px';
-    ghost.style.width = rect.width + 'px';
-    ghost.style.transform = '';
-    ghost.style.transition = 'none';
-    // A cloned canvas is blank; the graphs are copied across as drawn.
-    var from = container.querySelectorAll('canvas');
-    var to = ghost.querySelectorAll('canvas');
-    for (var i = 0; i < from.length && i < to.length; i++) {
-        try {
-            to[i].width = from[i].width;
-            to[i].height = from[i].height;
-            to[i].getContext('2d').drawImage(from[i], 0, 0);
-        } catch (e) { /* a canvas that cannot be read stays blank */ }
-    }
-    document.body.appendChild(ghost);
+    // The leaving picture and the arriving page carry different names (see
+    // style.css), swapped once the picture is taken.
+    var token = {};
+    pageTurnCurrent = token;
+    root.setAttribute('data-page-turn', direction);
+    container.classList.remove('page-turn-in');
+    container.classList.add('page-turn-out');
 
-    var away = {
-        left: 'translateX(-100%)', right: 'translateX(100%)',
-        up: 'translateY(-100vh)', down: 'translateY(100vh)'
-    }[direction] || 'translateX(-100%)';
-    if (!ghost.animate) { ghost.remove(); return; }
-    var anim = ghost.animate(
-        [{ transform: 'none' }, { transform: away }],
-        { duration: PAGE_TURN_MS, easing: 'ease-out', fill: 'forwards' });
-    anim.onfinish = function () { ghost.remove(); };
-    anim.oncancel = function () { ghost.remove(); };
+    var drawnDone;
+    var drawn = new Promise(function (resolve) { drawnDone = resolve; });
+    var turn = document.startViewTransition(function () {
+        if (pageTurnCurrent === token) {
+            container.classList.remove('page-turn-out');
+            container.classList.add('page-turn-in');
+        }
+        var done = new Promise(function (resolve) { resolve(update()); });
+        done.then(drawnDone, drawnDone);
+        var enough = new Promise(function (resolve) { setTimeout(resolve, PAGE_TURN_WAIT_MS); });
+        return Promise.race([done, enough]).catch(function (e) { console.error(e); });
+    });
+    // A turn taken during this one cuts it short; the browser's own
+    // complaint about that is not an error.
+    turn.ready.catch(function () {});
+    turn.finished.catch(function () {}).then(function () {
+        if (pageTurnCurrent !== token) { return; }   // a newer turn owns the names now
+        pageTurnCurrent = null;
+        root.removeAttribute('data-page-turn');
+        container.classList.remove('page-turn-out', 'page-turn-in');
+    });
+    return Promise.all([drawn, turn.updateCallbackDone.catch(function () {})])
+        .then(function () {});
 }
 
 // A page that turns by loading another page - Bundles' previous and next.
-// The browser cannot show the old page and the new one at once, so the turn
-// comes in two halves: the old page slides all the way away, then the
-// browser goes, and the page that arrives slides in from the far side
-// (pageTurnArrive). The arrival is keyed to the address it was meant for, so
-// a turn that never lands cannot slide some later page in.
+// Each bundle is a page of its own, so the old one cannot stay on the screen
+// while the new one draws: the page itself slides away, the browser goes,
+// and the page that arrives slides in from the far side (pageTurnArrive).
+// The arrival is keyed to the address it was meant for, so a turn that never
+// lands cannot slide some later page in.
 function pageTurnTo(href, direction) {
     var container = document.getElementById('main-container');
-    if (container) { pageTurnGhost(container, direction); }
-    if (!container || !document.querySelector('.page-turn-ghost')) {
+    var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!container || still) {
         window.location.href = href;
         return;
     }
@@ -5518,7 +5522,7 @@ function pageTurnTo(href, direction) {
         sessionStorage.setItem('blankee-page-turn',
             JSON.stringify({ to: to.pathname + to.search, direction: direction }));
     } catch (e) { /* no storage: the new page just appears */ }
-    container.classList.add('page-turn-gone');
+    container.classList.add(direction === 'right' ? 'page-turn-away-right' : 'page-turn-away-left');
     setTimeout(function () { window.location.href = href; }, PAGE_TURN_MS);
 }
 
@@ -5535,9 +5539,9 @@ function pageTurnTo(href, direction) {
         });
     }
     // Back to a page that was turned away from: the browser may hand it back
-    // exactly as it was left, hidden.
+    // exactly as it was left, off the screen.
     window.addEventListener('pageshow', function () {
         var container = document.getElementById('main-container');
-        if (container) { container.classList.remove('page-turn-gone'); }
+        if (container) { container.classList.remove('page-turn-away-left', 'page-turn-away-right'); }
     });
 })();
