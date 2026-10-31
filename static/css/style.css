@@ -4370,31 +4370,27 @@ transform: scale(1.2);
 @keyframes slideLeft {
     from {
         transform: translateX(100%);
-        opacity: 0.5;
     }
 
     to {
         transform: translateX(0);
-        opacity: 1;
     }
 }
 
 @keyframes slideRight {
     from {
         transform: translateX(-100%);
-        opacity: 0.5;
     }
 
     to {
         transform: translateX(0);
-        opacity: 1;
     }
 }
 
 /* Day view's week arriving by scrolling past the edge of the last one: up
-   from below for the next week, down from above for the one before. A
-   partial distance rather than a whole height - the week is far taller than
-   the screen, and travelling all of it would be a long blur. */
+   from below for the next week, down from above for the one before - a full
+   screen height, the same as the old week travels on its way out
+   (pageTurnGhost in script.js), so the two move as one. */
 .main-container.slide-up {
     animation: slideUp 0.3s ease-out;
 }
@@ -4405,25 +4401,21 @@ transform: scale(1.2);
 
 @keyframes slideUp {
     from {
-        transform: translateY(40vh);
-        opacity: 0.5;
+        transform: translateY(100vh);
     }
 
     to {
         transform: translateY(0);
-        opacity: 1;
     }
 }
 
 @keyframes slideDown {
     from {
-        transform: translateY(-40vh);
-        opacity: 0.5;
+        transform: translateY(-100vh);
     }
 
     to {
         transform: translateY(0);
-        opacity: 1;
     }
 }
 
@@ -22290,4 +22282,16 @@ label.loaf-holiday {
 
 .loaf-pay-lag {
     max-width: 120px;
+}
+
+/* The old page leaving as a dashboard turns to the next or previous one
+   (pageTurnGhost in script.js): a copy of it, fixed where it was, sliding
+   away while the new one slides in underneath. Never clickable, and under
+   the calendar bar (98) and nav bar (100) so they stay put above it. */
+.page-turn-ghost {
+    position: fixed;
+    z-index: 50;
+    margin: 0;
+    pointer-events: none;
+    box-sizing: border-box;
 }

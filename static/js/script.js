@@ -5422,3 +5422,76 @@ function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences,
     else if (unit === 'years') date.setFullYear(date.getFullYear() + interval * (occurrences - 1));
     return formatDateUTC(date);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// THE PAGE TURNING (2026-10-31)
+// ═══════════════════════════════════════════════════════════════
+// Moving a dashboard to the next or previous week, month, quarter or year
+// slid the new content in while the old one simply vanished. Now the old one
+// goes too: pageTurnGhost copies what is on the screen into a fixed overlay
+// exactly where it sits, and slides that away - left or right, up or down,
+// the way the person is going - while the real page redraws underneath and
+// slides in from the other side as it always has. A copy rather than holding
+// the real page back, so no page's redraw - some synchronous, some fetched -
+// has to change to make room for it.
+//
+// direction is the way the OLD page leaves: 'left' for next, 'right' for
+// previous, 'up' and 'down' for Day view's scroll into the next or last
+// week. Called by each page just before it redraws.
+//
+// The two move as one strip: the old page travels exactly as far and as
+// fast as the new one (a full width, or a full screen height, in the same
+// 0.3s ease-out as the .slide-* keyframes), and neither fades (asked for on
+// 2026-10-31).
+var PAGE_TURN_MS = 300;
+
+function pageTurnGhost(container, direction) {
+    if (!container || !container.getBoundingClientRect) { return; }
+    // One at a time: a turn taken mid-turn takes the old ghost away at once.
+    document.querySelectorAll('.page-turn-ghost').forEach(function (g) { g.remove(); });
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { return; }
+
+    // A turn taken while the last one is still sliding in: that slide is
+    // finished first, so the page is copied from where it now rests.
+    if (container.getAnimations) {
+        container.getAnimations().forEach(function (a) { try { a.finish(); } catch (e) { a.cancel(); } });
+    }
+    var rect = container.getBoundingClientRect();
+    // Off the screen already - a swipe has carried the page away itself.
+    var viewport = window.innerWidth || document.documentElement.clientWidth;
+    if (rect.width === 0 || (viewport && (rect.right <= 0 || rect.left >= viewport))) { return; }
+
+    var ghost = container.cloneNode(true);
+    ghost.removeAttribute('id');
+    ghost.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+    ghost.classList.remove('slide-left', 'slide-right', 'slide-up', 'slide-down', 'slide-left-slow', 'slide-right-slow');
+    ghost.classList.add('page-turn-ghost');
+    ghost.setAttribute('aria-hidden', 'true');
+    ghost.style.top = rect.top + 'px';
+    ghost.style.left = rect.left + 'px';
+    ghost.style.width = rect.width + 'px';
+    ghost.style.transform = '';
+    ghost.style.transition = 'none';
+    // A cloned canvas is blank; the graphs are copied across as drawn.
+    var from = container.querySelectorAll('canvas');
+    var to = ghost.querySelectorAll('canvas');
+    for (var i = 0; i < from.length && i < to.length; i++) {
+        try {
+            to[i].width = from[i].width;
+            to[i].height = from[i].height;
+            to[i].getContext('2d').drawImage(from[i], 0, 0);
+        } catch (e) { /* a canvas that cannot be read stays blank */ }
+    }
+    document.body.appendChild(ghost);
+
+    var away = {
+        left: 'translateX(-100%)', right: 'translateX(100%)',
+        up: 'translateY(-100vh)', down: 'translateY(100vh)'
+    }[direction] || 'translateX(-100%)';
+    if (!ghost.animate) { ghost.remove(); return; }
+    var anim = ghost.animate(
+        [{ transform: 'none' }, { transform: away }],
+        { duration: PAGE_TURN_MS, easing: 'ease-out', fill: 'forwards' });
+    anim.onfinish = function () { ghost.remove(); };
+    anim.oncancel = function () { ghost.remove(); };
+}

@@ -8,6 +8,17 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.69.0 — 2026-10-31
+
+### Changed
+
+- **The dashboards turn like pages.** Moving to the next or previous week,
+  month, quarter or year - in Day, Week, Month, Month Overview, Year
+  Overview and Loaf's month view - slides the old page away while the new
+  one slides in, the two together at the same speed, sideways from the
+  arrows and a swipe and up or down when Day view is scrolled past the end
+  of a week. Neither fades any more.
+
 ## 1.68.1 — 2026-10-31
 
 ### Changed

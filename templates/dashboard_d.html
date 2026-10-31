@@ -1671,6 +1671,7 @@
             const mainContainer = document.getElementById('main-container');
             const slide = vertical ? 'slide-down' : 'slide-right';
             mainContainer.classList.remove('slide-left', 'slide-right', 'slide-up', 'slide-down');
+            pageTurnGhost(mainContainer, vertical ? 'down' : 'right');   // the old week leaves too
             mainContainer.classList.add(slide);
             setTimeout(() => mainContainer.classList.remove(slide), 300);
 
@@ -1692,6 +1693,7 @@
             const mainContainer = document.getElementById('main-container');
             const slide = vertical ? 'slide-up' : 'slide-left';
             mainContainer.classList.remove('slide-left', 'slide-right', 'slide-up', 'slide-down');
+            pageTurnGhost(mainContainer, vertical ? 'up' : 'left');   // the old week leaves too
             mainContainer.classList.add(slide);
             setTimeout(() => mainContainer.classList.remove(slide), 300);
 

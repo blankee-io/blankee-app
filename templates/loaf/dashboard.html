@@ -713,6 +713,7 @@
     // this too; dashboard_3m always did it this way.
     function shiftMonth(by) {
         mainContainer.classList.remove('slide-left', 'slide-right');
+        pageTurnGhost(mainContainer, by > 0 ? 'left' : 'right');   // the old month leaves too
         mainContainer.classList.add(by > 0 ? 'slide-left' : 'slide-right');
 
         var loading = el('loading-screen');

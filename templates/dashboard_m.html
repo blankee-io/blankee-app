@@ -616,6 +616,7 @@
         function previousMonth() {
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
+            pageTurnGhost(mainContainer, 'right');   // the old page leaves too
             mainContainer.classList.add('slide-right');
             
             document.getElementById('loading-screen').style.display = 'none';
@@ -635,6 +636,7 @@
         function nextMonth() {
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
+            pageTurnGhost(mainContainer, 'left');   // the old page leaves too
             mainContainer.classList.add('slide-left');
             
             document.getElementById('loading-screen').style.display = 'none';

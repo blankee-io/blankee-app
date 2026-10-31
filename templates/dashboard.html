@@ -890,6 +890,7 @@
             clearBatchCache();
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
+            pageTurnGhost(mainContainer, 'left');   // the old page leaves too
             mainContainer.classList.add('slide-left');
             setTimeout(() => mainContainer.classList.remove('slide-left'), 300);
 
@@ -941,6 +942,7 @@
             clearBatchCache();
             const mainContainer = document.getElementById('main-container');
             mainContainer.classList.remove('slide-left', 'slide-right');
+            pageTurnGhost(mainContainer, 'right');   // the old page leaves too
             mainContainer.classList.add('slide-right');
             setTimeout(() => mainContainer.classList.remove('slide-right'), 300);
 
