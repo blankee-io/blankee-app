@@ -1911,18 +1911,13 @@
         // top; keep scrolling up past the first and the week before opens at its
         // bottom - the week as one long page. It takes a deliberate pull past
         // the edge, not one flick: the wheel has to travel PULL pixels beyond
-        // it (a finger TOUCH_PULL), a hint says what is about to happen as it
-        // builds, and after a jump the trackpad's momentum is left to die out
+        // it (a finger TOUCH_PULL), with no label saying so (asked for), and
+        // after a jump the trackpad's momentum is left to die out
         // (COOLDOWN) so one gesture never skips two weeks. Nothing happens
         // over a dialog or inside anything that scrolls on its own.
         (function () {
             const PULL = 260, TOUCH_PULL = 110, COOLDOWN = 900;
             let pull = 0, lastWheel = 0, lockedUntil = 0;
-
-            const hint = document.createElement('div');
-            hint.className = 'week-pull-hint';
-            hint.setAttribute('aria-hidden', 'true');
-            document.body.appendChild(hint);
 
             // The page scrolls in body here, as on the other dashboards.
             function scroller() {
@@ -1945,18 +1940,9 @@
                 return false;
             }
 
-            function show(direction, share) {
-                hint.textContent = direction > 0 ? 'Keep scrolling for next week' : 'Keep scrolling for last week';
-                hint.classList.toggle('is-top', direction < 0);
-                hint.classList.add('is-visible');
-                hint.style.setProperty('--pull', String(Math.min(Math.max(share, 0), 1)));
-            }
-            function hide() { hint.classList.remove('is-visible'); }
-
             function go(direction) {
                 lockedUntil = Date.now() + COOLDOWN;
                 pull = 0;
-                hide();
                 // Put there at once, and again once the week has finished
                 // drawing and its slide (300ms) is over - the cards are rebuilt
                 // in between and the page height moves with them.
@@ -1971,15 +1957,15 @@
 
             window.addEventListener('wheel', function (e) {
                 const now = Date.now();
-                if (now < lockedUntil || isAnimating || blocked(e.target)) { pull = 0; hide(); return; }
+                if (now < lockedUntil || isAnimating || blocked(e.target)) { pull = 0; return; }
                 if (now - lastWheel > 400) { pull = 0; }
                 lastWheel = now;
                 const direction = e.deltaY > 0 ? 1 : (e.deltaY < 0 ? -1 : 0);
                 if (!direction) { return; }
-                if ((direction > 0 && !atBottom()) || (direction < 0 && !atTop())) { pull = 0; hide(); return; }
+                if ((direction > 0 && !atBottom()) || (direction < 0 && !atTop())) { pull = 0; return; }
                 if (pull && Math.sign(pull) !== direction) { pull = 0; }
                 pull += e.deltaY * (e.deltaMode === 1 ? 16 : 1);
-                if (Math.abs(pull) >= PULL) { go(direction); } else { show(direction, Math.abs(pull) / PULL); }
+                if (Math.abs(pull) >= PULL) { go(direction); }
             }, { passive: true });
 
             // A finger dragged on past the end, the same way. Up the screen is
@@ -1991,18 +1977,10 @@
                 edgeTop = atTop();
                 edgeBottom = atBottom();
             }, { passive: true });
-            document.addEventListener('touchmove', function (e) {
-                if (startY === null || window.isHorizontalSwipe) { hide(); return; }
-                const dy = startY - e.touches[0].clientY;
-                const direction = dy > 0 ? 1 : -1;
-                if ((direction > 0 && !(edgeBottom && atBottom())) || (direction < 0 && !(edgeTop && atTop()))) { hide(); return; }
-                show(direction, Math.abs(dy) / TOUCH_PULL);
-            }, { passive: true });
             document.addEventListener('touchend', function (e) {
                 if (startY === null) { return; }
                 const dy = startY - e.changedTouches[0].clientY;
                 startY = null;
-                hide();
                 if (window.isHorizontalSwipe || isAnimating || Date.now() < lockedUntil || Math.abs(dy) < TOUCH_PULL) { return; }
                 const direction = dy > 0 ? 1 : -1;
                 if ((direction > 0 && edgeBottom && atBottom()) || (direction < 0 && edgeTop && atTop())) { go(direction); }

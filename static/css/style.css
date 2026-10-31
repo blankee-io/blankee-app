@@ -22291,36 +22291,3 @@ label.loaf-holiday {
 .loaf-pay-lag {
     max-width: 120px;
 }
-
-/* Day view: the hint that scrolling on past the week's edge is about to open
-   the next week or the one before (dashboard_d.html, "SCROLLING PAST THE
-   WEEK'S EDGE"). It grows clearer as the pull builds (--pull, 0 to 1). Under
-   the calendar bar when it is about the week before, at the foot of the
-   screen when it is about the next one. */
-.week-pull-hint {
-    position: fixed;
-    bottom: 18px;
-    left: 50%;
-    z-index: 97;
-    padding: 6px 14px;
-    border-radius: 16px;
-    background-color: var(--primary);
-    color: var(--text-light);
-    font-size: 13px;
-    font-weight: 600;
-    white-space: nowrap;
-    opacity: 0;
-    transform: translateX(-50%) scale(0.92);
-    transition: opacity 0.15s ease, transform 0.15s ease;
-    pointer-events: none;
-}
-
-.week-pull-hint.is-top {
-    top: 112px;
-    bottom: auto;
-}
-
-.week-pull-hint.is-visible {
-    opacity: calc(0.35 + var(--pull, 0) * 0.65);
-    transform: translateX(-50%) scale(calc(0.92 + var(--pull, 0) * 0.08));
-}

@@ -8,6 +8,13 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.68.1 — 2026-10-31
+
+### Changed
+
+- Day view no longer shows a "Keep scrolling" label while you scroll past
+  the end of a week; the scroll still takes a deliberate pull.
+
 ## 1.68.0 — 2026-10-30
 
 ### Added
