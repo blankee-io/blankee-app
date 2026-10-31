@@ -8,6 +8,17 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.68.0 — 2026-10-30
+
+### Added
+
+- **Day view scrolls from one week into the next.** Keep scrolling down
+  past the last day and the next week opens at its top; keep scrolling up
+  past the first day and the week before opens at its bottom. It takes a
+  deliberate pull past the edge - a hint says what is about to happen as it
+  builds - and one gesture never skips two weeks. On a phone, dragging on
+  past the end does the same.
+
 ## 1.67.2 — 2026-10-24
 
 ### Fixed
