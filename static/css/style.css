@@ -12675,21 +12675,22 @@ form button[type="submit"] {
     align-self: flex-end;
     display: flex;
     align-items: center;
-    gap: 6px;
     padding: 4px 0;
     background: none;
     border: none;
     color: var(--primary);
-    font-size: 15px;
+    /* The icon alone, the size and hover of the Add buttons on Categories and
+       the recurring pages (.add-income-btn). */
+    font-size: 22px;
     line-height: 28px;
-    white-space: nowrap;
     cursor: pointer;
+    transition: transform 0.15s ease, color 0.2s ease;
 }
 
 .add-bundle-btn:hover {
     color: var(--primary-hover);
     background: none;
-    transform: scale(1.1);
+    transform: scale(1.2);
 }
 
 /* The date picker's own indicator is the one browser-drawn part of the field.
@@ -18207,9 +18208,11 @@ tr[data-collapsed] {
     transform-origin: var(--press-x, 50%) var(--press-y, 50%) !important;
     transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1),
                 opacity 420ms cubic-bezier(0.4, 0, 0.2, 1) !important;
-    /* The widget asks for window.innerHeight - 120px, which overflows once any
-       browser chrome is taller than it assumed. Capping here is what makes it
-       fit vertically on a short window. */
+    /* The widget asks for window.innerHeight - 120px: on a tall screen a
+       column of empty white under a form that needs about 420px, plus the
+       link at its foot. 540px fits the two; anything more scrolls inside it.
+       Capped by the screen too, which is what makes it fit on a short one. */
+    height: 540px !important;
     max-height: calc(100vh - 48px) !important;
     max-width: calc(100vw - 32px) !important;
 }
