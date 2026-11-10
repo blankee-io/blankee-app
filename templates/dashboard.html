@@ -911,7 +911,9 @@
         function nextMonth() {
             return pageTurn('left', () => {
                 clearBatchCache();
-                document.getElementById('loading-screen').style.display = 'flex';
+                // No loading screen: the turn is the sign something is
+                // happening, and the blur, shown until the totals arrived,
+                // came down over the page once the slide was done.
                 currentMonthIndex++;
                 // Not returned: the grid is built before updateView's first
                 // await, and the totals it fetches fill in during the slide.
@@ -957,7 +959,9 @@
         function previousMonth() {
             return pageTurn('right', () => {
                 clearBatchCache();
-                document.getElementById('loading-screen').style.display = 'flex';
+                // No loading screen: the turn is the sign something is
+                // happening, and the blur, shown until the totals arrived,
+                // came down over the page once the slide was done.
                 currentMonthIndex--;
                 // Not returned: the grid is built before updateView's first
                 // await, and the totals it fetches fill in during the slide.
@@ -1080,6 +1084,34 @@
                 asyncOperations.push(updateRemainderRows());
             }
 
+            // The page as it will look, but for its totals, before waiting for
+            // them. A page turn slides the new page in as soon as its rows are
+            // built and does not wait for this function (pageTurn, script.js),
+            // so the stripes, this week's highlight and the hidden-category
+            // icons have to be on it already - done only after the wait, they
+            // snapped in once the slide was over and the page blinked
+            // (2026-11-09). Each is safe to repeat.
+            function finishDrawing() {
+                if (sections.includes("highlightCurrentWeek")) {
+                    highlightCurrentWeek();
+                }
+                if (sections.includes("addCurrentWeekDiv")) {
+                    addCurrentWeekDiv();
+                }
+                zebraStripeVisibleRows('#income-categories-body', 'zebra-odd-income', 'zebra-even-income');
+                zebraStripeVisibleRows('#expense-categories-body', 'zebra-odd-expense', 'zebra-even-expense');
+                zebraStripeVisibleRows('#income-categories-table tbody', 'zebra-odd-income', 'zebra-even-income');
+                zebraStripeVisibleRows('#expense-categories-table tbody', 'zebra-odd-expense', 'zebra-even-expense');
+                document.querySelectorAll('tbody[id^="ca-categories-body-"]').forEach(tbody => {
+                    zebraStripeVisibleRows(`#${tbody.id}`, 'zebra-odd-ca', 'zebra-even-ca');
+                });
+                document.querySelectorAll('table[id^="ca-categories-table-"] tbody').forEach(tbody => {
+                    zebraStripeVisibleRows(`#${tbody.parentElement.id} tbody`, 'zebra-odd-ca', 'zebra-even-ca');
+                });
+                updateHiddenIcons();
+            }
+            finishDrawing();
+
             // Wait for all async operations to complete before continuing
             if (asyncOperations.length > 0) {
                 await Promise.all(asyncOperations);
@@ -1087,28 +1119,10 @@
 
             addCellsToSavingsRow(globalFridays, savingsRowRight);
 
-            if (sections.includes("highlightCurrentWeek")) {
-                highlightCurrentWeek();
-            }
-
-            if (sections.includes("addCurrentWeekDiv")) {
-                addCurrentWeekDiv();
-            }
-
-            zebraStripeVisibleRows('#income-categories-body', 'zebra-odd-income', 'zebra-even-income');
-            zebraStripeVisibleRows('#expense-categories-body', 'zebra-odd-expense', 'zebra-even-expense');
-            zebraStripeVisibleRows('#income-categories-table tbody', 'zebra-odd-income', 'zebra-even-income');
-            zebraStripeVisibleRows('#expense-categories-table tbody', 'zebra-odd-expense', 'zebra-even-expense');
-            document.querySelectorAll('tbody[id^="ca-categories-body-"]').forEach(tbody => {
-                zebraStripeVisibleRows(`#${tbody.id}`, 'zebra-odd-ca', 'zebra-even-ca');
-            });
-            document.querySelectorAll('table[id^="ca-categories-table-"] tbody').forEach(tbody => {
-                zebraStripeVisibleRows(`#${tbody.parentElement.id} tbody`, 'zebra-odd-ca', 'zebra-even-ca');
-            });
+            // Again, now the savings row is there too - see finishDrawing.
+            finishDrawing();
 
             updateNextMonthIndicator();
-
-            updateHiddenIcons();
 
             document.getElementById('loading-screen').style.display = 'none';
         }
@@ -1542,7 +1556,9 @@
 
 
             document.querySelectorAll('.dashboard-this-week').forEach(td => {
-                if (td.classList.contains('current-week')) {
+                // Once only: updateView draws this before and after it waits
+                // for the totals.
+                if (td.classList.contains('current-week') && !td.querySelector('.dashboard-this-week-current')) {
                     // Create and append the "This Week" div inside the td
                     const thisWeekDiv = document.createElement('div');
                     thisWeekDiv.classList.add('dashboard-this-week-current');
