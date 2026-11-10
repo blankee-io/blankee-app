@@ -1326,6 +1326,15 @@ def _restore_forecast(user_id: int, table: str, entry_type: str, snap: Dict[str,
     synced = last_sync_date(user_id)
     if (snap.get('recurring_id') is not None and origin and synced and _iso(origin) <= synced
             and _is_allowance(user_id, table, snap)):
+        # No plan comes back, but the week's record still had the guess taken
+        # off it, and the record is that week's account of what it cost - the
+        # Summary page reads its "last" side from it. Returning before this
+        # left a $290 charge moved to Car Expenses still counted against a
+        # $55 week of Gas (2026-11-07), and Summary showed $343 spent.
+        try:
+            restore_bucket_for_category_change(bucket_table, cid, origin, txn_amount, user_id, entry_type)
+        except Exception as e:
+            log_warning(logger, TAG, f'user {user_id}: could not restore the record for {table}/{cid}: {e}')
         return None
     # Its own date when still ahead; otherwise the first day the bank has
     # not reported, where a deferred forecast would sit.

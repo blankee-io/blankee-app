@@ -1301,6 +1301,23 @@ WEEKDAY_NUMBERS = {
 }
 
 
+def _record_date_on_or_after(bucket_table, category_id, entry_date, user_id):
+    """The soonest bucket record dated on or after entry_date, or None."""
+    from recurring_bucket_manager import get_bucket_records_for_category
+    if isinstance(entry_date, str):
+        entry_date = date.fromisoformat(entry_date)
+    best = None
+    for record in get_bucket_records_for_category(bucket_table, category_id, user_id) or []:
+        when = record.get('bucket_date')
+        try:
+            when = when if isinstance(when, date) else date.fromisoformat(str(when)[:10])
+        except ValueError:
+            continue
+        if when >= entry_date and (best is None or when < best):
+            best = when
+    return best
+
+
 def _find_bucket_date_for_entry(entry_date, cadence_info):
     """
     Given an entry_date and cadence_info, determine which bucket_date (from
@@ -1515,15 +1532,22 @@ def process_manual_entry_with_bucket(table, category_id, entry_date, entry_amoun
         try:
             from recurring_bucket_manager import subtract_from_bucket_record_by_category_date, get_bucket_table_for_entry_table, get_bucket_record_by_category_date
             bucket_table = get_bucket_table_for_entry_table(table)
+            bucket_date_for_record = None
             if bucket_table and cadence_info:
                 # Use cadence info to find the bucket record for this entry's period
-                cadence_unit = cadence_info.get('cadence_unit', 'months')
-                monthly_days = cadence_info.get('monthly_days')
-                start_date_raw = cadence_info.get('start_date')
-                
-                # Determine the bucket_date for the entry's billing period
                 bucket_date_for_record = _find_bucket_date_for_entry(entry_date, cadence_info)
-                
+            elif bucket_table and not wage_bill:
+                # No cadence from the caller - the bank pull and the answer to
+                # one of its rows. That skipped the record altogether, so an
+                # entry moved into an allowance whose week's plan was already
+                # spent never counted against the week (2026-11-07: $26.96 of
+                # Gas). The week is the one the bank's own forecast search and
+                # restore_bucket_for_category_change use: the soonest record on
+                # or after the entry, its date the period's end. Allowances
+                # only - a bill's record is settled whole, and choosing one by
+                # date alone could take a later bill's.
+                bucket_date_for_record = _record_date_on_or_after(bucket_table, category_id, entry_date, user_id)
+            if bucket_table and (cadence_info or not wage_bill):
                 if bucket_date_for_record:
                     record = get_bucket_record_by_category_date(bucket_table, category_id, bucket_date_for_record, user_id)
                     # An allowance record that has already gone negative still

@@ -8,6 +8,21 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.70.5 — 2026-11-09
+
+### Fixed
+
+- **Moving a bank charge off an allowance gives the allowance its money
+  back.** The daily pull guesses a category for each charge and spends it
+  straight away. Answering with a different category after that
+  allowance's week was over moved the charge but left it spent against the
+  week, so the Summary page's last occurrence showed the week far
+  overspent - $343 of Gas against a $55 week, for a $290 charge that was
+  car repairs.
+- **A bank charge moved into an allowance counts against its week** even
+  when the week's plan is already spent. It was left out of the week
+  altogether.
+
 ## 1.70.4 — 2026-10-31
 
 ### Fixed
