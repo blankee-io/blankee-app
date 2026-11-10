@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.70.7 — 2026-11-09
+
+### Fixed
+
+- **Week and Month turn without jumping back.** Right after the page
+  landed it could flick back to mid-slide for a frame and then land again.
+  The work of filling in the new page's totals and fitting its text to the
+  cells now happens before the slide starts, so nothing interrupts it.
+
 ## 1.70.6 — 2026-11-09
 
 ### Fixed

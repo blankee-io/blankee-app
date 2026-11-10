@@ -1237,7 +1237,22 @@ function fitTextToContainer() {
 let fitTextTimeout;
 function fitTextDebounced() {
     clearTimeout(fitTextTimeout);
-    fitTextTimeout = setTimeout(fitTextToContainer, 150);
+    fitTextTimeout = setTimeout(fitTextWhenStill, 150);
+}
+
+// Never while a page is turning. Fitting measures every cell and forces
+// layout - tens of milliseconds with a little data, far more with a lot -
+// and a frame that long in the middle of the slide made Chrome show the
+// slide a frame back from where it had got to: the page jumping back and
+// in again as it landed (2026-11-09). pageTurn fits the page itself before
+// it slides; anything the tables change during the slide waits until it
+// has finished.
+function fitTextWhenStill() {
+    if (typeof pageTurnBusy === 'function' && pageTurnBusy()) {
+        fitTextTimeout = setTimeout(fitTextWhenStill, 80);
+        return;
+    }
+    fitTextToContainer();
 }
 
 // Run fitText on load and resize
@@ -5376,9 +5391,11 @@ function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences,
 // week. update is the page's redraw; when it returns a promise (a fetch),
 // the old picture stays until the new page has drawn - up to
 // PAGE_TURN_WAIT_MS, after which the new page slides in as far as it got.
-// Return one only when there is nothing to show without it: the new page
-// slides in live, so figures that arrive during the slide appear in place,
-// and waiting on them made every turn a round trip slower.
+// Return it whenever the page has work left to do: the new page slides in
+// live, but heavy work landing during the slide costs a long frame, and
+// Chrome then shows the slide a frame back from where it had got to - a
+// visible jump back and in again when it lands as the slide ends
+// (2026-11-09, Week and Month filling their totals).
 //
 // A swipe hands over mid-drag (pageTurnCarriesSwipe): the old page's picture
 // carries on from where the finger let go and the new page follows edge to
@@ -5651,6 +5668,18 @@ function pageTurn(direction, update) {
             root.setAttribute('data-page-turn-live', '');
         }
         var done = new Promise(function (resolve) { resolve(update()); });
+        // The redrawn page's text fitted now, while the old page's picture
+        // is still held, rather than by the tables' observer mid-slide - see
+        // fitTextWhenStill. Not under a finger: the drag must not freeze.
+        if (!drag) {
+            done = done.then(function (result) {
+                if (typeof fitTextToContainer === 'function') {
+                    clearTimeout(fitTextTimeout);
+                    try { fitTextToContainer(); } catch (e) { /* the turn goes on */ }
+                }
+                return result;
+            });
+        }
         // Where the new page is cut off, measured once it is drawn - Day
         // view's turn into the next week has moved the scroll by then.
         if (pageTurnCurrent === token) {

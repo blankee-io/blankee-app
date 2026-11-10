@@ -915,9 +915,12 @@
                 // happening, and the blur, shown until the totals arrived,
                 // came down over the page once the slide was done.
                 currentMonthIndex++;
-                // Not returned: the grid is built before updateView's first
-                // await, and the totals it fetches fill in during the slide.
-                updateView();
+                // Returned: the turn waits for the totals before it slides.
+                // Filled in during the slide, they cost the browser a long
+                // frame mid-animation, and Chrome then showed the slide one
+                // frame back from where it had got to - landing as the slide
+                // ended, a jump back and in again (2026-11-09).
+                return updateView();
             });
         }
 
@@ -963,10 +966,14 @@
                 // happening, and the blur, shown until the totals arrived,
                 // came down over the page once the slide was done.
                 currentMonthIndex--;
-                // Not returned: the grid is built before updateView's first
-                // await, and the totals it fetches fill in during the slide.
-                updateView();
+                // Returned: the turn waits for the totals before it slides.
+                // Filled in during the slide, they cost the browser a long
+                // frame mid-animation, and Chrome then showed the slide one
+                // frame back from where it had got to - landing as the slide
+                // ended, a jump back and in again (2026-11-09).
+                const drawn = updateView();
                 nextMonthBtn.style.display = 'inline-block';
+                return drawn;
             });
         }
 
