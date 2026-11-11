@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.70.8 — 2026-11-10
+
+### Fixed
+
+- **Upcoming Bills no longer counts one week's spending twice.** An
+  allowance whose last week had no record left showed the following
+  week's spending as its own - $191.93 of Groceries, bought on Nov 8,
+  against both Nov 6 and Nov 13. A bucket's date is the end of its week,
+  and the Summary now reads it that way.
+
 ## 1.70.7 — 2026-11-09
 
 ### Fixed

@@ -165,11 +165,23 @@ def _allowance_sides(occurrences, records, spending, today, template_anchors=(),
         entry = by_period.get(anchor)
         return (rec[1] if rec else None) or (entry['original'] if entry else None) or (entry['amount'] if entry else None)
 
-    def after(anchor):
-        later = [x for x in anchors if x > anchor]
-        return later[0] if later else None
+    span = timedelta(days=template_span or 7)
 
-    def period(anchor, end, fallback=None):
+    def window_start(anchor):
+        """
+        Where the period an anchor closes begins: the anchor before it, or one
+        span back for the first. A bucket's date is the END of its period -
+        the date its forecast falls on, the date the pull spends a charge
+        against (the next one on or after it), "the week Oct 31 - Nov 06" in
+        the overspend notice for a Nov 6 bucket. Read as the start, a week
+        whose record was gone counted the next week's spending: Groceries
+        showed the same $191.93, bought on Nov 8, against both Nov 6 and Nov
+        13 (2026-11-09).
+        """
+        earlier = [x for x in anchors if x < anchor]
+        return earlier[-1] if earlier else anchor - span
+
+    def period(anchor, fallback=None):
         rec = records.get(anchor)
         entry = by_period.get(anchor)
         # A period keeps no figure of its own once its record and forecast
@@ -177,7 +189,8 @@ def _allowance_sides(occurrences, records, spending, today, template_anchors=(),
         # middle of is often exactly that. The allowance is the same one, so
         # the template's figure says what it was.
         original = figure(anchor) or fallback or template_amount or 0.0
-        spent_in_window = sum(amt for d, amt in spending if d >= anchor and (end is None or d < end))
+        start = window_start(anchor)
+        spent_in_window = sum(amt for d, amt in spending if start < d <= anchor)
         # The record is what typed spending depletes, so it is the figure when
         # it has been drawn on. One left untouched beside spending inside its
         # dates is a record the confirmation did not clear away, and the
@@ -201,12 +214,12 @@ def _allowance_sides(occurrences, records, spending, today, template_anchors=(),
     ahead = [x for x in anchors if x > today] + [o['period'] for o in occurrences if o['open']]
     if ahead:
         up = min(ahead)
-        upcoming_side = period(up, after(up))
+        upcoming_side = period(up)
         before = [x for x in anchors if x < up]
         if not before:
             return None, upcoming_side
         last = before[-1]
-        last_side = period(last, up, fallback=figure(up))
+        last_side = period(last, fallback=figure(up))
     else:
         current = None
         for x in anchors:
@@ -215,11 +228,11 @@ def _allowance_sides(occurrences, records, spending, today, template_anchors=(),
         if current is None:
             return None, None
         last, upcoming_side = current, None
-        last_side = period(last, after(last))
+        last_side = period(last)
     # Not a last occurrence if it is before the category's first known
     # period - the series had not started.
-    end = after(last)
-    if known and last < min(known) and not any(last <= d and (end is None or d < end) for d, _ in spending):
+    start = window_start(last)
+    if known and last < min(known) and not any(start < d <= last for d, _ in spending):
         last_side = None
     return last_side, upcoming_side
 
