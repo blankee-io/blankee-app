@@ -8,6 +8,13 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.72.1 — 2026-11-10
+
+### Changed
+
+- **Bundles shows its arrows only when there is another bundle to go to.**
+  With one bundle, or none, the previous and next arrows are gone.
+
 ## 1.72.0 — 2026-11-10
 
 ### Added
