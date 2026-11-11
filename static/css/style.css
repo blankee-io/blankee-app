@@ -22649,9 +22649,8 @@ label.loaf-holiday {
 }
 
 /* The nav bar's "?" (nav.html): what the symbols on this page mean, right of
-   the bell on every page that has a legend. The bell's size and hover, but
-   the question mark alone - no circle - smaller and bold, as asked for on
-   2026-11-10. */
+   the bell on every page that has a legend - the circled question mark, at
+   the bell's size and with its hover. */
 .nav-legend-btn {
     display: flex;
     justify-content: center;
@@ -22663,8 +22662,7 @@ label.loaf-holiday {
     border: none;
     border-radius: 50%;
     color: white;
-    font-size: 15px;
-    font-weight: 900;
+    font-size: 20px;
     cursor: pointer;
     transition: background-color 0.2s ease, transform 0.2s ease;
 }
