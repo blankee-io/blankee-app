@@ -5376,18 +5376,19 @@ function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences,
 // ═══════════════════════════════════════════════════════════════
 // THE SYMBOL LEGEND (2026-11-10)
 // ═══════════════════════════════════════════════════════════════
-// What the little circles on the calendars mean, from the button in the
-// calendar bar of Day, Week, Month, Month Overview and Year. The legend
-// itself is templates/_symbol_legend.html, which each of them includes; this
-// only puts it in the shared dialog.
+// What the symbols on a page mean, from a "?" button: the calendars' in the
+// calendar bar of Day, Week and Month (templates/_symbol_legend.html), the
+// recurring pages' in their toolbar (_recurring_legend.html). A button names
+// its legend's <template> in data-legend and the dialog's title in
+// data-legend-title; this only puts it in the shared dialog.
 document.addEventListener('click', function (event) {
-    var button = event.target.closest && event.target.closest('#symbol-legend-btn');
+    var button = event.target.closest && event.target.closest('[data-legend]');
     if (!button) { return; }
     event.preventDefault();
-    var legend = document.getElementById('symbol-legend-content');
+    var legend = document.getElementById(button.getAttribute('data-legend'));
     if (!legend) { return; }
     showConfirmModal({
-        title: 'What the symbols mean',
+        title: button.getAttribute('data-legend-title') || 'What the symbols mean',
         message: '',
         bodyHtml: legend.innerHTML,
         confirmText: 'Got it',

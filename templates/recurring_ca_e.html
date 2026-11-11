@@ -38,14 +38,9 @@
             <div class="recurring-header ca">
                 <span>Recurring Credit Expenses</span>
             </div>
-            <!-- Cadence Legend -->
+            <!-- What the symbols mean (_recurring_legend.html) -->
             <div class="table-toolbar">
-                <div class="cadence-legend">
-                    <span class="cadence-legend-item"><i class="fa-solid fa-calendar-day"></i> Day</span>
-                    <span class="cadence-legend-item"><i class="fa-solid fa-calendar-week"></i> Week</span>
-                    <span class="cadence-legend-item"><i class="fa-solid fa-calendar-days"></i> Month</span>
-                    <span class="cadence-legend-item"><i class="fa-solid fa-calendars"></i> Year</span>
-                </div>
+                {% with change='price change' %}{% include '_recurring_legend.html' %}{% endwith %}
             </div>
             {% if credit_accounts and credit_accounts|length > 0 %}
                 {% for account in credit_accounts %}

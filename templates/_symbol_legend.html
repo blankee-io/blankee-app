@@ -1,12 +1,13 @@
-{# What the little circles on the calendars mean - one legend for Day, Week,
-   Month, Month Overview and Year, opened from the calendar bar. Included where
+{# What the little circles on the calendars mean - one legend for Day, Week
+   and Month, opened from the calendar bar. Included where
    the button belongs, inside .calendarnavbuttons; the content waits in an inert
    <template> until script.js puts it in the shared dialog ("THE SYMBOL
    LEGEND"). Each symbol is drawn with the class the calendars themselves use,
    so it cannot come to look different from what it explains - style.css only
    unpins them from the cell corners they sit on there. #}
-<a id="symbol-legend-btn" class="nav-button" href="javascript:void(0);" aria-label="What the symbols mean">
-    <i class="fa-solid fa-circle-question"></i>
+<a id="symbol-legend-btn" class="nav-button" href="javascript:void(0);" aria-label="What the symbols mean"
+   data-legend="symbol-legend-content" data-legend-title="What the symbols mean">
+    <i class="fa-solid fa-question"></i>
     <span class="nav-tooltip">What the symbols mean</span>
 </a>
 <template id="symbol-legend-content">

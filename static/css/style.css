@@ -22535,6 +22535,10 @@ label.loaf-holiday {
    .bank-sync-marker and the rest - so these rules only lay the rows out and
    take the symbols off the cell corners they are pinned to there. */
 .symbol-legend {
+    /* Every symbol at one size, whatever size it is on the page (asked for
+       on 2026-11-10): on the calendars they range from 11px to 26px. */
+    --legend-symbol-size: 18px;
+
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -22596,12 +22600,72 @@ label.loaf-holiday {
     bottom: auto;
 }
 
+/* One size for all of them, the text inside kept to scale. */
+.symbol-legend-swatch.paid::after,
+.symbol-legend-swatch.partially-paid::after,
+.symbol-legend-swatch.pending-entry::after,
+.symbol-legend-swatch.negative::before,
+.symbol-legend-swatch.below-threshold::before,
+.symbol-legend-swatch .bucket-late-badge,
+.symbol-legend-swatch .current-week-flag,
+.symbol-legend-swatch .member-since-badge,
+.symbol-legend-swatch .bank-sync-marker,
+.symbol-legend-swatch .next-indicator .indicator-dot {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: var(--legend-symbol-size);
+    height: var(--legend-symbol-size);
+    padding: 0;
+    box-sizing: border-box;
+    font-size: 10px;
+    line-height: 1;
+}
+
+/* The recurring pages' symbols are icons, not circles: drawn at the same
+   size, in the colour of the text beside them. */
+.symbol-legend-swatch.legend-icon {
+    color: var(--secondary-dark);
+    font-size: var(--legend-symbol-size);
+}
+
+/* The pin is a square turned on its corner, so at the same size it stands
+   out further than the circles: 13px across reaches about as far as 18. */
+.symbol-legend-swatch .bank-sync-marker {
+    width: 13px;
+    height: 13px;
+    font-size: 7px;
+}
+
 /* The pin is the one that moves on the calendars; it can sit still here. */
 .symbol-legend-swatch .bank-sync-marker {
     animation: none;
 }
 
-/* The flag hangs off the corner of a column outline; alone, it is a tab. */
+/* The flag hangs off the corner of a column outline; here it is a circle
+   like the rest. */
 .symbol-legend-swatch .current-week-flag {
-    border-radius: 6px;
+    border-radius: 50%;
+}
+
+/* The recurring pages' "?" - the question mark alone, no circle, where their
+   inline legend used to sit in the toolbar. */
+.legend-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--secondary-dark);
+    font-size: 16px;
+    cursor: pointer;
+    transition: color 0.2s ease, transform 0.15s ease;
+}
+
+.legend-btn:hover {
+    color: var(--primary);
+    transform: scale(1.15);
 }
