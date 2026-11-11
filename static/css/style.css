@@ -22528,3 +22528,80 @@ label.loaf-holiday {
         transform: translateY(100vh);
     }
 }
+
+/* ===== THE SYMBOL LEGEND (2026-11-10) =====
+   templates/_symbol_legend.html, in the shared dialog from the calendar bar's
+   button. Each symbol is the calendars' own class - .paid, .negative,
+   .bank-sync-marker and the rest - so these rules only lay the rows out and
+   take the symbols off the cell corners they are pinned to there. */
+.symbol-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+}
+
+.symbol-legend-heading {
+    margin: 8px 0 0;
+    color: var(--secondary-dark);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.symbol-legend-heading:first-child {
+    margin-top: 0;
+}
+
+.symbol-legend-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.symbol-legend-text {
+    color: var(--text-dark);
+    font-size: 14px;
+    line-height: 1.35;
+}
+
+/* A fixed square for every symbol, so the text lines up down the list. */
+.symbol-legend-swatch {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 32px;
+    justify-content: center;
+    align-items: center;
+    width: 32px;
+    height: 32px;
+}
+
+/* Unpinned from the cell corner: in place, in the middle of the square. */
+.symbol-legend-swatch.paid::after,
+.symbol-legend-swatch.partially-paid::after,
+.symbol-legend-swatch.pending-entry::after,
+.symbol-legend-swatch.negative::before,
+.symbol-legend-swatch.below-threshold::before,
+.symbol-legend-swatch .bucket-late-badge,
+.symbol-legend-swatch .current-week-flag,
+.symbol-legend-swatch .member-since-badge,
+.symbol-legend-swatch .bank-sync-marker,
+.symbol-legend-swatch .next-indicator,
+.symbol-legend-swatch .next-indicator .indicator-dot {
+    position: static;
+    top: auto;
+    right: auto;
+    left: auto;
+    bottom: auto;
+}
+
+/* The pin is the one that moves on the calendars; it can sit still here. */
+.symbol-legend-swatch .bank-sync-marker {
+    animation: none;
+}
+
+/* The flag hangs off the corner of a column outline; alone, it is a tab. */
+.symbol-legend-swatch .current-week-flag {
+    border-radius: 6px;
+}

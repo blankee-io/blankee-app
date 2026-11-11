@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.72.0 — 2026-11-10
+
+### Added
+
+- **What the symbols mean.** A question-mark button in the calendar bar
+  of Day, Week, Month, Month Overview and Year opens a legend of every
+  little circle the calendars use - this week, bank synced to here, your
+  first day, paid, partly paid, to check, late, running low, negative,
+  and the warning on the arrows - each drawn exactly as it appears.
+
 ## 1.71.0 — 2026-11-10
 
 ### Changed

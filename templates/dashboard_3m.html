@@ -62,6 +62,7 @@
                 </div>
             </div>
             <div class="calendarnavbuttons" id="calendarnavbuttons"> 
+                {% include '_symbol_legend.html' %}
                 <a id="previous-nav-btn" class="nav-button" href="javascript:previousCluster()">
                     <i class="fa-solid fa-left"></i>
                     <span class="nav-tooltip">Previous Month</span>
@@ -6745,7 +6746,10 @@
             // Position member-since badge as child of table-container for proper z-index
             function positionMemberSinceBadge() {
                 // Remove any existing badge
-                document.querySelectorAll('.member-since-badge').forEach(b => b.remove());
+                // Not the symbol legend's, which draws one to explain it.
+                document.querySelectorAll('.member-since-badge').forEach(b => {
+                    if (!b.closest('.symbol-legend')) b.remove();
+                });
                 
                 const cell = document.querySelector('.has-member-since-badge');
                 if (!cell) return;

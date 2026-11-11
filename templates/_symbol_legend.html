@@ -1,0 +1,60 @@
+{# What the little circles on the calendars mean - one legend for Day, Week,
+   Month, Month Overview and Year, opened from the calendar bar. Included where
+   the button belongs, inside .calendarnavbuttons; the content waits in an inert
+   <template> until script.js puts it in the shared dialog ("THE SYMBOL
+   LEGEND"). Each symbol is drawn with the class the calendars themselves use,
+   so it cannot come to look different from what it explains - style.css only
+   unpins them from the cell corners they sit on there. #}
+<a id="symbol-legend-btn" class="nav-button" href="javascript:void(0);" aria-label="What the symbols mean">
+    <i class="fa-solid fa-circle-question"></i>
+    <span class="nav-tooltip">What the symbols mean</span>
+</a>
+<template id="symbol-legend-content">
+    <div class="symbol-legend">
+        <p class="symbol-legend-heading">On the dates</p>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch"><span class="current-week-flag">T</span></span>
+            <span class="symbol-legend-text"><strong>This week</strong> - or this month, on the month views. Where today falls.</span>
+        </div>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch"><span class="bank-sync-marker"><span class="bank-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span></span></span>
+            <span class="symbol-legend-text"><strong>Bank synced to here.</strong> The last day your bank has reported; anything after it has not come through yet.</span>
+        </div>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch"><span class="member-since-badge"><i class="fa-solid fa-flag-checkered"></i></span></span>
+            <span class="symbol-legend-text"><strong>Your first day</strong> with Blankee.</span>
+        </div>
+
+        <p class="symbol-legend-heading">On amounts</p>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch paid"></span>
+            <span class="symbol-legend-text"><strong>Paid.</strong> Everything here is marked as paid.</span>
+        </div>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch partially-paid"></span>
+            <span class="symbol-legend-text"><strong>Partly paid.</strong> Some of it is marked as paid.</span>
+        </div>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch pending-entry"></span>
+            <span class="symbol-legend-text"><strong>To check.</strong> It came in from your bank and is waiting for you to confirm it.</span>
+        </div>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch"><span class="bucket-late-badge">3</span></span>
+            <span class="symbol-legend-text"><strong>Late.</strong> A recurring payment that is this many days overdue.</span>
+        </div>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch below-threshold"></span>
+            <span class="symbol-legend-text"><strong>Running low.</strong> Your balance is below your low-balance warning.</span>
+        </div>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch negative"></span>
+            <span class="symbol-legend-text"><strong>Negative.</strong> Your balance goes below zero.</span>
+        </div>
+
+        <p class="symbol-legend-heading">On the arrows</p>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch"><span class="next-indicator below-threshold-indicator"><span class="indicator-dot">!</span></span></span>
+            <span class="symbol-legend-text"><strong>Trouble ahead.</strong> A later period runs low - or, in red, goes negative.</span>
+        </div>
+    </div>
+</template>
