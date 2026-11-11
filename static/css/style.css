@@ -22648,15 +22648,28 @@ label.loaf-holiday {
     border-radius: 50%;
 }
 
-/* The nav bar's "?" (nav.html): what the symbols on this page mean, right of
-   the bell on every page that has a legend - the circled question mark, at
-   the bell's size and with its hover. */
-.nav-legend-btn {
+/* The menu's "?" (nav.html): what the symbols on this page mean, bottom right
+   of the menu just above the footer's line, on every page that has a legend.
+   It takes the footer's margin-top: auto, so the two sit together at the
+   foot of the menu, and the footer gives up most of the gap above its line. */
+.side-menu-legend {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: auto;
+    padding: 0 14px;
+}
+
+.side-menu .side-menu-legend + .app-footer {
+    margin-top: 0;
+    padding-top: 2px;
+}
+
+.side-menu-legend-btn {
     display: flex;
     justify-content: center;
     align-items: center;
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
     padding: 0;
     background-color: transparent;
     border: none;
@@ -22664,9 +22677,9 @@ label.loaf-holiday {
     color: white;
     font-size: 20px;
     cursor: pointer;
-    transition: background-color 0.2s ease, transform 0.2s ease;
+    transition: background-color 0.2s ease;
 }
 
-.nav-legend-btn:hover {
+.side-menu-legend-btn:hover {
     background-color: var(--primary-hover);
 }

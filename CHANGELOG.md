@@ -12,7 +12,7 @@ this file; the admin console links to it, it does not read it.
 
 ### Added
 
-- **What the symbols mean.** A "?" in the nav bar, beside the bell, opens a
+- **What the symbols mean.** A "?" at the bottom of the side menu opens a
   legend of the symbols on the page: on Day, Week and Month every little
   circle the calendars use (on Month Overview and Year, the ones they
   draw), each shown as it appears and all at one size; on the recurring

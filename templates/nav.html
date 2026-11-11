@@ -96,19 +96,6 @@
                 </div>
             </div>
 
-            <!-- What the symbols on this page mean. In the same place on
-                 every page that has a legend - the page names it in
-                 page_legend before including this bar, and the legend waits
-                 in a <template> until script.js opens it ("THE SYMBOL
-                 LEGEND"). A page without one has no button. -->
-            {% if page_legend %}
-            <button type="button" class="nav-legend-btn" id="navLegend"
-                    data-legend="page-legend-content" data-legend-title="What the symbols mean"
-                    title="What the symbols mean" aria-label="What the symbols mean">
-                <i class="fa-solid fa-circle-question"></i>
-            </button>
-            {% include page_legend %}
-            {% endif %}
 
             {% endif %}
 
@@ -208,6 +195,22 @@
     {# This app's own rows. Which file is decided by current_app_id, so
        adding an app means adding a _menu_<id>.html and nothing here. #}
     {% include '_menu_' + current_app_id + '.html' %}
+
+    {# What the symbols on this page mean: bottom right of the menu, just above
+       the footer's line, in the same place on every page that has a legend.
+       The page names it in page_legend before including this file, and the
+       legend waits in a <template> until script.js opens it ("THE SYMBOL
+       LEGEND"). A page without one has no button. #}
+    {% if page_legend %}
+    <div class="side-menu-legend">
+        <button type="button" class="side-menu-legend-btn" id="navLegend"
+                data-legend="page-legend-content" data-legend-title="What the symbols mean"
+                title="What the symbols mean" aria-label="What the symbols mean">
+            <i class="fa-solid fa-circle-question"></i>
+        </button>
+        {% include page_legend %}
+    </div>
+    {% endif %}
 
     {# The page footer, at the bottom of the menu instead of the bottom of the
        page. Its scripts stay in footer.html, which every page still includes

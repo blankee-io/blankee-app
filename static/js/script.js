@@ -5376,8 +5376,8 @@ function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences,
 // ═══════════════════════════════════════════════════════════════
 // THE SYMBOL LEGEND (2026-11-10)
 // ═══════════════════════════════════════════════════════════════
-// What the symbols on a page mean, from the "?" in the nav bar, right of the
-// bell. A page names its legend in page_legend (the calendars',
+// What the symbols on a page mean, from the "?" at the bottom right of the
+// side menu, above the footer's line. A page names its legend in page_legend (the calendars',
 // _symbol_legend.html; the recurring pages', Categories' and Credit
 // Accounts' own) and nav.html draws the button and the legend's <template>.
 // A button names that <template> in data-legend and the dialog's title in
