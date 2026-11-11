@@ -22648,24 +22648,27 @@ label.loaf-holiday {
     border-radius: 50%;
 }
 
-/* The recurring pages' "?" - the question mark alone, no circle, where their
-   inline legend used to sit in the toolbar. */
-.legend-btn {
-    display: inline-flex;
-    align-items: center;
+/* The nav bar's "?" (nav.html): what the symbols on this page mean, right of
+   the bell on every page that has a legend. The bell's size and hover, but
+   the question mark alone - no circle - smaller and bold, as asked for on
+   2026-11-10. */
+.nav-legend-btn {
+    display: flex;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    align-items: center;
+    width: 40px;
+    height: 40px;
     padding: 0;
-    background: none;
+    background-color: transparent;
     border: none;
-    color: var(--secondary-dark);
-    font-size: 16px;
+    border-radius: 50%;
+    color: white;
+    font-size: 15px;
+    font-weight: 900;
     cursor: pointer;
-    transition: color 0.2s ease, transform 0.15s ease;
+    transition: background-color 0.2s ease, transform 0.2s ease;
 }
 
-.legend-btn:hover {
-    color: var(--primary);
-    transform: scale(1.15);
+.nav-legend-btn:hover {
+    background-color: var(--primary-hover);
 }

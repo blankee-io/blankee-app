@@ -24,6 +24,7 @@
 </head>
 <body id="dashboard">
     <!-- Include the navigation bar (sidenav) from a separate HTML file -->
+    {% set page_legend = '_symbol_legend.html' %}
     {% include 'nav.html' %}
     {% include 'alert_modals.html' %}
 
@@ -62,7 +63,6 @@
                 </div>
             </div>
             <div class="calendarnavbuttons" id="calendarnavbuttons"> 
-                {% include '_symbol_legend.html' %}
                 <a id="previous-nav-btn" class="nav-button" href="javascript:previousMonth()">
                     <i class="fa-solid fa-left"></i>
                     <span class="nav-tooltip">Previous Month</span>

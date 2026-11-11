@@ -1,0 +1,36 @@
+{# What the symbols on Manage Categories mean, for the nav bar's "?" (nav.html;
+   "THE SYMBOL LEGEND" in script.js). The type column names its own icons in
+   words, so only the ones that stand alone are here. #}
+<template id="page-legend-content">
+    <div class="symbol-legend">
+        <p class="symbol-legend-heading">Groups</p>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch legend-icon"><i class="fa-solid fa-layer-plus"></i></span>
+            <span class="symbol-legend-text"><strong>A group of income categories</strong> - they are added up together on the dashboards.</span>
+        </div>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch legend-icon"><i class="fa-solid fa-layer-minus"></i></span>
+            <span class="symbol-legend-text"><strong>A group of expense categories</strong>, the same way.</span>
+        </div>
+
+        <p class="symbol-legend-heading">Moving things</p>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch legend-icon"><i class="fa-solid fa-bars"></i></span>
+            <span class="symbol-legend-text"><strong>Drag to reorder.</strong> The order here is the order on the dashboards.</span>
+        </div>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch legend-icon"><i class="fa-kit fa-solid-bars-lock"></i></span>
+            <span class="symbol-legend-text"><strong>Stays in place.</strong> This group cannot be moved.</span>
+        </div>
+
+        <p class="symbol-legend-heading">On a category</p>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch legend-icon"><i class="fa-solid fa-eye-slash"></i></span>
+            <span class="symbol-legend-text"><strong>Hidden</strong> from the dashboards. The eye button on a dashboard shows hidden categories again.</span>
+        </div>
+        <div class="symbol-legend-row">
+            <span class="symbol-legend-swatch legend-icon"><i class="fa-solid fa-pen-to-square"></i></span>
+            <span class="symbol-legend-text"><strong>Edit</strong> its name and group, hide it or delete it.</span>
+        </div>
+    </div>
+</template>

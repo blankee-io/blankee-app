@@ -18,6 +18,7 @@
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='mobileicon.png') }}">
 </head>
 <body id="manage-categories-body">
+    {% set page_legend = '_categories_legend.html' %}
     {% include 'nav.html' %}
     {% include 'alert_modals.html' %}
 

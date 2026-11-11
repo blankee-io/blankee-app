@@ -12,13 +12,13 @@ this file; the admin console links to it, it does not read it.
 
 ### Added
 
-- **What the symbols mean.** A "?" in the calendar bar of Day, Week and
-  Month opens a legend of every little circle the calendars use - this
-  week, bank synced to here, your first day, paid, partly paid, to check,
-  late, running low, negative, and the warning on the arrows - each drawn
-  as it appears, all at one size. The recurring pages' legend moves into
-  the same kind of "?" and dialog, and now explains raises (price changes
-  on expenses) and the buttons on each row too.
+- **What the symbols mean.** A "?" in the nav bar, beside the bell, opens a
+  legend of the symbols on the page: on Day, Week and Month every little
+  circle the calendars use (on Month Overview and Year, the ones they
+  draw), each shown as it appears and all at one size; on the recurring
+  pages how often an entry repeats, raises (price changes on expenses) and
+  the buttons on a row; on Categories and Credit Accounts their icons and
+  buttons. The recurring pages' old inline legend is gone.
 
 ## 1.71.0 — 2026-11-10
 

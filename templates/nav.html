@@ -96,6 +96,20 @@
                 </div>
             </div>
 
+            <!-- What the symbols on this page mean. In the same place on
+                 every page that has a legend - the page names it in
+                 page_legend before including this bar, and the legend waits
+                 in a <template> until script.js opens it ("THE SYMBOL
+                 LEGEND"). A page without one has no button. -->
+            {% if page_legend %}
+            <button type="button" class="nav-legend-btn" id="navLegend"
+                    data-legend="page-legend-content" data-legend-title="What the symbols mean"
+                    title="What the symbols mean" aria-label="What the symbols mean">
+                <i class="fa-solid fa-question"></i>
+            </button>
+            {% include page_legend %}
+            {% endif %}
+
             {% endif %}
 
             <!-- Profile dropdown container. Who you are, and how to leave -

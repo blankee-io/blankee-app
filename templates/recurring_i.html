@@ -19,6 +19,7 @@
 </head>
 <body id="recurring-i-body">
     <!-- Include the navigation bar -->
+    {% set page_legend = '_recurring_legend.html' %}{% set legend_change = 'raise' %}
     {% include 'nav.html' %}
     {% include 'alert_modals.html' %}
 
@@ -41,9 +42,8 @@
                 <span>Recurring Income</span>
                 <button id="add-income-btn" class="add-income-btn" type="button" title="Add Category"><i class="fa-kit fa-solid-arrows-repeat-circle-plus"></i></button>
             </div>
-            <!-- What the symbols mean (_recurring_legend.html) -->
+            <!-- What the symbols mean: the nav bar's "?" (_recurring_legend.html) -->
             <div class="table-toolbar">
-                {% with change='raise' %}{% include '_recurring_legend.html' %}{% endwith %}
                 {% if recurring_income_records and recurring_income_records|length > 0 %}
                 <div class="search-btn-container recurring-search income">
                         <button class="clear-filter-btn income" id="income-recurring-clear" type="button" title="Clear Filter">
@@ -1652,7 +1652,7 @@
                             padding: 4
                         },
                         {
-                            selector: '.table-toolbar .legend-btn',
+                            selector: '#navLegend',
                             text: 'The <b>?</b> explains the symbols: how often an entry repeats, raises, and the buttons on each row.'
                         },
                         {

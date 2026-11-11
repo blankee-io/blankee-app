@@ -1,13 +1,8 @@
-{# What the symbols on a recurring page mean - Income, Expenses and the cards'
-   pages - in the same dialog as the calendars' legend (_symbol_legend.html,
-   "THE SYMBOL LEGEND" in script.js). Included where the old inline legend sat;
-   `change` is the page's own word for a scheduled change: "raise" on income,
-   "price change" on expenses and cards. #}
-<button type="button" class="legend-btn" data-legend="recurring-legend-content"
-        data-legend-title="What the symbols mean" aria-label="What the symbols mean" title="What the symbols mean">
-    <i class="fa-solid fa-question"></i>
-</button>
-<template id="recurring-legend-content">
+{# What the symbols on a recurring page mean - Income, Expenses and the
+   cards' pages - for the nav bar's "?" (nav.html; "THE SYMBOL LEGEND" in
+   script.js). legend_change is the page's own word for a scheduled change:
+   "raise" on income, "price change" on expenses and cards. #}
+<template id="page-legend-content">
     <div class="symbol-legend">
         <p class="symbol-legend-heading">How often it repeats</p>
         <div class="symbol-legend-row">
@@ -30,13 +25,13 @@
         <p class="symbol-legend-heading">In the list</p>
         <div class="symbol-legend-row">
             <span class="symbol-legend-swatch legend-icon"><i class="fa-solid fa-arrow-turn-down-right"></i></span>
-            <span class="symbol-legend-text"><strong>A {{ change }}.</strong> The same entry at a new amount, from the date shown.</span>
+            <span class="symbol-legend-text"><strong>A {{ legend_change }}.</strong> The same entry at a new amount, from the date shown.</span>
         </div>
 
         <p class="symbol-legend-heading">The buttons on a row</p>
         <div class="symbol-legend-row">
             <span class="symbol-legend-swatch legend-icon"><i class="fa-solid fa-arrow-up-right-dots"></i></span>
-            <span class="symbol-legend-text"><strong>Schedule a {{ change }}</strong> from a date of your choosing.</span>
+            <span class="symbol-legend-text"><strong>Schedule a {{ legend_change }}</strong> from a date of your choosing.</span>
         </div>
         <div class="symbol-legend-row">
             <span class="symbol-legend-swatch legend-icon"><i class="fa-solid fa-pen-to-square"></i></span>
@@ -44,7 +39,7 @@
         </div>
         <div class="symbol-legend-row">
             <span class="symbol-legend-swatch legend-icon"><i class="fa-kit fa-solid-arrows-repeat-slash"></i></span>
-            <span class="symbol-legend-text"><strong>Stop recurring.</strong> Future entries go; past ones stay, and the category carries on as an ordinary one. On a {{ change }} row, it removes just that {{ change }}.</span>
+            <span class="symbol-legend-text"><strong>Stop recurring.</strong> Future entries go; past ones stay, and the category carries on as an ordinary one. On a {{ legend_change }} row, it removes just that {{ legend_change }}.</span>
         </div>
     </div>
 </template>

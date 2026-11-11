@@ -18,6 +18,7 @@
 </head>
 <body id="recurring-i-body">
     <!-- Include the navigation bar -->
+    {% set page_legend = '_recurring_legend.html' %}{% set legend_change = 'price change' %}
     {% include 'nav.html' %}
     {% include 'alert_modals.html' %}
 
@@ -38,9 +39,8 @@
             <div class="recurring-header ca">
                 <span>Recurring Credit Expenses</span>
             </div>
-            <!-- What the symbols mean (_recurring_legend.html) -->
+            <!-- What the symbols mean: the nav bar's "?" (_recurring_legend.html) -->
             <div class="table-toolbar">
-                {% with change='price change' %}{% include '_recurring_legend.html' %}{% endwith %}
             </div>
             {% if credit_accounts and credit_accounts|length > 0 %}
                 {% for account in credit_accounts %}

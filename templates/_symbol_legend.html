@@ -1,22 +1,18 @@
-{# What the little circles on the calendars mean - one legend for Day, Week
-   and Month, opened from the calendar bar. Included where
-   the button belongs, inside .calendarnavbuttons; the content waits in an inert
-   <template> until script.js puts it in the shared dialog ("THE SYMBOL
-   LEGEND"). Each symbol is drawn with the class the calendars themselves use,
-   so it cannot come to look different from what it explains - style.css only
-   unpins them from the cell corners they sit on there. #}
-<a id="symbol-legend-btn" class="nav-button" href="javascript:void(0);" aria-label="What the symbols mean"
-   data-legend="symbol-legend-content" data-legend-title="What the symbols mean">
-    <i class="fa-solid fa-question"></i>
-    <span class="nav-tooltip">What the symbols mean</span>
-</a>
-<template id="symbol-legend-content">
+{# What the little circles on the calendars mean, for the nav bar's "?"
+   (nav.html; "THE SYMBOL LEGEND" in script.js) - Day, Week and Month, and
+   with legend_overview set, Month Overview and Year, which draw fewer of
+   them. Each symbol is drawn with the class the calendars themselves use,
+   so it cannot come to look different from what it explains - style.css
+   only unpins them from the cell corners they sit on there. #}
+<template id="page-legend-content">
     <div class="symbol-legend">
         <p class="symbol-legend-heading">On the dates</p>
+        {% if not legend_overview %}
         <div class="symbol-legend-row">
             <span class="symbol-legend-swatch"><span class="current-week-flag">T</span></span>
             <span class="symbol-legend-text"><strong>This week</strong> - or this month, on the month views. Where today falls.</span>
         </div>
+        {% endif %}
         <div class="symbol-legend-row">
             <span class="symbol-legend-swatch"><span class="bank-sync-marker"><span class="bank-sync-marker-inner"><i class="fa-kit fa-solid-building-columns-circle-check"></i></span></span></span>
             <span class="symbol-legend-text"><strong>Bank synced to here.</strong> The last day your bank has reported; anything after it has not come through yet.</span>
@@ -27,6 +23,7 @@
         </div>
 
         <p class="symbol-legend-heading">On amounts</p>
+        {% if not legend_overview %}
         <div class="symbol-legend-row">
             <span class="symbol-legend-swatch paid"></span>
             <span class="symbol-legend-text"><strong>Paid.</strong> Everything here is marked as paid.</span>
@@ -43,6 +40,7 @@
             <span class="symbol-legend-swatch"><span class="bucket-late-badge">3</span></span>
             <span class="symbol-legend-text"><strong>Late.</strong> A recurring payment that is this many days overdue.</span>
         </div>
+        {% endif %}
         <div class="symbol-legend-row">
             <span class="symbol-legend-swatch below-threshold"></span>
             <span class="symbol-legend-text"><strong>Running low.</strong> Your balance is below your low-balance warning.</span>
