@@ -5388,7 +5388,7 @@ function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences,
 //
 // direction is the way the OLD page leaves: 'left' for next, 'right' for
 // previous, 'up' and 'down' for Day view's scroll into the next or last
-// week. update is the page's redraw; when it returns a promise (a fetch),
+// week, and 'today' - shrinking away - for the Today button (pageTurnToday). update is the page's redraw; when it returns a promise (a fetch),
 // the old picture stays until the new page has drawn - up to
 // PAGE_TURN_WAIT_MS, after which the new page slides in as far as it got.
 // Return it whenever the page has work left to do: the new page slides in
@@ -5414,7 +5414,8 @@ function calculateEndDateFromOccurrences(startDate, interval, unit, occurrences,
 // quicker to the eye, and it glitched.)
 var PAGE_TURN_MS = 300;
 var PAGE_TURN_WAIT_MS = 1500;
-var PAGE_TURN_SLIDE_IN = { left: 'slide-left', right: 'slide-right', up: 'slide-up', down: 'slide-down' };
+var PAGE_TURN_SLIDE_IN = { left: 'slide-left', right: 'slide-right', up: 'slide-up', down: 'slide-down',
+                          today: 'slide-today' };
 var pageTurnCurrent = null;
 var pageTurnSlideUntil = 0;
 
@@ -5622,6 +5623,24 @@ function pageTurnClipLine(container) {
     return Math.max(0, Math.round(line));
 }
 
+// The middle of what is on screen, in the page's own pixels: where Today's
+// shrink centres, so the part being looked at shrinks into itself rather than
+// towards the middle of a page that runs far below the screen.
+function pageTurnViewCentre(container) {
+    var bar = document.querySelector('.calendarnav') || document.querySelector('.nav-bar');
+    var top = bar ? bar.getBoundingClientRect().bottom : 0;
+    var middle = (Math.max(top, 0) + window.innerHeight) / 2;
+    return Math.max(0, Math.round(middle - container.getBoundingClientRect().top));
+}
+
+// The Today button in the calendar bar: the page shrinks away as the one for
+// today grows into its place (2026-11-09), rather than sliding - today is
+// not a step to either side. go is the page's own goToCurrent..., which its
+// own code also calls on its own with no animation (Day view, on load).
+function pageTurnToday(go) {
+    return pageTurn('today', go);
+}
+
 function pageTurn(direction, update) {
     var root = document.documentElement;
     var container = document.getElementById('main-container');
@@ -5634,7 +5653,7 @@ function pageTurn(direction, update) {
 
     if (!document.startViewTransition) {
         var slide = PAGE_TURN_SLIDE_IN[direction] || 'slide-left';
-        container.classList.remove('slide-left', 'slide-right', 'slide-up', 'slide-down');
+        container.classList.remove('slide-left', 'slide-right', 'slide-up', 'slide-down', 'slide-today');
         void container.offsetWidth;   // so the same slide twice running restarts
         container.classList.add(slide);
         setTimeout(function () { container.classList.remove(slide); }, PAGE_TURN_MS);
@@ -5656,6 +5675,7 @@ function pageTurn(direction, update) {
     container.classList.remove('page-turn-in');
     container.classList.add('page-turn-out');
     root.style.setProperty('--page-turn-clip-out', pageTurnClipLine(container) + 'px');
+    root.style.setProperty('--page-turn-origin-out', pageTurnViewCentre(container) + 'px');
 
     var drawnDone;
     var drawn = new Promise(function (resolve) { drawnDone = resolve; });
@@ -5684,6 +5704,7 @@ function pageTurn(direction, update) {
         // view's turn into the next week has moved the scroll by then.
         if (pageTurnCurrent === token) {
             root.style.setProperty('--page-turn-clip-in', pageTurnClipLine(container) + 'px');
+            root.style.setProperty('--page-turn-origin-in', pageTurnViewCentre(container) + 'px');
         }
         done.then(drawnDone, drawnDone);
         // Under a finger nothing waits: the page is held still until this

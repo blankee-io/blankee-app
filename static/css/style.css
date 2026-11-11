@@ -4399,6 +4399,12 @@ transform: scale(1.2);
     animation: slideDown 0.3s ease-out;
 }
 
+/* Today, where the browser cannot take the old page's picture: the new page
+   grows in alone (pageTurn's fallback). */
+.main-container.slide-today {
+    animation: pageTurnGrowIn 0.3s ease-out;   /* PAGE_TURN_MS: the class comes off then */
+}
+
 @keyframes slideUp {
     from {
         transform: translateY(100vh);
@@ -22436,6 +22442,37 @@ label.loaf-holiday {
 :root[data-page-turn="right"]::view-transition-new(page-turn-in) { animation-name: pageTurnInRight; }
 :root[data-page-turn="up"]::view-transition-new(page-turn-in) { animation-name: slideUp; }
 :root[data-page-turn="down"]::view-transition-new(page-turn-in) { animation-name: slideDown; }
+
+/* Today (pageTurnToday): the page shrinks away and the one for today grows
+   into its place - the first over the first 60% of the turn, the second over
+   the last 60%, so they cross rather than sit on top of each other. Each
+   centres on the middle of what is on screen (--page-turn-origin-*, set by
+   pageTurn), so a page scrolled far down shrinks into itself rather than
+   towards a middle far below the screen. A little longer than a slide, which
+   has distance to cover in its 0.3s; this has a change to show. */
+:root[data-page-turn="today"]::view-transition-old(page-turn-out) {
+    animation-name: pageTurnShrinkOut;
+    animation-duration: 0.4s;
+    transform-origin: 50% var(--page-turn-origin-out, 50%);
+}
+
+:root[data-page-turn="today"]::view-transition-new(page-turn-in) {
+    animation-name: pageTurnGrowIn;
+    animation-duration: 0.4s;
+    transform-origin: 50% var(--page-turn-origin-in, 50%);
+}
+
+@keyframes pageTurnShrinkOut {
+    0%   { transform: scale(1); opacity: 1; }
+    60%  { transform: scale(0.85); opacity: 0; }
+    100% { transform: scale(0.85); opacity: 0; }
+}
+
+@keyframes pageTurnGrowIn {
+    0%   { transform: scale(0.85); opacity: 0; }
+    40%  { transform: scale(0.85); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+}
 
 /* Sideways, from wherever a swipe had dragged the page (--page-turn-from,
    set by pageTurn; 0 from the arrows). The new page starts that same

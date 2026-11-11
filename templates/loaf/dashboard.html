@@ -1341,13 +1341,16 @@
 
     $('#loaf-prev').on('click', function () { shiftMonth(-1); });
     $('#loaf-next').on('click', function () { shiftMonth(1); });
+    // The page shrinks away as this month grows in (pageTurnToday, script.js).
     $('#loaf-today').on('click', function () {
-        state.year = parseInt(TODAY.substring(0, 4), 10);
-        state.month = parseInt(TODAY.substring(5, 7), 10);
-        el('loaf-month-dropdown').value = String(state.month);
-        el('loaf-year-dropdown').value = String(state.year);
-        resyncSelects();
-        load();
+        pageTurnToday(function () {
+            state.year = parseInt(TODAY.substring(0, 4), 10);
+            state.month = parseInt(TODAY.substring(5, 7), 10);
+            el('loaf-month-dropdown').value = String(state.month);
+            el('loaf-year-dropdown').value = String(state.year);
+            resyncSelects();
+            return load();
+        });
     });
 
     $('#loaf-entry-modal').on('click', function (event) {

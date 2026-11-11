@@ -66,7 +66,7 @@
                     <i class="fa-solid fa-left"></i>
                     <span class="nav-tooltip">Previous Month</span>
                 </a>
-                <a id="current-nav-btn" class="nav-button" href="javascript:goToCurrentCluster()">
+                <a id="current-nav-btn" class="nav-button" href="javascript:pageTurnToday(goToCurrentCluster)">
                     <span class="nav-current-icon"><i class="fa-solid fa-calendar-day"></i></span>
                     <span class="nav-tooltip">Go to Current Month</span>
                 </a>
@@ -950,7 +950,7 @@
 
         function goToCurrentCluster() {
             clearBatchCache();
-            document.getElementById('loading-screen').style.display = 'flex';
+            // No loading screen - the Today button turns the page instead.
             const today = new Date();
             const currentMonth = today.getUTCMonth(); // 0 = Jan, 1 = Feb, ..., 11 = Dec
             const currentYear = today.getUTCFullYear();
@@ -961,10 +961,13 @@
             // Set currentClusterIndex to the cluster containing the current month
             currentClusterIndex = Math.floor(currentMonth / 3);
 
-            updateView();
+            // Returned, so Today's turn waits for it - see nextMonth in
+            // dashboard.html.
+            const drawn = updateView();
 
             // Show the "Next Month" button if needed
             nextMonthBtn.style.display = 'inline-block';
+            return drawn;
         }
 
         // Function to go to the previous month

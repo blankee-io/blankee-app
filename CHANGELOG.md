@@ -8,6 +8,15 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.71.0 — 2026-11-10
+
+### Changed
+
+- **The Today button has its own turn.** In Day, Week, Month, Month
+  Overview, Year and Loaf's month view, the page shrinks away as the one
+  for today grows into its place, rather than the new page simply
+  appearing.
+
 ## 1.70.8 — 2026-11-10
 
 ### Fixed

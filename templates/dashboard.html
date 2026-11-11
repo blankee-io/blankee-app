@@ -66,7 +66,7 @@
                     <i class="fa-solid fa-left"></i>
                     <span class="nav-tooltip">Previous Month</span>
                 </a>
-                <a id="current-nav-btn" class="nav-button" href="javascript:goToCurrentMonth()">
+                <a id="current-nav-btn" class="nav-button" href="javascript:pageTurnToday(goToCurrentMonth)">
                     <span class="nav-current-icon"><i class="fa-solid fa-calendar-day"></i></span>
                     <span class="nav-tooltip">Go to Current Month</span>
                 </a>
@@ -926,7 +926,7 @@
 
         function goToCurrentMonth() {
             clearBatchCache();
-            document.getElementById('loading-screen').style.display = 'flex';
+            // No loading screen - the Today button turns the page instead.
             const today = new Date();
             const currentDay = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
 
@@ -950,12 +950,13 @@
 
             currentMonthIndex = (fridayYear - baseYear) * 12 + fridayMonth; // Update the month index using the Friday's month
 
-            // Update the view to reflect the month containing the current Friday
-            updateView();
+            // Update the view to reflect the month containing the current Friday.
+            // Returned, so Today's turn waits for it - see nextMonth.
+            const drawn = updateView();
 
             // Show the "Next Month" button if needed
             nextMonthBtn.style.display = 'inline-block';
-
+            return drawn;
         }
 
         // Function to go to the previous month
