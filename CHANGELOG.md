@@ -24,6 +24,19 @@ this file; the admin console links to it, it does not read it.
   Re-applying an affected plan clears what an earlier one left.
 - **A plan is saved once.** A second save of the same card's plan while
   one is still running is refused, and the dialog sends only one.
+- **A new recurring entry keeps the id it was given.** When the
+  background save gave a new recurring income, expense or card charge its
+  real id, it looked the row up again by its category, date and amount,
+  and two saves at once could hand two of them the same id, or leave
+  their forecasts on an id that no longer existed. The id now comes from
+  the save itself, one save per person runs at a time, and a temporary id
+  written back by a request still running is put right on the next save.
+- **An expired cache no longer erases data.** A change saved just as a
+  person's cached data had expired started their list from nothing, and
+  the next background save then deleted every other recurring entry,
+  bucket, card payment or group they had. Such a write now reloads the
+  list from the database first, and the save puts back anything a list
+  started from nothing would have deleted.
 
 ## 1.72.1 — 2026-11-10
 
