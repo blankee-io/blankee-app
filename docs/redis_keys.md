@@ -74,6 +74,8 @@ These keys are hydrated from MySQL when a user becomes active, and flushed back 
 |-------------|------|-----|-------------|
 | `dirty_tables:{user_id}` | SET | 7 days | Table names that have been modified in Redis and need flushing to MySQL |
 | `pending_deletes:{table_name}:{user_id}` | SET | 7 days | IDs of records deleted in Redis, pending MySQL deletion during flush |
+| `flush_lock:{user_id}` | STRING (lock token) | 300s | Held by every flush of one of the user's tables (`_flush_table_to_mysql`), so the worker in each process, a request's forced flush and dehydration never flush one user at once. A flush that waits 30s for it is deferred and its table left dirty |
+| `temp_ids:{recurring_table}:{user_id}` | HASH (temporary id → real id) | 1 day | What each temporary recurring id became when the flush INSERTed it. Before flushing a recurring table or a list that refers to one, the flush re-keys any temporary id a late writer put back |
 | `force_refresh:{user_id}` | STRING ("1") | 60s | Signal for frontend to auto-refresh dashboard after a provider sync. NOTE: written by the sync engine, but no consumer was found in app.py, middleware.py, redis_manager.py or the templates — verify before relying on it |
 | `provider_sync_lock:{user_id}` | STRING ("1") | 300s (5 min) | Per-user mutex preventing concurrent provider sync processing (SETNX). Reserved: no producer until a bank provider is configured |
 | `linked_connections_to_delete:{user_id}` | SET | — | Connection IDs recently deleted by user; webhook handlers skip events for these |
