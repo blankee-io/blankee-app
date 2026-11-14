@@ -8,6 +8,23 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.72.2 — 2026-11-13
+
+### Fixed
+
+- **A payment plan takes the card to $0.00 and stops there.** A card that
+  had had a plan before could carry old payment forecasts that no
+  recurring payment owned any more - left by two saves of one plan at the
+  same moment - and a new plan only took away the ones it could find by
+  their payment. The ones on the plan's dates were overwritten; the ones
+  after its last payment went on paying the card, past $0 and below it.
+  A plan now clears every forecast of the card's payment from its first
+  payment on that belongs to nothing, before it writes its own, and brings
+  the payment's planned amounts on the summary's bills in line with it.
+  Re-applying an affected plan clears what an earlier one left.
+- **A plan is saved once.** A second save of the same card's plan while
+  one is still running is refused, and the dialog sends only one.
+
 ## 1.72.1 — 2026-11-10
 
 ### Changed

@@ -700,6 +700,7 @@
                 months:  { label: 'Months to pay it off in', step: '1', placeholder: '12' }
             };
 
+            let planSaving = false;
             $('.credit-accounts-table').on('click', '.payment-plan-btn', async function(e) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -833,6 +834,10 @@
                     }
                 });
                 if (!ok || !applied) return;
+                // One save at a time: two at once each lay the plan over the
+                // other's (payment_plan_apply in app.py refuses the second).
+                if (planSaving) return;
+                planSaving = true;
 
                 $('#loading-screen').show();
                 $.ajax({
@@ -855,7 +860,8 @@
                     error: function(xhr) {
                         $('#loading-screen').hide();
                         showToast((xhr.responseJSON && xhr.responseJSON.message) || 'The plan could not be saved.', 'error');
-                    }
+                    },
+                    complete: function() { planSaving = false; }
                 });
             });
 

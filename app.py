@@ -20608,6 +20608,22 @@ def _delete_chain_entries(kind, user_id, recurring_id, on_or_after=None, forecas
     is not recalculated here - the caller is about to lay the new link's
     entries - but by _recalc_payment_card once it has.
     """
+    def matches(e):
+        if int(e.get('recurring_id') or 0) != int(recurring_id):
+            return False
+        if on_or_after is not None:
+            entry_date = _as_date(e.get('date'))
+            if not (entry_date and entry_date >= on_or_after):
+                return False
+        return not forecasts_only or int(e.get('is_bucket') or 0) == 1
+    return _drop_entries(kind, user_id, matches)
+
+
+def _drop_entries(kind, user_id, matches):
+    """Drop the entries `matches(entry)` picks, from Redis and (on the next
+    flush) MySQL, and take what was dropped off a card's payment mirror.
+    _delete_chain_entries picks by link; a payment plan also picks by
+    category (_drop_unowned_plan_forecasts). Returns how many went."""
     table = _CHAIN_KINDS[kind]['entries']
     entries = _get_entries_from_redis(table, user_id)
     if not entries:
@@ -20616,13 +20632,7 @@ def _delete_chain_entries(kind, user_id, recurring_id, on_or_after=None, forecas
     kept, dropped_ids, dropped = [], [], 0
     gone = {}  # (category_id, day) -> amount, for the card's mirror
     for e in entries:
-        matches = int(e.get('recurring_id') or 0) == int(recurring_id)
-        if matches and on_or_after is not None:
-            entry_date = _as_date(e.get('date'))
-            matches = bool(entry_date and entry_date >= on_or_after)
-        if matches and forecasts_only:
-            matches = int(e.get('is_bucket') or 0) == 1
-        if matches:
+        if matches(e):
             dropped += 1
             entry_id = e.get('id')
             if entry_id and int(entry_id) > 0:
@@ -26397,6 +26407,83 @@ def _plan_superseded(inputs):
             if _as_date(l.get('start_date')) and _as_date(l.get('start_date')) >= first]
 
 
+def _drop_unowned_plan_forecasts(user_id, category_id, first):
+    """
+    Every forecast of the card's payment from the first plan payment on that
+    belongs to no link the category still has. A plan decides every payment
+    from its first on, and the links it replaces are taken away by id
+    (_delete_chain_entries) - which cannot find a forecast still carrying the
+    temporary id its link had before the flush gave it a real one. Two applies
+    of one plan at the same moment left 36 of those on BA-01 (2026-10-23); the
+    next plan wrote its own amounts over the ones on its dates, and the ones
+    after its last payment went on paying the card, below $0 (2026-11-13).
+    So the plan clears the category's ground itself, by date, and only keeps
+    what a live link owns. Confirmed entries stay - money that moved.
+    """
+    live = {int(l.get('id') or 0) for l in _recurring_chain('expense', user_id, category_id)}
+
+    def unowned(e):
+        if int(e.get('category_id') or 0) != int(category_id) or int(e.get('is_bucket') or 0) != 1:
+            return False
+        when = _as_date(e.get('date'))
+        return bool(when and when >= first) and int(e.get('recurring_id') or 0) not in live
+    dropped = _drop_entries('expense', user_id, unowned)
+    if dropped:
+        log_info(app.logger, 'EXPENSE', f"[payment_plan] user {user_id}, category {category_id}: "
+                                        f"{dropped} forecasts from {first} on belonged to no link")
+    return dropped
+
+
+def _restate_plan_buckets(user_id, category_id, first):
+    """
+    The payment's bucket records from the first plan payment on, made to say
+    what the forecasts now say: the plan's amount on its dates, and none after
+    its last when nothing follows it. create_bucket_record keeps a record that
+    already exists as it was, so without this a card that had a plan before
+    kept the old plan's amounts in its records (BA-01, 2026-11-13).
+    """
+    forecast = {}
+    for e in _get_entries_from_redis('expense_entries', user_id) or []:
+        if int(e.get('category_id') or 0) != int(category_id) or int(e.get('is_bucket') or 0) != 1:
+            continue
+        when = _as_date(e.get('date'))
+        if when and when >= first:
+            forecast[when] = round(forecast.get(when, 0.0) + float(e.get('amount') or 0), 2)
+    try:
+        from recurring_bucket_manager import set_bucket_record_amount
+        import redis_manager as _rm
+        key = f"recurring_expense_buckets:v1:{user_id}"
+        raw = _rm._redis_client.get(key) if _rm._redis_client else None
+        records = json.loads(raw) if raw else []
+        kept = [b for b in records
+                if int(b.get('category_id') or 0) != int(category_id)
+                or not _as_date(b.get('bucket_date'))
+                or _as_date(b.get('bucket_date')) < first
+                or _as_date(b.get('bucket_date')) in forecast]
+        if len(kept) != len(records):
+            _rm._redis_client.setex(key, 604800, json.dumps(kept, cls=DecimalEncoder))
+            _rm._redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_expense_buckets')
+        for when, amount in sorted(forecast.items()):
+            set_bucket_record_amount('recurring_expense_buckets', category_id, when, amount, user_id)
+    except Exception as e:
+        log_error(app.logger, 'EXPENSE', f"[payment_plan] bucket records for category {category_id}: {e}")
+
+
+def _plan_apply_lock(user_id, account_id):
+    """
+    One apply of a card's plan at a time. Two at once (a double click, two
+    tabs) each lay the plan's links and forecasts over the other's, and leave
+    forecasts behind that no link owns (_drop_unowned_plan_forecasts).
+    Returns a release function, or None when an apply is already running.
+    """
+    if not app.config.get('REDIS_OK') or _redis_client is None:
+        return lambda: None
+    key = f"payment_plan_apply:{user_id}:{account_id}"
+    if not _redis_client.set(key, '1', nx=True, ex=120):
+        return None
+    return lambda: _redis_client.delete(key)
+
+
 # ------------------------------------------------- a payment plan, kept to
 # A plan pays fixed amounts on fixed days, so anything it did not expect - a
 # purchase on the card, a payment made by hand, a payment skipped or changed -
@@ -26646,6 +26733,9 @@ def payment_plan_apply(account_id):
     after = inputs['pay_dates'][months]
     keep_going = inputs['charges'] > 0
     spec = _CHAIN_KINDS['expense']
+    release = _plan_apply_lock(user_id, account_id)
+    if release is None:
+        return jsonify({'status': 'error', 'message': 'This plan is already being saved.'}), 409
     try:
         # The card's last plan goes first, so the recalculations below are
         # not checked against it halfway through being replaced.
@@ -26658,6 +26748,7 @@ def payment_plan_apply(account_id):
                 delete_recurring_mismatch(spec['recurring'], link.get('id'), user_id=user_id)
             except Exception:
                 pass
+        _drop_unowned_plan_forecasts(user_id, category['id'], first)
         chain = _recurring_chain('expense', user_id, category['id'])
         wage_bill = int(chain[-1].get('wage_bill') or 0) if chain else 1
         covering = next((l for l in reversed(chain)
@@ -26686,6 +26777,7 @@ def payment_plan_apply(account_id):
         _remember_payment_plan(user_id, account_id, data.get('mode'), data.get('value'), result, inputs, last)
         _resync_payment_mirror(user_id, account_id, category['id'], first)
         last_payment = _settle_last_plan_payment(user_id, account_id, category['id'], last) or result['payment']
+        _restate_plan_buckets(user_id, category['id'], first)
         try:
             import redis_manager as _rm
             _rm.flush_dirty_tables_for_user(user_id)
@@ -26694,6 +26786,8 @@ def payment_plan_apply(account_id):
     except Exception as e:
         log_exception(app.logger, 'EXPENSE', f"[payment_plan] user {user_id}, account {account_id}: {e}")
         return jsonify({'status': 'error', 'message': 'The plan could not be saved. Try again.'}), 500
+    finally:
+        release()
     log_info(app.logger, 'EXPENSE', f"[payment_plan] user {user_id}, account {account_id}: "
                                     f"{months} x {result['payment']} from {first}, then {inputs['charges']}")
     return jsonify({'status': 'success', 'payment': result['payment'], 'months': months,
