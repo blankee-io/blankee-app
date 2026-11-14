@@ -1022,8 +1022,7 @@ def _correct_savings(user_id, actual, on_date):
 
     Returns (ok, difference) with difference as a Decimal, zero when in balance.
     """
-    from app import (_get_savings_adjustments_from_redis,
-                     _set_savings_adjustments_to_redis)
+    from app import _set_savings_adjustments_to_redis
 
     current = savings_balance(user_id, on_date)
     if current is None:
@@ -1033,9 +1032,13 @@ def _correct_savings(user_id, actual, on_date):
     if abs(difference) < TOLERANCE:
         return True, Decimal('0')
 
-    rows = _get_savings_adjustments_from_redis(user_id)
+    # From MySQL when the key is missing: savings_adjustments is flushed by
+    # deleting the user's rows and inserting the list, so a list holding only
+    # this row would delete every other adjustment.
+    import redis_manager
+    rows = redis_manager.list_for_write('savings_adjustments', user_id)
     if rows is None:
-        rows = []
+        return False, None
     rows.append({
         'user_id': user_id,
         'date': on_date.isoformat(),

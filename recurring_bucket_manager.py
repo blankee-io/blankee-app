@@ -63,14 +63,13 @@ def create_bucket_record(entry_table, user_id, category_id, bucket_date, origina
         redis_key = f"{bucket_table}:v1:{user_id}"
         log_info(logger, 'CREATE_BUCKET', f"Redis key: {redis_key}, table={entry_table}, user_id={user_id}, category_id={category_id}, date={bucket_date}")
         
-        redis_data = redis_manager._redis_client.get(redis_key)
-        
-        buckets = []
-        if redis_data:
-            buckets = json.loads(redis_data)
-            log_info(logger, 'CREATE_BUCKET', f"Found {len(buckets)} existing buckets in Redis")
-        else:
-            log_info(logger, 'CREATE_BUCKET', f"No existing buckets found, creating new list")
+        # The user's records - from MySQL when the key is missing. A list
+        # holding only this record would be, to the flush, all of them.
+        buckets = redis_manager.list_for_write(bucket_table, user_id)
+        if buckets is None:
+            log_error(logger, 'CREATE_BUCKET', f"{redis_key} could not be loaded; record not created")
+            return None
+        log_info(logger, 'CREATE_BUCKET', f"Found {len(buckets)} existing buckets in Redis")
         
         # Check if bucket already exists
         bucket_id = None

@@ -11,6 +11,8 @@ All Redis keys used by the application. Keys are scoped per user unless noted ot
 
 These keys are hydrated from MySQL when a user becomes active, and flushed back to MySQL by the background flush worker every 15 seconds.
 
+A user's lists live for `CACHE_TTL` (600s) from their last refresh - longer than a hydrated user can go without one. A write never starts a list from nothing: `redis_manager.list_for_write` loads a missing key from MySQL first (or refuses the write), because a list holding only the new row is, to the flush, the user's whole table.
+
 | Key Pattern | Type | Description |
 |-------------|------|-------------|
 | `users:v1:{user_id}` | STRING (JSON object) | User profile and preferences |
@@ -75,6 +77,7 @@ These keys are hydrated from MySQL when a user becomes active, and flushed back 
 | `dirty_tables:{user_id}` | SET | 7 days | Table names that have been modified in Redis and need flushing to MySQL |
 | `pending_deletes:{table_name}:{user_id}` | SET | 7 days | IDs of records deleted in Redis, pending MySQL deletion during flush |
 | `flush_lock:{user_id}` | STRING (lock token) | 300s | Held by every flush of one of the user's tables (`_flush_table_to_mysql`), so the worker in each process, a request's forced flush and dehydration never flush one user at once. A flush that waits 30s for it is deferred and its table left dirty |
+| `seeded:{table}:{user_id}` | STRING ("1") | `CACHE_TTL` - 30s, never past its list | Says the list was loaded from MySQL (hydration, or a write's load of a missing key). Only for the tables whose flush deletes what the list lacks (`SEEDED_TABLES`: the recurring tables and their bucket records, `c_payment_entries`, the three category-group tables, `savings_adjustments`). A list without one was started from nothing, and the flush puts back the MySQL rows it lacks - all but pending deletes - before it deletes anything |
 | `temp_ids:{recurring_table}:{user_id}` | HASH (temporary id → real id) | 1 day | What each temporary recurring id became when the flush INSERTed it. Before flushing a recurring table or a list that refers to one, the flush re-keys any temporary id a late writer put back |
 | `force_refresh:{user_id}` | STRING ("1") | 60s | Signal for frontend to auto-refresh dashboard after a provider sync. NOTE: written by the sync engine, but no consumer was found in app.py, middleware.py, redis_manager.py or the templates — verify before relying on it |
 | `provider_sync_lock:{user_id}` | STRING ("1") | 300s (5 min) | Per-user mutex preventing concurrent provider sync processing (SETNX). Reserved: no producer until a bank provider is configured |

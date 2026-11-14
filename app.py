@@ -35,7 +35,7 @@ from collections import defaultdict
 from functools import wraps
 from PIL import Image
 from db_connections import init_db_pool, get_db_pool, dispose_db_pool
-from redis_manager import init_redis_manager, shutdown_redis_manager, DecimalEncoder
+from redis_manager import init_redis_manager, shutdown_redis_manager, DecimalEncoder, list_for_write
 from middleware import init_redis_middleware, init_redis_routes
 from providers import get_bank_provider, get_enrichment_provider
 from bank_sync import map_transaction_to_entry, get_default_category_mapping, is_compatible_account_type
@@ -4376,11 +4376,9 @@ def _update_totals_remainders_in_redis(table_name, user_id, updates):
     
     try:
         redis_key = f"{table_name}:v1:{user_id}"
-        cached = _redis_client.get(redis_key)
-        
-        if cached:
-            # Cache exists - update specific rows
-            data = json.loads(cached)
+        data = list_for_write(table_name, user_id)
+
+        if data is not None:
             # Create a map of date -> update data
             update_map = {}
             for update in updates:
@@ -4411,23 +4409,9 @@ def _update_totals_remainders_in_redis(table_name, user_id, updates):
             _redis_client.sadd(dirty_key, table_name)
             _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
         else:
-            # Cache doesn't exist - create it with the updates
-            serializable_updates = []
-            for update in updates:
-                update_copy = update.copy()
-                if isinstance(update_copy['date'], date):
-                    update_copy['date'] = update_copy['date'].isoformat()
-                # Convert Decimals to floats
-                for k, v in update_copy.items():
-                    if isinstance(v, Decimal):
-                        update_copy[k] = float(v)
-                serializable_updates.append(update_copy)
-            
-            _redis_client.setex(redis_key, PERSISTENT_CACHE_TTL, json.dumps(serializable_updates))
-            # Mark table as dirty for flush (with TTL matching cache TTL)
-            dirty_key = f"dirty_tables:{user_id}"
-            _redis_client.sadd(dirty_key, table_name)
-            _redis_client.expire(dirty_key, PERSISTENT_CACHE_TTL)
+            # Not a list holding only these dates in place of the user's.
+            log_error(app.logger, 'REDIS', f"{table_name} for user {user_id} could not be loaded; "
+                                           f"{len(updates)} totals not written")
     except Exception as e:
         pass
 
@@ -4616,11 +4600,11 @@ def _set_ca_balances_to_redis(table_name, user_id, data):
     try:
         redis_key = f"{table_name}:v1:{user_id}"
         
-        # Get existing data from Redis
-        existing_data = []
-        cached = _redis_client.get(redis_key)
-        if cached:
-            existing_data = json.loads(cached)
+        # Get existing data from Redis (from MySQL when the key is missing)
+        existing_data = list_for_write(table_name, user_id)
+        if existing_data is None:
+            log_error(app.logger, 'CREDIT', f"{table_name} for user {user_id} could not be loaded; balances not written")
+            return
         
         # Create a map of existing records by (account_id, date)
         existing_map = {}
@@ -5962,13 +5946,13 @@ def _update_recurring_in_redis(table_name, user_id, recurring_data):
     try:
         redis_key = f"{table_name}:v1:{user_id}"
         
-        # Get existing data
-        cached = _redis_client.get(redis_key)
-        if cached:
-            rows = json.loads(cached)
-        else:
-            rows = []
-        
+        # The user's links - loaded from MySQL when the key is missing. A list
+        # holding only this link would be, to the flush, every link they have.
+        rows = list_for_write(table_name, user_id)
+        if rows is None:
+            log_error(app.logger, 'RECURRING', f"{table_name} for user {user_id} could not be loaded; link not written")
+            return
+
         recurring_id = recurring_data.get('id')
         
         if recurring_id:
@@ -6732,10 +6716,8 @@ def _sync_delete_to_credit_accounts(user_id, category_name):
                 cat_ids = set(int(cat.get('id')) for cat in matching_cats)
                 filtered = [r for r in recurring_list if int(r.get('category_id', 0)) not in cat_ids]
                 if len(filtered) < len(recurring_list):
-                    if len(filtered) == 0:
-                        _redis_client.delete(recurring_redis_key)
-                    else:
-                        _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered, cls=DecimalEncoder))
+                    # [] when emptied, not a deleted key (which reads as not loaded)
+                    _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered, cls=DecimalEncoder))
                     _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_c_expense')
         except Exception as e:
             log_error(app.logger, 'CATEGORY_SYNC', f"Error removing recurring_c_expense for deleted categories: {e}")
@@ -6828,10 +6810,11 @@ def _add_category_to_redis(table_name, user_id, category_data):
     try:
         redis_key = f"{table_name}:v1:{user_id}"
         
-        # Get existing data or initialize empty list
-        cached = _redis_client.get(redis_key)
-        rows = json.loads(cached) if cached else []
-        
+        # Existing data, from MySQL when the key is missing - never an empty list
+        rows = list_for_write(table_name, user_id)
+        if rows is None:
+            return None
+
         # Generate a negative temporary ID for the new category
         # (flush worker will replace with MySQL auto-increment ID)
         existing_ids = [int(row.get('id', 0)) for row in rows]
@@ -6884,9 +6867,10 @@ def _add_categories_batch_to_redis(table_name, user_id, categories_list):
     try:
         redis_key = f"{table_name}:v1:{user_id}"
         
-        # Single read
-        cached = _redis_client.get(redis_key)
-        rows = json.loads(cached) if cached else []
+        # Single read (from MySQL when the key is missing - never an empty list)
+        rows = list_for_write(table_name, user_id)
+        if rows is None:
+            return []
         
         # Generate sequential negative IDs for all new categories
         existing_ids = [int(row.get('id', 0)) for row in rows]
@@ -7039,13 +7023,14 @@ def _add_category_group_to_redis(table_name, user_id, group_data):
         return None
     try:
         redis_key = f"{table_name}:v1:{user_id}"
-        cached = _redis_client.get(redis_key)
-        rows = json.loads(cached) if cached else []
-        
+        rows = list_for_write(table_name, user_id)
+        if rows is None:
+            return None
+
         existing_ids = [int(row.get('id', 0)) for row in rows]
         min_id = min(existing_ids) if existing_ids else 0
         new_id = min_id - 1 if min_id <= 0 else -1
-        
+
         group_data['id'] = new_id
         group_data['user_id'] = user_id
         rows.append(group_data)
@@ -7244,8 +7229,9 @@ def _update_bundle_in_redis(user_id, bundle_data):
         return None
     try:
         redis_key = f"bundles:v1:{user_id}"
-        cached = _redis_client.get(redis_key)
-        rows = json.loads(cached) if cached else []
+        rows = list_for_write('bundles', user_id)
+        if rows is None:
+            return None
         
         bundle_id = bundle_data.get('id')
         if bundle_id:
@@ -7366,10 +7352,11 @@ def _add_credit_account_to_redis(user_id, account_data):
     try:
         redis_key = f"credit_accounts:v1:{user_id}"
         
-        # Get existing data or initialize empty list
-        cached = _redis_client.get(redis_key)
-        rows = json.loads(cached) if cached else []
-        
+        # Existing data, from MySQL when the key is missing - never an empty list
+        rows = list_for_write('credit_accounts', user_id)
+        if rows is None:
+            return None
+
         # Generate a negative temporary ID for the new account
         existing_ids = [int(row.get('id', 0)) for row in rows]
         min_id = min(existing_ids) if existing_ids else 0
@@ -7894,8 +7881,9 @@ def _update_bundle_item_in_redis(user_id, bundle_item_data):
         return None
     try:
         redis_key = f"bundle_items:v1:{user_id}"
-        cached = _redis_client.get(redis_key)
-        rows = json.loads(cached) if cached else []
+        rows = list_for_write('bundle_items', user_id)
+        if rows is None:
+            return None
         
         item_id = bundle_item_data.get('id')
         if item_id:
@@ -10562,10 +10550,8 @@ def delete_income_category():
                     category_id_int = int(category_id)
                     filtered_recurring = [r for r in recurring_list if r.get('category_id') != category_id_int]
                     if len(filtered_recurring) < len(recurring_list):
-                        if len(filtered_recurring) == 0:
-                            _redis_client.delete(recurring_redis_key)
-                        else:
-                            _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring))
+                        # [] when emptied, not a deleted key (which reads as not loaded)
+                        _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring))
                         _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_income')
 
                 # Remove bucket records for this category from Redis
@@ -10576,10 +10562,8 @@ def delete_income_category():
                     category_id_int = int(category_id)
                     filtered_buckets = [b for b in buckets if b.get('category_id') != category_id_int]
                     if len(filtered_buckets) < len(buckets):
-                        if len(filtered_buckets) == 0:
-                            _redis_client.delete(bucket_redis_key)
-                        else:
-                            _redis_client.setex(bucket_redis_key, 604800, json.dumps(filtered_buckets))
+                        # [] when emptied, not a deleted key (which reads as not loaded)
+                        _redis_client.setex(bucket_redis_key, 604800, json.dumps(filtered_buckets))
                         _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_income_buckets')
 
                 # Delete category from Redis cache
@@ -10686,10 +10670,8 @@ def delete_expense_category():
                     category_id_int = int(category_id)
                     filtered_recurring = [r for r in recurring_list if r.get('category_id') != category_id_int]
                     if len(filtered_recurring) < len(recurring_list):
-                        if len(filtered_recurring) == 0:
-                            _redis_client.delete(recurring_redis_key)
-                        else:
-                            _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring))
+                        # [] when emptied, not a deleted key (which reads as not loaded)
+                        _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring))
                         _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_expense')
 
                 # Remove bucket records for this category from Redis
@@ -10700,10 +10682,8 @@ def delete_expense_category():
                     category_id_int = int(category_id)
                     filtered_buckets = [b for b in buckets if b.get('category_id') != category_id_int]
                     if len(filtered_buckets) < len(buckets):
-                        if len(filtered_buckets) == 0:
-                            _redis_client.delete(bucket_redis_key)
-                        else:
-                            _redis_client.setex(bucket_redis_key, 604800, json.dumps(filtered_buckets))
+                        # [] when emptied, not a deleted key (which reads as not loaded)
+                        _redis_client.setex(bucket_redis_key, 604800, json.dumps(filtered_buckets))
                         _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_expense_buckets')
 
                 # Delete category from Redis cache
@@ -10792,10 +10772,8 @@ def delete_ca_category():
                     recurring_list = json.loads(recurring_data)
                     filtered_recurring = [r for r in recurring_list if int(r.get('category_id', 0)) != category_id_int]
                     if len(filtered_recurring) < len(recurring_list):
-                        if len(filtered_recurring) == 0:
-                            _redis_client.delete(recurring_redis_key)
-                        else:
-                            _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring, cls=DecimalEncoder))
+                        # [] when emptied, not a deleted key (which reads as not loaded)
+                        _redis_client.setex(recurring_redis_key, 604800, json.dumps(filtered_recurring, cls=DecimalEncoder))
                         _redis_client.sadd(f"dirty_tables:{current_user.id}", 'recurring_c_expense')
             except Exception as e:
                 log_error(app.logger, 'CATEGORIES', f"Error removing recurring_c_expense during convert-to-nonrecurring: {e}")
@@ -10817,10 +10795,8 @@ def delete_ca_category():
                         else:
                             filtered_buckets.append(b)
                     if len(filtered_buckets) < len(buckets):
-                        if len(filtered_buckets) == 0:
-                            _redis_client.delete(bucket_redis_key)
-                        else:
-                            _redis_client.setex(bucket_redis_key, 604800, json.dumps(filtered_buckets, cls=DecimalEncoder))
+                        # [] when emptied, not a deleted key (which reads as not loaded)
+                        _redis_client.setex(bucket_redis_key, 604800, json.dumps(filtered_buckets, cls=DecimalEncoder))
                         if deleted_bucket_ids:
                             pending_key = f"pending_deletes:recurring_c_expense_buckets:{current_user.id}"
                             _redis_client.sadd(pending_key, *deleted_bucket_ids)
@@ -27027,8 +27003,9 @@ def add_credit_account():
         # (using helper would fail since account doesn't exist in MySQL yet)
         try:
             redis_key = f"c_expense_entries:v1:{current_user.id}"
-            cached = _redis_client.get(redis_key)
-            entries = json.loads(cached) if cached else []
+            entries = list_for_write('c_expense_entries', current_user.id)
+            if entries is None:
+                raise RuntimeError('c_expense_entries could not be loaded')
             
             # Generate temp ID
             existing_ids = [int(e.get('id', 0)) for e in entries]
@@ -27620,10 +27597,8 @@ def delete_credit_account():
                         cat_ids = [cat['id'] for cat in categories if cat.get('account_id') == actual_id_to_delete]
                         # Filter out categories for this account
                         filtered_categories = [cat for cat in categories if cat.get('account_id') != actual_id_to_delete]
-                        if filtered_categories:
-                            _redis_client.setex(cat_redis_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_categories, cls=DecimalEncoder))
-                        else:
-                            _redis_client.delete(cat_redis_key)
+                        # [] when emptied, not a deleted key (which reads as not loaded)
+                        _redis_client.setex(cat_redis_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_categories, cls=DecimalEncoder))
                         _redis_client.sadd(dirty_key, 'c_expense_categories')
                     
                     # 1b. Delete c_expense_category_groups for this account
@@ -27633,10 +27608,8 @@ def delete_credit_account():
                         groups = json.loads(ceg_cached)
                         group_ids_to_delete = [g['id'] for g in groups if g.get('account_id') == actual_id_to_delete]
                         filtered_groups = [g for g in groups if g.get('account_id') != actual_id_to_delete]
-                        if filtered_groups:
-                            _redis_client.setex(ceg_redis_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_groups, cls=DecimalEncoder))
-                        else:
-                            _redis_client.delete(ceg_redis_key)
+                        # [] when emptied, not a deleted key (which reads as not loaded)
+                        _redis_client.setex(ceg_redis_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_groups, cls=DecimalEncoder))
                         _redis_client.sadd(dirty_key, 'c_expense_category_groups')
                         # Add real (positive) IDs to pending deletes
                         if group_ids_to_delete:
@@ -27716,10 +27689,8 @@ def delete_credit_account():
                     if recurring_cached:
                         recurring_list = json.loads(recurring_cached)
                         filtered_recurring = [r for r in recurring_list if r.get('category_id') not in account_category_ids]
-                        if filtered_recurring:
-                            _redis_client.setex(recurring_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_recurring, cls=DecimalEncoder))
-                        else:
-                            _redis_client.delete(recurring_key)
+                        # [] when emptied, not a deleted key (which reads as not loaded)
+                        _redis_client.setex(recurring_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_recurring, cls=DecimalEncoder))
                         _redis_client.sadd(dirty_key, 'recurring_c_expense')
                     
                     # 8. Delete recurring_c_expense_buckets for this account (keyed by user_id, filter by account_id via category)
@@ -27728,10 +27699,8 @@ def delete_credit_account():
                     if buckets_cached:
                         buckets = json.loads(buckets_cached)
                         filtered_buckets = [b for b in buckets if b.get('category_id') not in account_category_ids]
-                        if filtered_buckets:
-                            _redis_client.setex(recurring_buckets_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_buckets, cls=DecimalEncoder))
-                        else:
-                            _redis_client.delete(recurring_buckets_key)
+                        # [] when emptied, not a deleted key (which reads as not loaded)
+                        _redis_client.setex(recurring_buckets_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_buckets, cls=DecimalEncoder))
                         _redis_client.sadd(dirty_key, 'recurring_c_expense_buckets')
                     
         
@@ -27834,10 +27803,8 @@ def delete_credit_account():
                             recurring_exp_list = json.loads(recurring_exp_cached)
                             recurring_ids_to_delete = [r.get('id') for r in recurring_exp_list if r.get('category_id') == category_id_to_delete]
                             filtered_recurring_exp = [r for r in recurring_exp_list if r.get('category_id') != category_id_to_delete]
-                            if filtered_recurring_exp:
-                                _redis_client.setex(recurring_exp_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_recurring_exp, cls=DecimalEncoder))
-                            else:
-                                _redis_client.delete(recurring_exp_key)
+                            # [] when emptied, not a deleted key (which reads as not loaded)
+                            _redis_client.setex(recurring_exp_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_recurring_exp, cls=DecimalEncoder))
                             _redis_client.sadd(dirty_key, 'recurring_expense')
                             # Add real IDs to pending deletes
                             for rec_id in recurring_ids_to_delete:
@@ -27853,10 +27820,8 @@ def delete_credit_account():
                             buckets_list = json.loads(buckets_cached)
                             bucket_ids_to_delete = [b.get('id') for b in buckets_list if b.get('category_id') == category_id_to_delete]
                             filtered_buckets = [b for b in buckets_list if b.get('category_id') != category_id_to_delete]
-                            if filtered_buckets:
-                                _redis_client.setex(recurring_buckets_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_buckets, cls=DecimalEncoder))
-                            else:
-                                _redis_client.delete(recurring_buckets_key)
+                            # [] when emptied, not a deleted key (which reads as not loaded)
+                            _redis_client.setex(recurring_buckets_key, PERSISTENT_CACHE_TTL, json.dumps(filtered_buckets, cls=DecimalEncoder))
                             _redis_client.sadd(dirty_key, 'recurring_expense_buckets')
                             # Add real IDs to pending deletes
                             for bucket_id in bucket_ids_to_delete:

@@ -400,13 +400,14 @@ def _ensure_hydrated(user_id: int) -> None:
     if not redis_manager.is_user_hydrated(user_id):
         log_info(logger, TAG, f'user {user_id}: hydrating before the pull')
         redis_manager._hydrate_user_data(user_id)
-    # Hydration writes no key for a table with no rows, and add_entry only
-    # appends to a key that exists - so a first entry into an empty table
-    # would reach MySQL and not the cache the pages read. An empty list is
-    # the same thing hydration would have written had it written anything.
+    # add_entry only appends to a key that exists, so a table whose key is
+    # missing - never written, or expired - would take a first entry into
+    # MySQL and not the cache the pages read. Load it. Not an empty list in
+    # its place: for c_payment_entries the flush deletes from MySQL whatever
+    # the list lacks.
     for table in ENTRY_TABLES.values():
         if redis_manager.get_table_cache(table, user_id) is None:
-            redis_manager.set_table_cache(table, user_id, [], mark_dirty=False)
+            redis_manager.list_for_write(table, user_id)
 
 
 # ------------------------------------------------------------- the budget

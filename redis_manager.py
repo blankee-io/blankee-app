@@ -46,6 +46,34 @@ FLUSH_INTERVAL = 15  # 15 seconds (balanced flush interval)
 REDIS_KEY_VERSION = "v1"
 REDIS_TTL = 604800  # 7 days in seconds
 
+# How long a user's lists live in Redis without being touched. It has to
+# outlast hydration: a list that expires while its user is still hydrated is
+# read as missing, and a write that starts from nothing then leaves a list
+# holding only the new row - which the flush takes for the user's whole table
+# and deletes the rest from MySQL (dev, user 324, 2026-11-13). Activity
+# refreshes TTLs at most every 120s (_refresh_user_ttls' throttle) and the
+# dehydration worker acts up to INACTIVITY_TIMEOUT + 30s after the last
+# request, so a list must last 450s past its last refresh. It was
+# INACTIVITY_TIMEOUT + 60 (360s), which left a minute in which an active
+# user's lists were gone. 600 matches the app's PERSISTENT_CACHE_TTL.
+CACHE_TTL = 600
+
+# The tables whose flush deletes from MySQL whatever their Redis list lacks:
+# an orphan pass (mysql_ids - redis_ids), or savings_adjustments' delete-all
+# and insert. For these a list that was not loaded from MySQL - one a write
+# started from nothing - is a list of deletions. Each list loaded from MySQL
+# carries a marker, seeded:{table}:{user_id}, that expires SEED_MARGIN before
+# the list can, and before the orphan pass runs the flush puts back any rows a
+# list without one is missing (_reseed_unseeded_list).
+SEEDED_TABLES = frozenset({
+    'recurring_income', 'recurring_expense', 'recurring_c_expense',
+    'recurring_income_buckets', 'recurring_expense_buckets', 'recurring_c_expense_buckets',
+    'c_payment_entries',
+    'income_category_groups', 'expense_category_groups', 'c_expense_category_groups',
+    'savings_adjustments',
+})
+SEED_MARGIN = 30
+
 
 def _json_or_none(value):
     """
@@ -387,7 +415,7 @@ def set_table_cache(table: str, user_id: int, data, mark_dirty: bool = True) -> 
         redis_key = _get_redis_key(table, user_id)
         _redis_client.setex(
             redis_key,
-            INACTIVITY_TIMEOUT + 60,
+            CACHE_TTL,
             json.dumps(data, cls=DecimalEncoder)
         )
 
@@ -466,7 +494,7 @@ def _hydrate_user_profile(user_id: int):
                 redis_key = _get_redis_key('users', user_id)
                 _redis_client.setex(
                     redis_key,
-                    INACTIVITY_TIMEOUT + 60,  # Slightly longer TTL
+                    CACHE_TTL,  # Slightly longer TTL
                     json.dumps(user_data, cls=DecimalEncoder)
                 )
                 log_info(logger, 'REDIS', f"Hydrated user profile for user {user_id}")
@@ -474,116 +502,171 @@ def _hydrate_user_profile(user_id: int):
         log_error(logger, 'REDIS', f"Error hydrating user profile for {user_id}: {e}")
 
 
+def _seeded_key(table: str, user_id: int) -> str:
+    return f"seeded:{table}:{user_id}"
+
+
+def _table_rows_from_mysql(table: str, user_id: int) -> list:
+    """A user's rows of one table, as hydration loads them. Raises on a MySQL error."""
+    with get_db_pool().get_cursor(dictionary=True) as cursor:
+        # Build query based on table structure
+        # Different tables have different relationships to users
+        
+        if table == 'income_entries':
+            # income_entries -> income_categories -> users
+            query = """
+                SELECT ie.* FROM income_entries ie
+                INNER JOIN income_categories ic ON ie.category_id = ic.id
+                WHERE ic.user_id = %s
+            """
+        elif table == 'expense_entries':
+            # expense_entries -> expense_categories -> users
+            query = """
+                SELECT ee.* FROM expense_entries ee
+                INNER JOIN expense_categories ec ON ee.category_id = ec.id
+                WHERE ec.user_id = %s
+            """
+        elif table == 'c_expense_entries':
+            # c_expense_entries -> c_expense_categories -> credit_accounts -> users
+            query = """
+                SELECT ce.* FROM c_expense_entries ce
+                INNER JOIN c_expense_categories cec ON ce.category_id = cec.id
+                INNER JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+            """
+        elif table in ['c_a_balances', 'c_a_balances_d', 'c_a_balances_m', 'c_payment_entries']:
+            # These tables join directly to credit_accounts
+            query = f"""
+                SELECT t.* FROM {table} t
+                INNER JOIN credit_accounts ca ON t.account_id = ca.id
+                WHERE ca.user_id = %s
+            """
+        elif table in ['c_expense_categories']:
+            # c_expense_categories -> credit_accounts -> users
+            query = f"""
+                SELECT cec.* FROM {table} cec
+                INNER JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+            """
+        elif table == 'recurring_income_buckets':
+            # recurring_income_buckets -> income_categories -> users
+            query = """
+                SELECT rib.* FROM recurring_income_buckets rib
+                INNER JOIN income_categories ic ON rib.category_id = ic.id
+                WHERE ic.user_id = %s
+            """
+        elif table == 'recurring_expense_buckets':
+            # recurring_expense_buckets -> expense_categories -> users
+            query = """
+                SELECT reb.* FROM recurring_expense_buckets reb
+                INNER JOIN expense_categories ec ON reb.category_id = ec.id
+                WHERE ec.user_id = %s
+            """
+        elif table == 'recurring_c_expense_buckets':
+            # recurring_c_expense_buckets -> c_expense_categories -> credit_accounts -> users
+            query = """
+                SELECT rceb.* FROM recurring_c_expense_buckets rceb
+                INNER JOIN c_expense_categories cec ON rceb.category_id = cec.id
+                INNER JOIN credit_accounts ca ON cec.account_id = ca.id
+                WHERE ca.user_id = %s
+            """
+        elif table == 'bundle_items':
+            # bundle_items -> bundles -> users. It has no user_id of its own, so
+            # the default branch below emitted "WHERE user_id = %s" against
+            # a table without that column - a query that failed on every
+            # hydration pass.
+            query = """
+                SELECT bi.* FROM bundle_items bi
+                INNER JOIN bundles b ON bi.bundle_id = b.id
+                WHERE b.user_id = %s
+            """
+        elif table == 'credit_accounts':
+            # Credit accounts ordered by display_order DESC (highest at top, like categories)
+            query = "SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order DESC"
+        else:
+            # Default: table has direct user_id column
+            query = f"SELECT * FROM {table} WHERE user_id = %s"
+        
+        cursor.execute(query, (user_id,))
+        return list(cursor.fetchall())
+
+
 def _hydrate_table(table: str, user_id: int):
     """
-    Hydrate a specific table's data for a user.
-    
-    Args:
-        table: Table name
-        user_id: User ID
+    Load a user's table from MySQL into Redis, replacing what is there. An
+    empty list is stored too, to say the table was checked.
+
+    Returns the count of rows loaded (0 on a MySQL error, which stores nothing).
     """
     try:
-        with get_db_pool().get_cursor(dictionary=True) as cursor:
-            # Build query based on table structure
-            # Different tables have different relationships to users
-            
-            if table == 'income_entries':
-                # income_entries -> income_categories -> users
-                query = """
-                    SELECT ie.* FROM income_entries ie
-                    INNER JOIN income_categories ic ON ie.category_id = ic.id
-                    WHERE ic.user_id = %s
-                """
-            elif table == 'expense_entries':
-                # expense_entries -> expense_categories -> users
-                query = """
-                    SELECT ee.* FROM expense_entries ee
-                    INNER JOIN expense_categories ec ON ee.category_id = ec.id
-                    WHERE ec.user_id = %s
-                """
-            elif table == 'c_expense_entries':
-                # c_expense_entries -> c_expense_categories -> credit_accounts -> users
-                query = """
-                    SELECT ce.* FROM c_expense_entries ce
-                    INNER JOIN c_expense_categories cec ON ce.category_id = cec.id
-                    INNER JOIN credit_accounts ca ON cec.account_id = ca.id
-                    WHERE ca.user_id = %s
-                """
-            elif table in ['c_a_balances', 'c_a_balances_d', 'c_a_balances_m', 'c_payment_entries']:
-                # These tables join directly to credit_accounts
-                query = f"""
-                    SELECT t.* FROM {table} t
-                    INNER JOIN credit_accounts ca ON t.account_id = ca.id
-                    WHERE ca.user_id = %s
-                """
-            elif table in ['c_expense_categories']:
-                # c_expense_categories -> credit_accounts -> users
-                query = f"""
-                    SELECT cec.* FROM {table} cec
-                    INNER JOIN credit_accounts ca ON cec.account_id = ca.id
-                    WHERE ca.user_id = %s
-                """
-            elif table == 'recurring_income_buckets':
-                # recurring_income_buckets -> income_categories -> users
-                query = """
-                    SELECT rib.* FROM recurring_income_buckets rib
-                    INNER JOIN income_categories ic ON rib.category_id = ic.id
-                    WHERE ic.user_id = %s
-                """
-            elif table == 'recurring_expense_buckets':
-                # recurring_expense_buckets -> expense_categories -> users
-                query = """
-                    SELECT reb.* FROM recurring_expense_buckets reb
-                    INNER JOIN expense_categories ec ON reb.category_id = ec.id
-                    WHERE ec.user_id = %s
-                """
-            elif table == 'recurring_c_expense_buckets':
-                # recurring_c_expense_buckets -> c_expense_categories -> credit_accounts -> users
-                query = """
-                    SELECT rceb.* FROM recurring_c_expense_buckets rceb
-                    INNER JOIN c_expense_categories cec ON rceb.category_id = cec.id
-                    INNER JOIN credit_accounts ca ON cec.account_id = ca.id
-                    WHERE ca.user_id = %s
-                """
-            elif table == 'bundle_items':
-                # bundle_items -> bundles -> users. It has no user_id of its own, so
-                # the default branch below emitted "WHERE user_id = %s" against
-                # a table without that column - a query that failed on every
-                # hydration pass.
-                query = """
-                    SELECT bi.* FROM bundle_items bi
-                    INNER JOIN bundles b ON bi.bundle_id = b.id
-                    WHERE b.user_id = %s
-                """
-            elif table == 'credit_accounts':
-                # Credit accounts ordered by display_order DESC (highest at top, like categories)
-                query = "SELECT * FROM credit_accounts WHERE user_id = %s ORDER BY display_order DESC"
-            else:
-                # Default: table has direct user_id column
-                query = f"SELECT * FROM {table} WHERE user_id = %s"
-            
-            cursor.execute(query, (user_id,))
-            rows = cursor.fetchall()
-            
-            if rows:
-                redis_key = _get_redis_key(table, user_id)
-                # Store as JSON array
-                _redis_client.setex(
-                    redis_key,
-                    INACTIVITY_TIMEOUT + 60,
-                    json.dumps(rows, cls=DecimalEncoder)
-                )
-                log_info(logger, 'REDIS', f"Hydrated {len(rows)} rows from {table} for user {user_id}")
-                return len(rows)
-            else:
-                # Store empty array to indicate table was checked
-                redis_key = _get_redis_key(table, user_id)
-                _redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps([]))
-                return 0
-                
+        rows = _table_rows_from_mysql(table, user_id)
+        redis_key = _get_redis_key(table, user_id)
+        with _redis_client.pipeline() as pipe:
+            pipe.setex(redis_key, CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
+            if table in SEEDED_TABLES:
+                pipe.setex(_seeded_key(table, user_id), CACHE_TTL - SEED_MARGIN, '1')
+            pipe.execute()
+        if rows:
+            log_info(logger, 'REDIS', f"Hydrated {len(rows)} rows from {table} for user {user_id}")
+        return len(rows)
     except Exception as e:
         log_error(logger, 'REDIS', f"Error hydrating {table} for user {user_id}: {e}")
         return 0
+
+
+def _seed_missing_table(table: str, user_id: int) -> bool:
+    """
+    Load a user's table from MySQL into Redis only if its key is missing. A
+    request that writes the key in between keeps what it wrote, and then the
+    list gets no seeded marker - it was not loaded here. Returns whether this
+    loaded it. Raises on a MySQL error.
+    """
+    rows = _table_rows_from_mysql(table, user_id)
+    redis_key = _get_redis_key(table, user_id)
+    with _redis_client.pipeline() as pipe:
+        try:
+            pipe.watch(redis_key)
+            if pipe.exists(redis_key):
+                return False
+            pipe.multi()
+            pipe.setex(redis_key, CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
+            if table in SEEDED_TABLES:
+                pipe.setex(_seeded_key(table, user_id), CACHE_TTL - SEED_MARGIN, '1')
+            pipe.execute()
+        except WatchError:
+            return False
+    log_info(logger, 'REDIS', f"Loaded missing {table} for user {user_id}: {len(rows)} rows")
+    return True
+
+
+def list_for_write(table: str, user_id: int):
+    """
+    A user's rows of one table, read to be changed and written back. Never a
+    list made from nothing: a missing key - expired, dehydrated by another
+    process, deleted - is loaded from MySQL first, so the write lands on the
+    user's rows rather than replacing them. (A list holding only the new row
+    is, to the flush, the user's whole table: for SEEDED_TABLES it deletes the
+    rest from MySQL, for the others Redis shows the user one row until they
+    are dehydrated.)
+
+    Returns the rows, or None when they cannot be had - no Redis, or MySQL
+    failing - and the caller then writes nothing.
+    """
+    if not _redis_client:
+        return None
+    redis_key = _get_redis_key(table, user_id)
+    try:
+        cached = _redis_client.get(redis_key)
+        if cached is None:
+            _seed_missing_table(table, user_id)
+            cached = _redis_client.get(redis_key)
+        if cached is None:
+            log_error(logger, 'REDIS', f"{redis_key} is missing and could not be loaded; write refused")
+            return None
+        return json.loads(cached)
+    except Exception as e:
+        log_error(logger, 'REDIS', f"Could not read {redis_key} for a write, refused: {e}")
+        return None
 
 
 def _refresh_user_ttls(user_id: int):
@@ -611,7 +694,7 @@ def _refresh_user_ttls(user_id: int):
         # Refresh TTL for user profile
         user_key = _get_redis_key('users', user_id)
         if _redis_client.exists(user_key):
-            _redis_client.expire(user_key, INACTIVITY_TIMEOUT + 60)
+            _redis_client.expire(user_key, CACHE_TTL)
         
         # Refresh TTL for all user tables, hydrate any missing
         refreshed_count = 0
@@ -619,14 +702,17 @@ def _refresh_user_ttls(user_id: int):
         for table in USER_TABLES:
             key = _get_redis_key(table, user_id)
             if _redis_client.exists(key):
-                _redis_client.expire(key, INACTIVITY_TIMEOUT + 60)
+                _redis_client.expire(key, CACHE_TTL)
+                if table in SEEDED_TABLES:
+                    # Only ever after its list's, so it never outlives it.
+                    # A list without one keeps without one.
+                    _redis_client.expire(_seeded_key(table, user_id), CACHE_TTL - SEED_MARGIN)
                 refreshed_count += 1
             else:
-                # Missing table - hydrate it from MySQL
-                rows_count = _hydrate_table(table, user_id)
-                if rows_count > 0:
+                # Missing table - load it from MySQL, unless a request has
+                # written the key since (that write is kept, not replaced)
+                if _seed_missing_table(table, user_id):
                     hydrated_count += 1
-                    log_info(logger, 'TTL_REFRESH', f"Hydrated missing table {table} for user {user_id}: {rows_count} rows")
         
         if hydrated_count > 0:
             log_info(logger, 'TTL_REFRESH', f"✓ Refreshed {refreshed_count} keys, hydrated {hydrated_count} missing tables for user {user_id}")
@@ -714,6 +800,8 @@ def _dehydrate_user_data(user_id: int):
         # All user tables
         for table in USER_TABLES:
             keys_to_delete.append(_get_redis_key(table, user_id))
+            if table in SEEDED_TABLES:
+                keys_to_delete.append(_seeded_key(table, user_id))
         
         # Bundle items (stored by user_id)
         bundle_items_key = f"bundle_items:{REDIS_KEY_VERSION}:{user_id}"
@@ -1137,6 +1225,78 @@ def _drop_ids_from_redis_list(key: str, ids: set) -> bool:
     return _edit_redis_list(key, edit)
 
 
+def _row_identity(table: str, row):
+    """What makes a row the same row in Redis and MySQL, for _reseed_unseeded_list."""
+    if table == 'savings_adjustments':
+        # Delete-all and insert: MySQL's ids change every flush and Redis
+        # keeps the old ones, so a row is known by what it says.
+        return (str(row.get('date'))[:10], round(float(row.get('amount') or 0), 2),
+                row.get('description') or None, row.get('linked_account_id'))
+    try:
+        return int(row.get('id'))
+    except (TypeError, ValueError):
+        return None
+
+
+def _reseed_unseeded_list(table: str, user_id: int, redis_key: str):
+    """
+    Before a flush of a SEEDED_TABLES table deletes anything: if the list has
+    no seeded marker it was not loaded from MySQL - a write started it from
+    nothing - so the MySQL rows it lacks were never removed by anyone. Put them
+    back (all but pending deletes), and mark the list seeded.
+
+    Returns whether the list was changed, or None when it could not be checked
+    (the list kept being written; the flush is deferred). Raises on a MySQL
+    error, which fails the flush before it deletes anything.
+    """
+    marker = _seeded_key(table, user_id)
+    if _redis_client.exists(marker):
+        return False
+    mysql_rows = _table_rows_from_mysql(table, user_id)
+    pending = set()
+    for raw_id in _redis_client.smembers(f"pending_deletes:{table}:{user_id}") or ():
+        try:
+            pending.add(int(raw_id))
+        except (TypeError, ValueError):
+            pass
+    for _ in range(20):
+        with _redis_client.pipeline() as pipe:
+            try:
+                pipe.watch(redis_key, marker)
+                if pipe.exists(marker):
+                    return False
+                current = pipe.get(redis_key)
+                if current is None:
+                    return False
+                rows = json.loads(current)
+                have = defaultdict(int)
+                for row in rows:
+                    have[_row_identity(table, row)] += 1
+                restored = []
+                for row in mysql_rows:
+                    ident = _row_identity(table, row)
+                    if have.get(ident, 0) > 0:
+                        have[ident] -= 1
+                    elif int(row.get('id') or 0) not in pending:
+                        restored.append(row)
+                ttl = pipe.ttl(redis_key)
+                ttl = ttl if ttl and ttl > SEED_MARGIN else CACHE_TTL
+                pipe.multi()
+                if restored:
+                    pipe.set(redis_key, json.dumps(restored + rows, cls=DecimalEncoder), ex=ttl)
+                pipe.set(marker, '1', ex=ttl - SEED_MARGIN)
+                pipe.execute()
+            except WatchError:
+                continue
+        if restored:
+            log_warning(logger, 'FLUSH', f"{redis_key} was not loaded from MySQL and lacked {len(restored)} "
+                                         f"of its rows - put back before the flush, not deleted: "
+                                         f"{[r.get('id') for r in restored][:50]}")
+        return bool(restored)
+    log_warning(logger, 'FLUSH', f"Gave up checking {redis_key}: written by another every time it was read")
+    return None
+
+
 def _flush_table_to_mysql(table: str, user_id: int):
     """
     Flush one of a user's tables to MySQL, holding the user's flush lock.
@@ -1274,6 +1434,12 @@ def _flush_table_unlocked(table: str, user_id: int):
                 return 0
         
         log_info(logger, 'FLUSH', f"Found Redis data for {table}, length: {len(redis_data)} bytes")
+        if table in SEEDED_TABLES:
+            reseeded = _reseed_unseeded_list(table, user_id, redis_key)
+            if reseeded is None:
+                return -1
+            if reseeded:
+                redis_data = _redis_client.get(redis_key) or redis_data
         rows = json.loads(redis_data)
         
         # Don't return early when rows is an empty list - we still need to
@@ -2829,7 +2995,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                     redis_key = _get_redis_key('bundles', user_id)
                     _redis_client.setex(
                         redis_key,
-                        INACTIVITY_TIMEOUT + 60,
+                        CACHE_TTL,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
                     log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} bundle temp IDs in Redis")
@@ -2849,7 +3015,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if updated_count > 0:
                             _redis_client.setex(
                                 bundle_items_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(bundle_items, cls=DecimalEncoder)
                             )
                             log_info(logger, 'FLUSH', f"Updated {updated_count} bundle_item bundle_id references in Redis")
@@ -2871,7 +3037,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if mirrors_updated > 0:
                             _redis_client.setex(
                                 mirrors_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(mirrors, cls=DecimalEncoder)
                             )
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
@@ -2973,7 +3139,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                     redis_key = _get_redis_key('bundle_items', user_id)
                     _redis_client.setex(
                         redis_key,
-                        INACTIVITY_TIMEOUT + 60,
+                        CACHE_TTL,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
                     log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} bundle_item temp IDs in Redis")
@@ -2994,7 +3160,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                             if updated_count > 0:
                                 _redis_client.setex(
                                     entries_key,
-                                    INACTIVITY_TIMEOUT + 60,
+                                    CACHE_TTL,
                                     json.dumps(entries, cls=DecimalEncoder)
                                 )
                                 log_info(logger, 'FLUSH', f"Updated {updated_count} bundle_item_id references in {table}")
@@ -3200,7 +3366,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                 redis_key = _get_redis_key(table, user_id)
                 _redis_client.setex(
                     redis_key,
-                    INACTIVITY_TIMEOUT + 60,
+                    CACHE_TTL,
                     json.dumps(rows, cls=DecimalEncoder)
                 )
                 
@@ -3224,7 +3390,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if updated:
                             _redis_client.setex(
                                 accounts_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(accounts, cls=DecimalEncoder)
                             )
                             # Mark accounts as dirty so they get flushed with correct connection_id
@@ -3381,7 +3547,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                 redis_key = _get_redis_key(table, user_id)
                 _redis_client.setex(
                     redis_key,
-                    INACTIVITY_TIMEOUT + 60,
+                    CACHE_TTL,
                     json.dumps(updated_rows, cls=DecimalEncoder)
                 )
                 
@@ -3622,7 +3788,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                     redis_key = _get_redis_key('income_categories', user_id)
                     _redis_client.setex(
                         redis_key,
-                        INACTIVITY_TIMEOUT + 60,
+                        CACHE_TTL,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
                     log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} income_category temp IDs in Redis")
@@ -3641,7 +3807,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if entries_updated > 0:
                             _redis_client.setex(
                                 entries_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(entries, cls=DecimalEncoder)
                             )
                             # Mark as dirty so entries get flushed in this cycle
@@ -3662,7 +3828,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if buckets_updated > 0:
                             _redis_client.setex(
                                 buckets_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(buckets, cls=DecimalEncoder)
                             )
                             # Mark as dirty so buckets get flushed in this cycle
@@ -3683,7 +3849,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if recurring_updated > 0:
                             _redis_client.setex(
                                 recurring_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(recurring_records, cls=DecimalEncoder)
                             )
                             # Mark as dirty so recurring_income gets flushed in this cycle
@@ -3794,7 +3960,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                     redis_key = _get_redis_key('expense_categories', user_id)
                     _redis_client.setex(
                         redis_key,
-                        INACTIVITY_TIMEOUT + 60,
+                        CACHE_TTL,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
                     log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} expense_category temp IDs in Redis")
@@ -3813,7 +3979,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if entries_updated > 0:
                             _redis_client.setex(
                                 entries_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(entries, cls=DecimalEncoder)
                             )
                             # Mark as dirty so entries get flushed in this cycle
@@ -3834,7 +4000,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if buckets_updated > 0:
                             _redis_client.setex(
                                 buckets_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(buckets, cls=DecimalEncoder)
                             )
                             # Mark as dirty so buckets get flushed in this cycle
@@ -3855,7 +4021,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if recurring_updated > 0:
                             _redis_client.setex(
                                 recurring_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(recurring_records, cls=DecimalEncoder)
                             )
                             # Mark as dirty so recurring_expense gets flushed in this cycle
@@ -3879,7 +4045,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if bundles_updated > 0:
                             _redis_client.setex(
                                 bundles_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(bundle_rows, cls=DecimalEncoder)
                             )
                             # Mark as dirty so bundles get flushed in this cycle
@@ -4016,7 +4182,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                     # Save updated categories back to Redis (using user_id key)
                     _redis_client.setex(
                         redis_key,
-                        INACTIVITY_TIMEOUT + 60,
+                        CACHE_TTL,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
                     log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} c_expense_category temp IDs in Redis for user {user_id}")
@@ -4036,13 +4202,13 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if updated_count > 0:
                             _redis_client.setex(
                                 entries_redis_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(entries, cls=DecimalEncoder)
                             )
                             log_info(logger, 'FLUSH', f"Updated {updated_count} c_expense_entries with new category IDs for user {user_id}")
                             # Mark entries as dirty so they get flushed with real IDs
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_entries')
-                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                            _redis_client.expire(f"dirty_tables:{user_id}", CACHE_TTL)
                     
                     # Also update recurring_c_expense_buckets that reference these temp category IDs
                     # Now using user_id key instead of account_id
@@ -4060,13 +4226,13 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if updated_count > 0:
                             _redis_client.setex(
                                 buckets_redis_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(buckets, cls=DecimalEncoder)
                             )
                             log_info(logger, 'FLUSH', f"Updated {updated_count} recurring_c_expense_buckets with new category IDs for user {user_id}")
                             # Mark buckets as dirty so they get flushed with real IDs
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_c_expense_buckets')
-                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                            _redis_client.expire(f"dirty_tables:{user_id}", CACHE_TTL)
                     
                     # Also update category_id in recurring_c_expense records
                     recurring_key = f"recurring_c_expense:v1:{user_id}"
@@ -4082,12 +4248,12 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if recurring_updated > 0:
                             _redis_client.setex(
                                 recurring_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(recurring_records, cls=DecimalEncoder)
                             )
                             # Mark as dirty so recurring_c_expense gets flushed in this cycle
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'recurring_c_expense')
-                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                            _redis_client.expire(f"dirty_tables:{user_id}", CACHE_TTL)
                             log_info(logger, 'FLUSH', f"Updated {recurring_updated} recurring_c_expense records with new category IDs for user {user_id}")
                 
                 # Clear pending deletions
@@ -4169,7 +4335,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                             rows[i]['id'] = temp_id_mappings[int(old_id)]
                     
                     redis_key = _get_redis_key(table, user_id)
-                    _redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(rows, cls=DecimalEncoder))
+                    _redis_client.setex(redis_key, CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
                     log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} {table} temp IDs in Redis")
                     
                     # Update group_id references in category tables
@@ -4185,7 +4351,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                                 cat['group_id'] = temp_id_mappings[int(old_gid)]
                                 cats_updated += 1
                         if cats_updated > 0:
-                            _redis_client.setex(cat_key, INACTIVITY_TIMEOUT + 60, json.dumps(categories, cls=DecimalEncoder))
+                            _redis_client.setex(cat_key, CACHE_TTL, json.dumps(categories, cls=DecimalEncoder))
                             _redis_client.sadd(f"dirty_tables:{user_id}", cat_table)
                             log_info(logger, 'FLUSH', f"Updated {cats_updated} {cat_table} group_id refs")
                     
@@ -4202,7 +4368,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                                     cg['source_group_id'] = temp_id_mappings[int(old_src)]
                                     ceg_updated += 1
                             if ceg_updated > 0:
-                                _redis_client.setex(ceg_key, INACTIVITY_TIMEOUT + 60, json.dumps(c_groups_list, cls=DecimalEncoder))
+                                _redis_client.setex(ceg_key, CACHE_TTL, json.dumps(c_groups_list, cls=DecimalEncoder))
                                 _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_category_groups')
                                 log_info(logger, 'FLUSH', f"Updated {ceg_updated} c_expense_category_groups source_group_id refs")
                 
@@ -4268,7 +4434,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                     log_warning(logger, 'FLUSH', f"Removed {len(removed_rows)} orphaned c_expense_category_groups (invalid account_ids: {[r.get('account_id') for r in removed_rows]})")
                     # Update Redis to remove orphaned groups
                     redis_key = _get_redis_key('c_expense_category_groups', user_id)
-                    _redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(valid_rows, cls=DecimalEncoder))
+                    _redis_client.setex(redis_key, CACHE_TTL, json.dumps(valid_rows, cls=DecimalEncoder))
                     rows = valid_rows
                 
                 if not rows:
@@ -4320,7 +4486,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                             rows[i]['id'] = temp_id_mappings[int(old_id)]
                     
                     redis_key = _get_redis_key('c_expense_category_groups', user_id)
-                    _redis_client.setex(redis_key, INACTIVITY_TIMEOUT + 60, json.dumps(rows, cls=DecimalEncoder))
+                    _redis_client.setex(redis_key, CACHE_TTL, json.dumps(rows, cls=DecimalEncoder))
                     log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} c_expense_category_groups temp IDs in Redis")
                     
                     # Update group_id references in c_expense_categories
@@ -4335,7 +4501,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                                 cat['group_id'] = temp_id_mappings[int(old_gid)]
                                 cats_updated += 1
                         if cats_updated > 0:
-                            _redis_client.setex(cat_key, INACTIVITY_TIMEOUT + 60, json.dumps(c_categories, cls=DecimalEncoder))
+                            _redis_client.setex(cat_key, CACHE_TTL, json.dumps(c_categories, cls=DecimalEncoder))
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
                             log_info(logger, 'FLUSH', f"Updated {cats_updated} c_expense_categories group_id refs")
                 
@@ -4447,7 +4613,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                     redis_key = f"credit_accounts:v1:{user_id}"
                     _redis_client.setex(
                         redis_key,
-                        INACTIVITY_TIMEOUT + 60,
+                        CACHE_TTL,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
                     log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} credit_account temp IDs in Redis")
@@ -4469,13 +4635,13 @@ def _flush_table_unlocked(table: str, user_id: int):
                             # Save back to same key with updated account_ids
                             _redis_client.setex(
                                 cat_redis_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(categories, cls=DecimalEncoder)
                             )
                             log_info(logger, 'FLUSH', f"Updated account_id in {updated_count} c_expense_categories")
                             # Mark categories as dirty so they get flushed to MySQL
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_categories')
-                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                            _redis_client.expire(f"dirty_tables:{user_id}", CACHE_TTL)
                     
                     # c_expense_category_groups also reference account_id — cascade temp ID resolution
                     ceg_redis_key = f"c_expense_category_groups:v1:{user_id}"
@@ -4492,12 +4658,12 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if group_updated_count > 0:
                             _redis_client.setex(
                                 ceg_redis_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(groups, cls=DecimalEncoder)
                             )
                             log_info(logger, 'FLUSH', f"Updated account_id in {group_updated_count} c_expense_category_groups")
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_category_groups')
-                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                            _redis_client.expire(f"dirty_tables:{user_id}", CACHE_TTL)
                     
                     # c_payment_entries are stored at c_payment_entries:v1:{user_id}
                     # We need to update the account_id field WITHIN the entries
@@ -4516,13 +4682,13 @@ def _flush_table_unlocked(table: str, user_id: int):
                             # Save back to same key with updated account_ids
                             _redis_client.setex(
                                 payment_redis_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(payments, cls=DecimalEncoder)
                             )
                             log_info(logger, 'FLUSH', f"Updated account_id in {payment_updated_count} c_payment_entries")
                             # Mark payments as dirty so they get flushed to MySQL
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_payment_entries')
-                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                            _redis_client.expire(f"dirty_tables:{user_id}", CACHE_TTL)
                     
                     # expense_categories: update credit_account_id for payment categories
                     exp_cat_redis_key = f"expense_categories:v1:{user_id}"
@@ -4538,12 +4704,12 @@ def _flush_table_unlocked(table: str, user_id: int):
                         if exp_cat_updated > 0:
                             _redis_client.setex(
                                 exp_cat_redis_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(exp_categories, cls=DecimalEncoder)
                             )
                             log_info(logger, 'FLUSH', f"Updated credit_account_id in {exp_cat_updated} expense_categories")
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'expense_categories')
-                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                            _redis_client.expire(f"dirty_tables:{user_id}", CACHE_TTL)
                     
                     # c_expense_entries are also stored at c_expense_entries:v1:{user_id}
                     # They reference categories by category_id, not account_id directly
@@ -4561,7 +4727,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                             user_entries.extend(entries)
                             _redis_client.setex(
                                 user_entries_key,
-                                INACTIVITY_TIMEOUT + 60,
+                                CACHE_TTL,
                                 json.dumps(user_entries, cls=DecimalEncoder)
                             )
                             # Delete old key
@@ -4569,7 +4735,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                             log_info(logger, 'FLUSH', f"Moved {len(entries)} c_expense_entries from account {old_account_id} to user {user_id}")
                             # Mark entries as dirty
                             _redis_client.sadd(f"dirty_tables:{user_id}", 'c_expense_entries')
-                            _redis_client.expire(f"dirty_tables:{user_id}", INACTIVITY_TIMEOUT + 60)
+                            _redis_client.expire(f"dirty_tables:{user_id}", CACHE_TTL)
                         
                         # Initialize balance records for new account
                         _initialize_ca_balances_for_account(cursor, conn, new_account_id)
@@ -4713,7 +4879,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                     redis_key = _get_redis_key('notifications', user_id)
                     _redis_client.setex(
                         redis_key,
-                        INACTIVITY_TIMEOUT + 60,
+                        CACHE_TTL,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
                     log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} notification temp IDs in Redis")
@@ -4832,7 +4998,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                     redis_key = _get_redis_key('recurring_mismatches', user_id)
                     _redis_client.setex(
                         redis_key,
-                        INACTIVITY_TIMEOUT + 60,
+                        CACHE_TTL,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
                     log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} recurring_mismatches temp IDs in Redis")
@@ -4959,7 +5125,7 @@ def _flush_table_unlocked(table: str, user_id: int):
                     redis_key = _get_redis_key('recurring_suggestions', user_id)
                     _redis_client.setex(
                         redis_key,
-                        INACTIVITY_TIMEOUT + 60,
+                        CACHE_TTL,
                         json.dumps(rows, cls=DecimalEncoder)
                     )
                     log_info(logger, 'FLUSH', f"Updated {len(temp_id_mappings)} recurring_suggestions temp IDs in Redis")
@@ -5438,7 +5604,7 @@ def get_cached_data(table: str, user_id: int) -> Optional[List[Dict]]:
         return None
 
 
-def set_cached_data(table: str, user_id: int, data: List[Dict], ttl: int = INACTIVITY_TIMEOUT + 60):
+def set_cached_data(table: str, user_id: int, data: List[Dict], ttl: int = CACHE_TTL):
     """
     Set cached data in Redis for a specific table and user.
     
