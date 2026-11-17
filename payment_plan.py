@@ -1,7 +1,7 @@
 """
 A payment plan for a credit account (2026-10-18): equal monthly payments that
-clear the card by a chosen month, or the fewest months a chosen maximum
-payment allows. Pure - the search only; app.py's payment-plan routes read the
+clear the card by a chosen month, or a chosen monthly payment until the card
+is clear, the last payment only what is left. Pure - the search only; app.py's payment-plan routes read the
 card and write the plan as its payment category's recurring expense.
 
 THE WALK
@@ -83,7 +83,7 @@ def least_payment(walk, months, ceiling=None):
 
 def plan(balance, mode, value, walk, least=None):
     """
-    mode 'payment': value is the most the person can pay a month.
+    mode 'payment': value is what the person pays a month, exactly.
     mode 'months':  value is how many months to pay it off in.
 
     `least` is what a month adds to the card - its interest and charges - for
@@ -120,7 +120,7 @@ def plan(balance, mode, value, walk, least=None):
             return out
     elif mode == 'payment':
         if value <= 0:
-            out['error'] = 'Enter the most you can pay a month.'
+            out['error'] = 'Enter what you pay a month.'
             return out
         ceiling = int(round(value * 100))
         owed, _ = walk(ceiling / 100.0, MAX_MONTHS, stop=True)
@@ -134,9 +134,12 @@ def plan(balance, mode, value, walk, least=None):
                 out['error'] = 'At that payment it would take more than fifty years. Pay a little more.'
             return out
         months = len(owed)
-        # The fewest months at the most they can pay; then the least payment
-        # that still does it in that many, which is at most what they said.
-        cents = least_payment(walk, months, ceiling=ceiling) or ceiling
+        # Exactly what they said, every month; only the last payment is less,
+        # by whatever it would pay past zero. Until 1.72.3 the least payment
+        # that still cleared it in that many months was used instead - 350.00
+        # became 343.57 on BA-01, the bank went on paying 350.00, and the plan
+        # read every month as overpaid.
+        cents = ceiling
     else:
         out['error'] = 'Choose a maximum payment or a number of months.'
         return out

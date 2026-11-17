@@ -8,6 +8,29 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.72.3 — 2026-11-16
+
+### Fixed
+
+- **A card payment the card posts before checking does is no longer
+  counted twice.** When the card company posted a payment first, the
+  morning balance check - which leaves forecasts out - saw the card owing
+  less than the budget's real entries and wrote the difference onto the
+  card as a correction, while the payment's forecast went on paying the
+  card as well; a payment plan on the card then read it as overpaid. The
+  check now allows for a payment the card has and checking has not sent,
+  for up to 7 days. If checking sends it in that time it is matched as
+  usual; if not, it came from somewhere else, and it is recorded on the
+  card as a payment, taking the place of the payment forecast nearest it.
+
+### Changed
+
+- **A payment plan pays what you tell it to.** "Monthly payment" (was
+  "Maximum payment") now pays exactly that amount every month, with only
+  the last payment smaller. It used to work out the least payment that
+  cleared the card in the same number of months - 350.00 became 343.57 -
+  and a bank paying the 350.00 made the plan look overpaid every month.
+
 ## 1.72.2 — 2026-11-13
 
 ### Fixed
