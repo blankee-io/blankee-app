@@ -16,10 +16,16 @@ on a server's behalf. It knows as little as it can:
 - The phone's notification service extension fetches the notification from the
   person's own server, using its own credentials, and fills in the alert before
   it is shown.
+- When the number of unread notifications changes without a new one arriving -
+  read or deleted in a browser, say - the server asks for a badge-only push with
+  the same token and secret and that number. Apple sets it on the app's icon,
+  silently: no alert, no sound, the app not woken.
 
-No text, amount or server address passes through here. Without both a phone's
-token and its secret nobody can push to it, and one phone is limited to
-`RELAY_HOURLY_LIMIT` pushes an hour, whoever asks.
+No text, amount or server address passes through here. The one thing the relay
+learns about anyone's notifications is how many are unread, when that number
+changes, and it keeps none of them. Without both a phone's token and its secret
+nobody can push to it, and one phone is limited to `RELAY_HOURLY_LIMIT` pushes
+and `RELAY_BADGE_HOURLY_LIMIT` badge updates an hour, whoever asks.
 
 ## API
 
@@ -32,6 +38,10 @@ needs. Answers 204.
 `{sent: true}`; `401` for a wrong secret; `404` for a token never registered;
 `410` when Apple says the device is gone (the relay forgets it, and the server
 should too); `429` past the hourly limit; `502` when Apple cannot be reached.
+
+`POST /v1/badge` `{token, secret, count}` - from a Blankee server, when the
+unread count changed without a new notification. `count` is a whole number from
+0 to 9999. The same answers as `/v1/push`, with its own hourly limit.
 
 `GET /v1/health` - `{ok, apns}`.
 

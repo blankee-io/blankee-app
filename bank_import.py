@@ -1967,6 +1967,11 @@ def _delete_notification(user_id: int) -> int:
         return 0
     if n:
         _forget_notifications_cache(user_id)
+        try:
+            from push_notifications import badge_changed
+            badge_changed(user_id)
+        except Exception:
+            pass
     return n
 
 

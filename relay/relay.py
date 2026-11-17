@@ -18,6 +18,11 @@ It is built to know as little as possible:
 - The phone's notification service extension then fetches the notification
   from the person's own server, using its own credentials, and fills in the
   alert before it is shown.
+- When the number of unread notifications changes without a new one - read
+  in a browser, deleted - the server asks for a badge-only push with the
+  same token and secret and that number (/v1/badge). That number is the one
+  thing about a person's notifications the relay ever sees; Apple sets it on
+  the app's icon, silently, without waking the app.
 
 So a stranger cannot push to a phone without both its token and its secret,
 the relay cannot read anyone's finances, and losing the relay's database
@@ -27,6 +32,7 @@ Settings, all from the environment (see install.sh):
     APNS_KEY_PATH, APNS_KEY_ID, APNS_TEAM_ID, APNS_TOPIC   the app maker's key
     RELAY_DB           SQLite file (default /var/lib/blankee-relay/relay.db)
     RELAY_HOURLY_LIMIT pushes per token per hour (default 60)
+    RELAY_BADGE_HOURLY_LIMIT  badge-only pushes per token per hour (default 120)
 """
 
 import hashlib
@@ -46,6 +52,8 @@ app = Flask(__name__)
 
 DB_PATH = os.environ.get('RELAY_DB', '/var/lib/blankee-relay/relay.db')
 HOURLY_LIMIT = int(os.environ.get('RELAY_HOURLY_LIMIT', '60'))
+BADGE_HOURLY_LIMIT = int(os.environ.get('RELAY_BADGE_HOURLY_LIMIT', '120'))
+MAX_BADGE = 9999
 TOKEN_RE = re.compile(r'^[0-9a-f]{64}$')
 ENVIRONMENTS = ('sandbox', 'production')
 HOSTS = {'sandbox': 'api.sandbox.push.apple.com', 'production': 'api.push.apple.com'}
@@ -78,6 +86,12 @@ def init_db():
                 window_count INTEGER NOT NULL DEFAULT 0
             )
         """)
+        # Badge-only pushes have an hour of their own, so reading notifications
+        # in a browser can never use up the pushes that bring new ones.
+        have = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
+        for column in ('badge_window_start', 'badge_window_count'):
+            if column not in have:
+                conn.execute(f"ALTER TABLE devices ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
 
 
 def _hash(secret):
@@ -133,11 +147,26 @@ def _send(token, environment, notification_id, kind):
         # evening nudge, which has no row to fetch; the phone knows its text).
         'kind': kind,
     }
+    return _post(token, environment, payload, {})
+
+
+def _send_badge(token, environment, count):
+    """A badge-only push: no alert, no sound, the app not woken. Apple sets
+    the number on the icon. Collapsed, so a phone that was offline gets the
+    latest number rather than every one in between."""
+    return _post(token, environment, {'aps': {'badge': count}},
+                 {'apns-priority': '10', 'apns-collapse-id': 'badge'})
+
+
+def _post(token, environment, payload, extra_headers):
+    """Returns (status, apns_reason)."""
     headers = {
         'authorization': f'bearer {_bearer()}',
         'apns-topic': os.environ['APNS_TOPIC'],
+        # A badge-only push is an 'alert' push too, by Apple's rules.
         'apns-push-type': 'alert',
     }
+    headers.update(extra_headers)
     response = _apns['client'].post(f'https://{HOSTS[environment]}/3/device/{token}',
                                     headers=headers, content=json.dumps(payload))
     reason = None
@@ -186,6 +215,54 @@ def register():
     return '', 204
 
 
+def _admit(token, secret, prefix, limit):
+    """
+    The device's environment if the secret is its own and it has pushes left
+    in this hour, counting this one; otherwise the error response. `prefix`
+    picks the hour: '' for alerts, 'badge_' for badge-only pushes.
+    """
+    now = int(time.time())
+    with _db_lock, _db() as conn:
+        row = conn.execute("SELECT * FROM devices WHERE token = ?", (token,)).fetchone()
+        if row is None:
+            return None, (jsonify({'error': 'unknown_token'}), 404)
+        if not hmac.compare_digest(row['secret_hash'], _hash(secret)):
+            return None, (jsonify({'error': 'bad_secret'}), 401)
+        # A sliding hour, so one device cannot be used as a buzzer.
+        window_start, count = row[prefix + 'window_start'], row[prefix + 'window_count']
+        if now - window_start >= 3600:
+            window_start, count = now, 0
+        if count >= limit:
+            return None, (jsonify({'error': 'rate_limited'}), 429)
+        conn.execute(f"UPDATE devices SET {prefix}window_start = ?, {prefix}window_count = ?, "
+                     f"last_push_at = ? WHERE token = ?", (window_start, count + 1, now, token))
+        return row['environment'], None
+
+
+def _deliver(token, send):
+    """Send through Apple and answer the server: what /v1/push and /v1/badge share."""
+    # Checked after the secret, not before: a relay with no key yet should
+    # still tell a caller with the wrong secret exactly that.
+    if not _apns_ready():
+        return jsonify({'error': 'relay_not_configured'}), 503
+    try:
+        status, reason = send()
+    except Exception as exc:
+        return jsonify({'error': 'apns_unreachable', 'detail': str(exc)}), 502
+
+    if status == 200:
+        return jsonify({'sent': True})
+    if status == 410 or reason in ('BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic'):
+        # The device is gone, or this token belongs to the other environment.
+        # Forgotten here, and the server is told so it can forget it too. Not
+        # on any other 400 - a payload Apple did not like says nothing about
+        # the device, and forgetting it would cost the phone its pushes.
+        with _db_lock, _db() as conn:
+            conn.execute("DELETE FROM devices WHERE token = ?", (token,))
+        return jsonify({'sent': False, 'error': 'invalid_token', 'apns_reason': reason}), 410
+    return jsonify({'sent': False, 'error': 'apns_error', 'status': status, 'apns_reason': reason}), 502
+
+
 @app.post('/v1/push')
 def push():
     """A server, asking for a nudge on behalf of one of its users' phones."""
@@ -202,42 +279,32 @@ def push():
     kind = str(data.get('kind') or 'notification')
     if kind not in ('notification', 'reminder'):
         return jsonify({'error': 'bad_request'}), 400
+    environment, refused = _admit(token, secret, '', HOURLY_LIMIT)
+    if refused:
+        return refused
+    return _deliver(token, lambda: _send(token, environment, notification_id, kind))
 
-    now = int(time.time())
-    with _db_lock, _db() as conn:
-        row = conn.execute("SELECT * FROM devices WHERE token = ?", (token,)).fetchone()
-        if row is None:
-            return jsonify({'error': 'unknown_token'}), 404
-        if not hmac.compare_digest(row['secret_hash'], _hash(secret)):
-            return jsonify({'error': 'bad_secret'}), 401
-        # A sliding hour, so one device cannot be used as a buzzer.
-        window_start, count = row['window_start'], row['window_count']
-        if now - window_start >= 3600:
-            window_start, count = now, 0
-        if count >= HOURLY_LIMIT:
-            return jsonify({'error': 'rate_limited'}), 429
-        conn.execute("UPDATE devices SET window_start = ?, window_count = ?, last_push_at = ? WHERE token = ?",
-                     (window_start, count + 1, now, token))
-        environment = row['environment']
 
-    # Checked after the secret, not before: a relay with no key yet should
-    # still tell a caller with the wrong secret exactly that.
-    if not _apns_ready():
-        return jsonify({'error': 'relay_not_configured'}), 503
-    try:
-        status, reason = _send(token, environment, notification_id, kind)
-    except Exception as exc:
-        return jsonify({'error': 'apns_unreachable', 'detail': str(exc)}), 502
-
-    if status == 200:
-        return jsonify({'sent': True})
-    if status in (400, 410) or reason in ('BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic'):
-        # The device is gone, or this token belongs to the other environment.
-        # Forgotten here, and the server is told so it can forget it too.
-        with _db_lock, _db() as conn:
-            conn.execute("DELETE FROM devices WHERE token = ?", (token,))
-        return jsonify({'sent': False, 'error': 'invalid_token', 'apns_reason': reason}), 410
-    return jsonify({'sent': False, 'error': 'apns_error', 'status': status, 'apns_reason': reason}), 502
+@app.post('/v1/badge')
+def badge():
+    """
+    A server, setting the number on the app's icon: the person's unread
+    notifications, after they changed without a new one arriving (read or
+    deleted somewhere else). Only the number - nothing to show, nothing to
+    fetch - and silent.
+    """
+    data = request.get_json(silent=True) or {}
+    token = str(data.get('token') or '').strip().lower()
+    secret = str(data.get('secret') or '')
+    if not TOKEN_RE.match(token) or not secret:
+        return jsonify({'error': 'bad_request'}), 400
+    count = data.get('count')
+    if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= MAX_BADGE:
+        return jsonify({'error': 'bad_request'}), 400
+    environment, refused = _admit(token, secret, 'badge_', BADGE_HOURLY_LIMIT)
+    if refused:
+        return refused
+    return _deliver(token, lambda: _send_badge(token, environment, count))
 
 
 init_db()

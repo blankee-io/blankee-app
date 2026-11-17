@@ -52,7 +52,7 @@ from redis_crud import (
     upsert_recurring_suggestion, delete_recurring_suggestion
 )
 from bucket_utils import process_manual_entry_with_bucket, restore_bucket_for_category_change
-from push_notifications import apns_enabled, send_apns_notification, push_to_user, deep_link_from
+from push_notifications import apns_enabled, send_apns_notification, push_to_user, deep_link_from, badge_changed
 
 app = Flask(__name__)
 
@@ -19302,6 +19302,7 @@ def mark_notification_read():
             _redis_client.delete(f"notifications:v1:{current_user.id}")
         except Exception:
             pass
+    badge_changed(current_user.id)
     
     return jsonify({'success': True, 'is_read': new_status})
 
@@ -19334,6 +19335,7 @@ def delete_notification():
             _redis_client.delete(f"notifications:v1:{current_user.id}")
         except Exception:
             pass
+    badge_changed(current_user.id)
     
     return jsonify({'success': True})
 
@@ -19367,6 +19369,8 @@ def delete_reconnect_notifications():
             _redis_client.delete(f"notifications:v1:{current_user.id}")
         except Exception:
             pass
+    if deleted_count:
+        badge_changed(current_user.id)
     
     return jsonify({'success': True, 'deleted_count': deleted_count})
 
@@ -19414,6 +19418,8 @@ def mark_all_notifications_read():
             _redis_client.delete(f"notifications:v1:{current_user.id}")
         except Exception:
             pass
+    if updated_count:
+        badge_changed(current_user.id)
     
     return jsonify({'success': True, 'updated_count': updated_count})
 
@@ -25008,11 +25014,13 @@ def _set_shortfall_notification(user_id, first_date, short_by):
         return
     if send:
         _deliver_notification(user_id, user, message, now, notification_id, unread, kind='low_balance')
-    elif changed and app.config.get('REDIS_OK'):
-        try:
-            _redis_client.delete(f"notifications:v1:{user_id}")
-        except Exception:
-            pass
+    elif changed:
+        if app.config.get('REDIS_OK'):
+            try:
+                _redis_client.delete(f"notifications:v1:{user_id}")
+            except Exception:
+                pass
+        badge_changed(user_id)
     if changed:
         log_info(app.logger, 'NOTIFICATION',
                  f"Shortfall notification for user {user_id}: "
@@ -26511,6 +26519,8 @@ def _forget_payment_plan(user_id, account_id):
             cursor.close()
         if gone and app.config.get('REDIS_OK'):
             _redis_client.delete(f"notifications:v1:{user_id}")
+        if gone:
+            badge_changed(user_id)
     except Exception as e:
         log_error(app.logger, 'NOTIFICATION', f"[payment_plan] forgetting user {user_id}'s plan "
                                               f"for card {account_id}: {e}")

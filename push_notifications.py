@@ -299,6 +299,139 @@ def _push_via_relay(relay, user_id, devices, notification_id, kind):
     return sent
 
 
+# ---------------------------------------------------------------- the badge
+# A new notification sets the number on the app's icon as it arrives (its
+# push carries it, or the phone's extension fetches it). Anything else that
+# changes how many are unread - one read or deleted in a browser, all marked
+# read, a standing notification the app withdrew - used to leave the icon
+# wrong until the app was next opened. badge_changed sends the new number on
+# its own: silently, to every device, through the relay's /v1/badge or
+# straight to Apple. Asked for on 2026-11-16.
+
+BADGE_DELAY = 2.0      # seconds: a burst of changes sends one number
+_badge_timers = {}
+_badge_lock = threading.Lock()
+
+
+def badge_changed(user_id):
+    """
+    The person's unread count may have changed: send it to their phones in
+    BADGE_DELAY seconds, on a thread of its own, the count read when it goes.
+    Call it after the change is committed. Never raises, never waits, and
+    does nothing on a server with no way to push.
+    """
+    try:
+        if not apns_enabled() and not (os.environ.get('PUSH_RELAY_URL') or '').strip():
+            return
+        with _badge_lock:
+            pending = _badge_timers.pop(user_id, None)
+            if pending is not None:
+                pending.cancel()
+            timer = threading.Timer(BADGE_DELAY, _send_badge_now, args=(user_id,))
+            timer.daemon = True
+            _badge_timers[user_id] = timer
+            timer.start()
+    except Exception as exc:
+        log_warning(logger, 'PUSH', f"Could not queue a badge update for user {user_id}: {exc}")
+
+
+def unread_count(user_id):
+    """Unread notifications - the same count the phone's extension is given
+    (/api/widget/notification), so the two never disagree."""
+    from db_connections import get_db_pool
+    with get_db_pool().get_cursor(dictionary=True) as cursor:
+        cursor.execute("SELECT COUNT(*) AS total FROM notifications WHERE user_id = %s AND is_read = 0",
+                       (user_id,))
+        return int((cursor.fetchone() or {}).get('total') or 0)
+
+
+def _send_badge_now(user_id):
+    with _badge_lock:
+        if _badge_timers.get(user_id) is not None and not _badge_timers[user_id].is_alive():
+            _badge_timers.pop(user_id, None)
+    try:
+        from db_connections import get_db_pool
+        count = min(unread_count(user_id), 9999)
+        with get_db_pool().get_cursor(dictionary=True) as cursor:
+            cursor.execute("SELECT device_token, relay_secret FROM device_tokens WHERE user_id = %s",
+                           (user_id,))
+            devices = [(r['device_token'], r.get('relay_secret')) for r in (cursor.fetchall() or [])
+                       if r.get('device_token')]
+    except Exception as exc:
+        log_warning(logger, 'PUSH', f"Could not read the badge for user {user_id}: {exc}")
+        return 0
+    if not devices:
+        return 0
+
+    sent = 0
+    if apns_enabled():
+        for token, _ in devices:
+            result = send_apns_badge(token, count)
+            if result.get('sent'):
+                sent += 1
+            elif result.get('reason') == 'invalid_token':
+                _forget_device(user_id, token, 'APNs says the device is gone')
+            else:
+                log_warning(logger, 'PUSH', f"Badge for user {user_id} not sent", reason=result.get('reason'),
+                            status=result.get('status'), apns_reason=result.get('apns_reason'))
+    else:
+        relay = (os.environ.get('PUSH_RELAY_URL') or '').strip().rstrip('/')
+        for token, secret in devices:
+            if not secret:
+                continue
+            try:
+                response = httpx.post(f"{relay}/v1/badge", json={'token': token, 'secret': secret, 'count': count},
+                                      timeout=httpx.Timeout(10.0, connect=5.0))
+            except Exception as exc:
+                log_warning(logger, 'PUSH', f"Relay unreachable for user {user_id}'s badge: {exc}")
+                break
+            if response.status_code == 200:
+                sent += 1
+            elif response.status_code == 410:
+                _forget_device(user_id, token, 'relay says the device is gone')
+            else:
+                # 404 from a relay older than /v1/badge too: the icon simply
+                # waits for the app, as it did before.
+                log_warning(logger, 'PUSH', f"Relay refused a badge for user {user_id}",
+                            status=response.status_code)
+    if sent:
+        log_info(logger, 'PUSH', f"Badge {count} sent to {sent} device(s) for user {user_id}")
+    return sent
+
+
+def send_apns_badge(device_token, count):
+    """A badge-only push straight to Apple: no alert, no sound. Returns the
+    same shape as send_apns_notification."""
+    if not _init_config():
+        return {"sent": False, "reason": "apns_not_configured"}
+    try:
+        token = _get_jwt()
+    except Exception as exc:
+        return {"sent": False, "reason": "apns_jwt_error", "error": str(exc)}
+    headers = {
+        "authorization": f"bearer {token}",
+        "apns-topic": _apns_topic,
+        "apns-push-type": "alert",
+        "apns-priority": "10",
+        "apns-collapse-id": "badge",
+    }
+    try:
+        response = _http_client.post(f"https://{_apns_host}/3/device/{device_token}", headers=headers,
+                                     content=json.dumps({"aps": {"badge": int(count)}}))
+        if response.status_code == 200:
+            return {"sent": True}
+        apns_reason = None
+        try:
+            apns_reason = response.json().get("reason")
+        except Exception:
+            pass
+        if response.status_code == 410 or apns_reason in ("BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"):
+            return {"sent": False, "reason": "invalid_token", "status": response.status_code, "apns_reason": apns_reason}
+        return {"sent": False, "reason": "apns_error", "status": response.status_code, "apns_reason": apns_reason}
+    except Exception as exc:
+        return {"sent": False, "reason": "apns_exception", "error": str(exc)}
+
+
 def deep_link_from(message):
     """The relative app path a notification's first link points at, if any.
 

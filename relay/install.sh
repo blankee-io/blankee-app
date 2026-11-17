@@ -57,6 +57,8 @@ APNS_TOPIC=io.blankee.app
 RELAY_DB=$DATA_DIR/relay.db
 # Pushes one phone may receive in an hour, whoever asks.
 RELAY_HOURLY_LIMIT=60
+# Badge-only updates (the unread count) one phone may receive in an hour.
+RELAY_BADGE_HOURLY_LIMIT=120
 EOF
   echo "created $ENV_FILE - fill in the APNS_ values and restart the service"
 fi

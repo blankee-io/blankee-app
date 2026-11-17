@@ -8,6 +8,28 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.72.4 — 2026-11-16
+
+### Fixed
+
+- **The app's icon shows the right number of unread notifications.** It
+  was only set when a new notification arrived or the app was opened, so
+  reading or deleting notifications in a browser left the iPhone's badge
+  wrong until then. Whenever the unread count changes - one read or
+  deleted, all marked read, a notification the app withdrew - the server
+  now sends the new number to the phone, silently. Through the push relay
+  that needs the relay's new `/v1/badge`; with an older relay the badge
+  waits for the app, as before.
+
+### Changed
+
+- **The push relay learns one more thing: the unread count.** `/v1/badge`
+  takes a device's token and secret and the number to show, and passes it
+  to Apple as a badge-only push with an hourly limit of its own
+  (`RELAY_BADGE_HOURLY_LIMIT`, default 120). The count is not kept.
+  `relay/README.md` says so. The relay also no longer forgets a device
+  when Apple refuses a push for a reason that is not about the device.
+
 ## 1.72.3 — 2026-11-16
 
 ### Fixed

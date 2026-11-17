@@ -321,4 +321,9 @@ def clear_prompt(user_id):
         except Exception as cache_err:
             log_warning(logger, 'BUCKET_PROMPT',
                         f"Could not clear the notifications cache for user {user_id}: {cache_err}")
+        try:
+            from push_notifications import badge_changed
+            badge_changed(user_id)
+        except Exception:
+            pass
     return removed
