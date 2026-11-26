@@ -8,6 +8,17 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.72.5 — 2026-11-25
+
+### Fixed
+
+- **A card's interest charge posted the day before its statement closes
+  answers that statement.** It was filed under the statement before, which
+  already had its charge, so the month it belonged to was projected again
+  and the card carried the interest twice until someone deleted the extra
+  one. The bank's charge now goes to the statement date nearest the day
+  it posted, before or after.
+
 ## 1.72.4 — 2026-11-16
 
 ### Fixed

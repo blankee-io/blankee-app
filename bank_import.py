@@ -626,8 +626,8 @@ def _memory_pick(user_id: int, row: Dict[str, Any], plan: Dict[str, Any]) -> Opt
 def _interest_statement(user_id: int, table: str, category_id: Optional[int], when: Any) -> Optional[str]:
     """
     For an entry going into a card's Interest Charge category: the statement
-    date it is the charge for - the card's last statement day on or before
-    the day it posted. None for any other category.
+    date it is the charge for - the card's statement day nearest the day it
+    posted, before or after. None for any other category.
 
     The balance walk keys a real interest charge to its statement by
     original_date (or, without one, the day it sits on), and a statement with
@@ -635,6 +635,13 @@ def _interest_statement(user_id: int, table: str, category_id: Optional[int], wh
     posts the charge a day after the statement closes would otherwise leave
     that statement unanswered, and the card would carry the real charge and
     the projected one.
+
+    Nearest, not "on or before": banks post on either side of the closing
+    day. On BA-01 (2026-11-19) a card closing on the 20th posted its charge
+    on the 19th; on or before filed it under the previous month's statement,
+    which already had its charge, and November was projected a second time.
+    Statements are a month apart and a charge posts within days of its own,
+    so the nearest one is never in doubt; a tie goes to the earlier.
     """
     if table != 'c_expense_entries' or category_id is None:
         return None
@@ -650,8 +657,12 @@ def _interest_statement(user_id: int, table: str, category_id: Optional[int], wh
     if day is None or not setting:
         return None
     try:
-        from app import _previous_cycle_date_before
-        statement = _previous_cycle_date_before(setting, day + timedelta(days=1))
+        from app import _previous_cycle_date_before, _next_cycle_date_after
+        before = _previous_cycle_date_before(setting, day + timedelta(days=1))
+        after = _next_cycle_date_after(setting, day)
+        statement = before
+        if after is not None and (before is None or (after - day) < (day - before)):
+            statement = after
     except Exception as e:
         log_warning(logger, TAG, f'user {user_id}: no statement date for an interest charge on {when}: {e}')
         return None
