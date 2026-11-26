@@ -8,6 +8,16 @@ major for anything that breaks an existing installation's data or configuration.
 Headings are `## <version> — <YYYY-MM-DD>`. Nothing in the application parses
 this file; the admin console links to it, it does not read it.
 
+## 1.72.6 — 2026-11-25
+
+### Fixed
+
+- **The payment plan opens from its notification and stays open.** The
+  page's own prompts - entries to confirm, the balance to check - opened
+  as the page loaded and took the same dialog over, so the plan appeared
+  and vanished. A dialog already open now keeps the screen, and the
+  prompts wait in the nav.
+
 ## 1.72.5 — 2026-11-25
 
 ### Fixed

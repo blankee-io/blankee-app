@@ -4205,6 +4205,21 @@ function runMoneyPrompts() {
             .then(function (d) {
                 var total = (d && d.success) ? d.total : 0;
 
+                // A dialog is already up: a link that opens one as the page
+                // loads, like the payment plan notification's
+                // ?payment_plan=. Both prompts use that same shared dialog,
+                // and the balance path puts away whatever is open before
+                // asking (_dialogSettled), so the plan appeared and vanished.
+                // The prompts wait in the nav instead, and are not marked
+                // seen, so the next page asks as usual.
+                var shared = document.getElementById("generic-confirm-modal");
+                if (shared && shared.classList.contains("modal--open")) {
+                    if (!total) { return syncMoneyLaunchers(); }
+                    setBucketLauncher(total);
+                    setBalanceLauncher(false);
+                    return null;
+                }
+
                 if (!total) {
                     // Nothing to confirm, so the balance has the slot - but
                     // only if one is already waiting. Raising here as well is
